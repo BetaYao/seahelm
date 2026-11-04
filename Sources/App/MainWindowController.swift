@@ -455,7 +455,6 @@ class MainWindowController: NSWindowController {
         }
         usageSummaryStore.onUpdate = { [weak self] claude, codex in
             let used = [claude.rateLimit?.usedPercent, codex.rateLimit?.usedPercent].compactMap { $0 }.max()
-            self?.tabCoordinator.autopilot.usagePercent = used
             self?.islandController.model.setUsageReadouts(
                 UsageSummaryFormatter.readouts(claude: claude, codex: codex)
             )
@@ -2266,10 +2265,10 @@ extension MainWindowController {
         model.onSendToFirstMate = { [weak self] text in
             guard let self else { return false }
             if text.hasPrefix("/") { return self.submitBridgeCommand(text) }
-            return self.tabCoordinator.autopilot.sendUserMessage(text)
+            return self.tabCoordinator.firstMate.sendUserMessage(text)
         }
         model.onInterruptFirstMate = { [weak self] in
-            self?.tabCoordinator.autopilot.interrupt()
+            self?.tabCoordinator.firstMate.interrupt()
         }
         islandController.install()
         // The conversation reads First Mate's timeline while it shows.
@@ -2368,13 +2367,13 @@ extension MainWindowController {
     func refreshIslandFirstMate() {
         guard config.islandEnabled else { return }
         let model = islandController.model
-        let autopilot = tabCoordinator.autopilot
-        let (word, _) = FirstMateStateText.describe(autopilot.state.activity)
-        let tone = FirstMateStateText.tone(autopilot.state)
+        let firstMate = tabCoordinator.firstMate
+        let (word, _) = FirstMateStateText.describe(firstMate.state.activity)
+        let tone = FirstMateStateText.tone(firstMate.state)
         if model.mateActivity != word { model.mateActivity = word }
         if model.mateTone != tone { model.mateTone = tone }
-        if model.mateRunning != autopilot.isRunning { model.mateRunning = autopilot.isRunning }
-        let busy = autopilot.state.activity == .thinking
+        if model.mateRunning != firstMate.isRunning { model.mateRunning = firstMate.isRunning }
+        let busy = firstMate.state.activity == .thinking
         if model.mateBusy != busy { model.mateBusy = busy }
     }
 
@@ -2383,9 +2382,8 @@ extension MainWindowController {
         let model = islandController.model
         guard config.islandEnabled, model.isOpened, model.page == .conversation, !islandMateFetching else { return }
         islandMateFetching = true
-        let remote = tabCoordinator.autopilot.remote
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let messages = AutopilotCoordinator.timeline(remote: remote)
+            let messages = FirstMateLink.timeline()
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.islandMateFetching = false
@@ -2912,20 +2910,6 @@ extension MainWindowController {
     /// Routes a suggestion chip tap. `integrationReport` chips run or decline the
     /// discard; all other kinds forward the option text to the agent terminal.
     func handleSuggestionTapped(order: PendingOrder, optionText: String) {
-        if order.action.kind == .autopilotProposal {
-            if let id = order.action.payload {
-                tabCoordinator.autopilot.resolveProposal(id, picked: optionText)
-            }
-            return
-        }
-        if order.action.kind == .autopilotApproval {
-            // The card goes as soon as it is answered; the coordinator runs the
-            // call (off main) and tells First Mate how it went.
-            if let id = order.action.payload {
-                tabCoordinator.autopilot.resolveApproval(id, approved: optionText == AutopilotCoordinator.approveLabel)
-            }
-            return
-        }
         if order.action.kind == .integrationReport {
             // The card is the only place the discard is offered, and it is the
             // one irreversible step in the feature — so the option that takes
@@ -3047,10 +3031,10 @@ extension MainWindowController {
 // MARK: - CommandHost
 
 extension MainWindowController: CommandHost {
-    var firstMateAvailable: Bool { tabCoordinator.autopilot.isRunning }
+    var firstMateAvailable: Bool { tabCoordinator.firstMate.isRunning }
 
     func sayToFirstMate(_ text: String, from surface: CommandSurface) -> Bool {
-        tabCoordinator.autopilot.sendUserMessage(text, replyTo: surface.isDesktop ? nil : surface.sessionKey)
+        tabCoordinator.firstMate.sendUserMessage(text, replyTo: surface.isDesktop ? nil : surface.sessionKey)
     }
 
     /// The fleet as the command language sees it, with every pane's stable
@@ -3811,45 +3795,38 @@ extension MainWindowController: PaneSharing {
 
 extension MainWindowController {
     fileprivate func setupFirstMate(_ dashboard: DashboardViewController) {
-        let autopilot = tabCoordinator.autopilot
+        let firstMate = tabCoordinator.firstMate
         // First Mate's answer to a chat goes back to that chat.
-        autopilot.onReply = { [weak self] targets, text in
+        firstMate.onReply = { [weak self] targets, text in
             for key in targets where key.hasPrefix("telegram:") {
                 self?.pushFirstMateLine(text, chatId: String(key.dropFirst("telegram:".count)))
             }
         }
         // What it did on its own is worth a line on the phone; reads and
         // deliveries are not.
-        let auditHook = autopilot.audit.onAppend
-        autopilot.audit.onAppend = { [weak self] entry in
-            auditHook?(entry)
-            guard entry.kind == .action else { return }
-            DispatchQueue.main.async {
-                guard let self, let chat = self.config.telegram?.resolvedDefaultChatId else { return }
-                self.pushFirstMateLine(AutopilotCoordinator.headline(entry), chatId: chat)
-            }
+        firstMate.onAudit = { [weak self] entry in
+            guard entry.kind == .action,
+                  let self, let chat = self.config.telegram?.resolvedDefaultChatId else { return }
+            self.pushFirstMateLine("→ \(entry.text)", chatId: chat)
         }
         tabCoordinator.firstMateCardAnswerer = { [weak self] order, option in
             self?.handleSuggestionTapped(order: order, optionText: option)
         }
-        autopilot.onStateChange = { [weak self] _ in
-            guard let self else { return }
-            // Remote clients (seahelm-web) draw the same First Mate.
-            NotificationCenter.default.post(name: .firstMateStateChanged, object: nil,
-                                            userInfo: self.tabCoordinator.firstMateRemoteState())
-            self.refreshIslandFirstMate()
+        firstMate.onStateChange = { [weak self] _ in
+            self?.refreshIslandFirstMate()
+            // Remote clients (seahelm-web) draw the same First Mate: the core's.
+            DispatchQueue.global(qos: .utility).async {
+                guard let state = FirstMateLink.remoteState() else { return }
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .firstMateStateChanged, object: nil, userInfo: state)
+                }
+            }
         }
     }
 
     /// Waving a card away. For a First Mate approval that is a "no", and First
     /// Mate has to hear it — it is waiting on the answer.
     func dismissOrder(_ order: PendingOrder) {
-        if order.action.kind == .autopilotApproval, let id = order.action.payload {
-            tabCoordinator.autopilot.resolveApproval(id, approved: false)
-        }
-        if order.action.kind == .autopilotProposal, let id = order.action.payload {
-            tabCoordinator.autopilot.resolveProposal(id, picked: AutopilotCoordinator.dismissLabel)
-        }
         tabCoordinator.pendingOrders.resolve(id: order.id)
     }
 

@@ -6,7 +6,7 @@ import AppKit
 enum FirstMateStateText {
     enum Tone: Equatable { case quiet, watching, working, wantsYou }
 
-    static func describe(_ activity: AutopilotCoordinator.State.Activity) -> (String, NSColor) {
+    static func describe(_ activity: FirstMateLink.State.Activity) -> (String, NSColor) {
         switch activity {
         case .off: return ("off", SemanticColors.subtle)
         case .starting: return ("starting", SemanticColors.subtle)
@@ -17,7 +17,7 @@ enum FirstMateStateText {
         }
     }
 
-    static func tone(_ state: AutopilotCoordinator.State) -> Tone {
+    static func tone(_ state: FirstMateLink.State) -> Tone {
         if state.activity == .needsYou || (state.pendingApprovals > 0 && state.activity != .off) { return .wantsYou }
         switch state.activity {
         case .off, .paused, .starting: return .quiet
@@ -27,7 +27,7 @@ enum FirstMateStateText {
     }
 
     /// What is true now: the tooltip always, the second line when it wants you.
-    static func detailLine(_ state: AutopilotCoordinator.State, now: Date) -> String {
+    static func detailLine(_ state: FirstMateLink.State, now: Date) -> String {
         let queued = state.queued > 0 ? "\(state.queued) queued · " : ""
         switch state.activity {
         case .off: return "Off — click to set it up"

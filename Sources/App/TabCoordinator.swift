@@ -95,7 +95,7 @@ class TabCoordinator {
     private var integration: IntegrationCoordinator?
     var worktreeRepoCache: [String: String] = [:]
     /// First Mate: the LLM pane rules wake up.
-    let autopilot = AutopilotCoordinator()
+    let firstMate = FirstMateLink()
 
     /// Display name of the repo owning a given worktree path.
     func repoName(forWorktree path: String) -> String {
@@ -218,12 +218,6 @@ class TabCoordinator {
         )
         Fleet.shared.onChange = { [weak self] outcome in
             guard let self else { return }
-            // First Mate is not a member of the fleet: none of the fleet's
-            // notifications, cards or rollups apply to its turns.
-            if FirstMatePane.isFirstMate(worktreePath: outcome.info.worktreePath) {
-                self.autopilot.firstMateOutcome(outcome)
-                return
-            }
             self.integration?.handle(outcome)
             self.mailPaneObserver.ingest(outcome)
             self.chatProgress.ingest(outcome)
@@ -266,7 +260,6 @@ class TabCoordinator {
         WorktreePRStore.shared.onChange = { [weak self] in
             guard let self else { return }
             self.scheduleCleanupRepaint()
-            self.autopilot.observe(self.prObservations())
         }
     }
 
@@ -806,15 +799,8 @@ class TabCoordinator {
                     let controlDataSource = SeahelmControlDataSource()
                     // seahelm-core watches what the app shows and runs the command
                     // language; see CoreLink.
-                    CoreLink.shared.panes = { [weak self, weak controlDataSource] in
-                        var rows = controlDataSource?.snapshotPanes().map(\.dict) ?? []
-                        // First Mate is out of the fleet's list but its status is
-                        // the core's to decide like any pane's.
-                        if let id = self?.autopilot.stationId {
-                            rows.append(["pane_id": id, "pane_session_key": FirstMatePane.sessionName,
-                                         "worktree_path": FirstMatePane.directory, "branch": "", "project": ""])
-                        }
-                        return rows
+                    CoreLink.shared.panes = { [weak controlDataSource] in
+                        controlDataSource?.snapshotPanes().map(\.dict) ?? []
                     }
                     CoreLink.shared.worktrees = { [weak self] in self?.allWorktrees.map(\.info.path) ?? [] }
                     CoreLink.shared.start()
@@ -895,13 +881,6 @@ class TabCoordinator {
                     controlDataSource.wakeHandler = { [weak self] stationId in
                         self?.terminalCoordinator.wakePane(targetStationId: stationId) ?? []
                     }
-                    controlDataSource.autopilotGateHandler = { [weak self] action, method, params in
-                        self?.autopilot.gate(action: action, method: method, params: params)
-                            ?? .deny("First Mate is not running")
-                    }
-                    controlDataSource.autopilotDidRunHandler = { [weak self] method, result in
-                        self?.autopilot.didRun(method: method, result: result)
-                    }
                     controlDataSource.deleteWorktreeHandler = { [weak self] path, done in
                         guard let self else { return done(.failure(.unavailable)) }
                         let wanted = WorktreeDiscovery.canonicalPath(path)
@@ -921,39 +900,10 @@ class TabCoordinator {
                             }
                         }
                     }
-                    let autopilotRouter = ControlRouter(dataSource: controlDataSource)
-                    self.autopilot.execute = { method, params in autopilotRouter.handle(method: method, params: params) }
-                    self.autopilot.liveWorktrees = { [weak self] in Set(self?.allWorktrees.map(\.info.path) ?? []) }
-                    self.autopilot.repoPaths = { [weak self] in self?.config.workspacePaths ?? [] }
-                    self.autopilot.onRequestApproval = { [weak self] id, summary in
-                        guard let self else { return }
-                        self.pendingOrders.enqueue(FirstMateAction(
-                            kind: .autopilotApproval, zone: .red, worktreePath: FirstMatePane.directory,
-                            branch: "", project: FirstMatePane.project,
-                            terminalID: self.autopilot.stationId ?? "", message: "First Mate asks: \(summary)",
-                            payload: id, options: [AutopilotCoordinator.approveLabel, AutopilotCoordinator.rejectLabel]))
-                    }
-                    controlDataSource.firstMateStateHandler = { [weak self] in self?.firstMateRemoteState() }
-                    controlDataSource.firstMateAnswerHandler = { [weak self] card, option in
-                        guard let self, let order = self.firstMateCards().first(where: { $0.action.payload == card }),
-                              (order.action.options ?? []).contains(option) else { return false }
-                        self.firstMateCardAnswerer?(order, option)
-                        return true
-                    }
-                    controlDataSource.autopilotProposeHandler = { [weak self] summary, options in
-                        self?.autopilot.propose(summary: summary, options: options)
-                            ?? .error(code: ControlError.autopilotRefused, message: "First Mate is not running")
-                    }
-                    self.autopilot.onRequestProposal = { [weak self] id, summary, labels in
-                        guard let self else { return }
-                        self.pendingOrders.enqueue(FirstMateAction(
-                            kind: .autopilotProposal, zone: .red, worktreePath: FirstMatePane.directory,
-                            branch: "", project: FirstMatePane.project,
-                            terminalID: self.autopilot.stationId ?? "", message: "First Mate suggests: \(summary)",
-                            payload: id, options: labels))
-                    }
-                    self.autopilot.onApprovalClosed = { [weak self] id in
-                        self?.pendingOrders.resolveAutopilotApproval(id)
+                    controlDataSource.firstMateStateHandler = { FirstMateLink.remoteState() ?? ["enabled": false] }
+                    controlDataSource.firstMateAnswerHandler = { card, option in
+                        if case .success = CoreSocketClient.call("autopilot.answer", ["card": card, "option": option]) { return true }
+                        return false
                     }
                     controlDataSource.dismissDecisionHandler = { [weak self] paneId in
                         // Station id or the stable session key — the queue keys off the
@@ -2159,52 +2109,11 @@ class TabCoordinator {
         pendingOrders.all().filter { $0.action.kind == .autopilotApproval || $0.action.kind == .autopilotProposal }
     }
 
-    /// First Mate as a remote client draws it (`autopilot.state`).
-    func firstMateRemoteState(now: Date = Date()) -> [String: Any] {
-        let state = autopilot.state
-        let (word, _) = FirstMateStateText.describe(state.activity)
-        let tone: String
-        switch FirstMateStateText.tone(state) {
-        case .quiet: tone = "quiet"
-        case .watching: tone = "watching"
-        case .working: tone = "working"
-        case .wantsYou: tone = "wants_you"
-        }
-        var out: [String: Any] = [
-            "enabled": autopilot.isRunning,
-            "activity": word,
-            "tone": tone,
-            "detail": FirstMateStateText.detailLine(state, now: now),
-            "pending": state.pendingApprovals,
-            "agent": autopilot.agent.rawValue,
-        ]
-        if let station = autopilot.station, let pane = Fleet.shared.pane(for: station.id) {
-            out["pane"] = [
-                "pane_id": station.id, "pane_session_key": FirstMatePane.sessionName,
-                "worktree_path": FirstMatePane.directory, "project": FirstMatePane.project, "branch": "",
-                "agent_type": pane.agentType.rawValue, "status": pane.status.rawValue,
-                "last_message": pane.lastMessage, "title": FirstMatePane.project,
-                "display_title": FirstMatePane.project, "first_mate": true,
-            ] as [String: Any]
-        }
-        out["cards"] = firstMateCards().map { order -> [String: Any] in
-            [
-                "card": order.action.payload ?? "",
-                "kind": order.action.kind == .autopilotProposal ? "proposal" : "approval",
-                "message": order.action.message,
-                "options": order.action.options ?? [],
-            ]
-        }
-        return out
-    }
-
     /// Start, stop, pause or resume First Mate from config. Safe to call again.
     func applyAutopilotConfig() {
-        autopilot.apply(enabled: config.autopilotEnabled, paused: config.autopilotPaused,
-                        backend: runtimeBackend,
-                        agent: AgentType(rawValue: config.autopilotAgent) ?? .claudeCode,
-                        defaults: AutomationConfig.defaults(overriding: config.autopilotAutonomy),
-                        ownerCore: config.autopilotRunsInCore)
+        // The core reads First Mate's settings from config.json itself; the
+        // app follows what it reports.
+        firstMate.start()
     }
 
     /// Every PR-able worktree with its branch's PR as last fetched. Main and the
@@ -2325,8 +2234,8 @@ class TabCoordinator {
         var names = allWorktrees.flatMap { entry in
             entry.tree?.allLeaves.map(\.paneSessionKey) ?? []
         }
-        // First Mate has no split tree, so the sweep would take it for an orphan.
-        if autopilot.station != nil { names.append(FirstMatePane.sessionName) }
+        // First Mate's session is the core's: never the app's to sweep.
+        names.append(FirstMatePane.sessionName)
         return Set(names.filter { !$0.isEmpty })
     }
 

@@ -11,7 +11,7 @@ extension MainWindowController {
             "desktop": surface.isDesktop,
             // First Mate running here: what is for it comes back to hand over.
             // (When the core runs First Mate, the core uses its own first.)
-            "first_mate_here": tabCoordinator.autopilot.isRunning,
+            "first_mate_here": tabCoordinator.firstMate.isRunning,
         ]
         if let binding = coreBinding(for: surface) { context["binding"] = binding }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

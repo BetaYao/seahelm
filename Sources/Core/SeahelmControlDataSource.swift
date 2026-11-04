@@ -40,12 +40,9 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// Decline a pane's pending suggestion (main thread — it is UI state).
     var dismissDecisionHandler: ((String) -> Bool)?
     /// First Mate's gated calls (main thread — the policy reads UI state).
-    var autopilotGateHandler: ((AutopilotAction, String, [String: Any]) -> AutopilotGate)?
     /// A worktree's Delete, by path (main thread).
     /// Delete a worktree with no one at the Mac; calls back with what happened.
     var deleteWorktreeHandler: ((String, @escaping (Result<[String: Any], ControlCreateError>) -> Void) -> Void)?
-    var autopilotDidRunHandler: ((String, ControlResult) -> Void)?
-    var autopilotProposeHandler: ((String, [[String: Any]]) -> ControlResult)?
     var firstMateStateHandler: (() -> [String: Any]?)?
     var firstMateAnswerHandler: ((String, String) -> Bool)?
     /// Answer a pane's open question card (main thread — it is UI state).
@@ -535,12 +532,6 @@ extension SeahelmControlDataSource {
         ])
     }
 
-    func autopilotGate(action: AutopilotAction, method: String, params: [String: Any]) -> AutopilotGate {
-        guard let h = autopilotGateHandler else { return .deny("First Mate is not running") }
-        var gate = AutopilotGate.deny("First Mate is not running")
-        runOnMain { gate = h(action, method, params) }
-        return gate
-    }
 
     func firstMateState() -> [String: Any]? {
         guard let h = firstMateStateHandler else { return nil }
@@ -556,19 +547,7 @@ extension SeahelmControlDataSource {
         return ok
     }
 
-    func autopilotPropose(summary: String, options: [[String: Any]]) -> ControlResult {
-        guard let h = autopilotProposeHandler else {
-            return .error(code: ControlError.autopilotRefused, message: "First Mate is not running")
-        }
-        var result = ControlResult.error(code: ControlError.autopilotRefused, message: "First Mate is not running")
-        runOnMain { result = h(summary, options) }
-        return result
-    }
 
-    func autopilotDidRun(method: String, result: ControlResult) {
-        guard let h = autopilotDidRunHandler else { return }
-        runOnMain { h(method, result) }
-    }
 
     /// Waits for the delete to finish (git can take a while on a big checkout),
     /// so the caller hears whether the worktree is gone rather than that it
