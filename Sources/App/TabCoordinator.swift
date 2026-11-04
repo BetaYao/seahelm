@@ -2209,9 +2209,9 @@ class TabCoordinator {
     /// First Mate as a remote client draws it (`autopilot.state`).
     func firstMateRemoteState(now: Date = Date()) -> [String: Any] {
         let state = autopilot.state
-        let (word, _) = FirstMateDockView.describe(state.activity)
+        let (word, _) = FirstMateStateText.describe(state.activity)
         let tone: String
-        switch FirstMateDockView.tone(state) {
+        switch FirstMateStateText.tone(state) {
         case .quiet: tone = "quiet"
         case .watching: tone = "watching"
         case .working: tone = "working"
@@ -2221,7 +2221,7 @@ class TabCoordinator {
             "enabled": autopilot.isRunning,
             "activity": word,
             "tone": tone,
-            "detail": FirstMateDockView.detailLine(state, now: now),
+            "detail": FirstMateStateText.detailLine(state, now: now),
             "pending": state.pendingApprovals,
             "agent": autopilot.agent.rawValue,
         ]

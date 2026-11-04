@@ -45,6 +45,14 @@ enum IslandState: Equatable {
     case popping // brief attention pop of the closed pill
 }
 
+/// What the opened island shows (docs/superpowers/specs/2026-11-04-first-mate-surfaces-design.md):
+/// the cards waiting on the user, or First Mate's conversation. One at a time;
+/// the usage bar stays above both.
+enum IslandPage: Equatable {
+    case suggestions
+    case conversation
+}
+
 enum IslandOpenReason: Equatable {
     case hover
     case click
@@ -59,6 +67,7 @@ final class IslandModel {
 
     var state: IslandState = .closed
     var openReason: IslandOpenReason?
+    var page: IslandPage = .conversation
 
     var rows: [IslandAgentRow] = []
     /// Claude/Codex rate-limit readouts, refreshed by `UsageSummaryStore`.
@@ -70,7 +79,33 @@ final class IslandModel {
     /// Suggestions waiting on the user to pick an option. This is the island's
     /// only attention signal — status notifications go to Notification Center
     /// and are not mirrored here.
-    var orders: [PendingOrder] = []
+    var orders: [PendingOrder] = [] {
+        didSet {
+            // The last card dealt with: First Mate's conversation takes over
+            // (without taking the keyboard — `pendingCommandFocus` stays put).
+            if orders.isEmpty, page == .suggestions { page = .conversation }
+        }
+    }
+
+    // MARK: First Mate's conversation
+
+    /// First Mate's timeline (the core's, or the app's own while it runs
+    /// First Mate), oldest first. Refreshed while the conversation shows.
+    var mateMessages: [MessageEvent] = []
+    /// "watching", "working"… and its tone, from the coordinator.
+    var mateActivity: String = "off"
+    var mateTone: FirstMateStateText.Tone = .quiet
+    var mateRunning = false
+    /// A turn is under way: the conversation offers Stop.
+    var mateBusy = false
+    /// What is being typed for First Mate; kept across page switches and closes.
+    var draft = ""
+    /// The last send that did not reach First Mate; the draft is kept for a retry.
+    var sendError: String?
+    /// Say this to First Mate (a `/command` runs as one). False when it did not go.
+    var onSendToFirstMate: ((String) -> Bool)?
+    /// Stop First Mate's turn (Esc into its session).
+    var onInterruptFirstMate: (() -> Void)?
     /// Set when the control channel is down in a way the app cannot fix itself
     /// — practically always a second live instance owning the socket path.
     ///
@@ -154,11 +189,26 @@ final class IslandModel {
         usageRotationTimer?.invalidate()
     }
 
-    func open(reason: IslandOpenReason) {
+    /// Open on `page`, or by the queue: cards waiting → the cards, else the
+    /// conversation.
+    func open(reason: IslandOpenReason, page: IslandPage? = nil) {
         popRevertWork?.cancel()
         popRevertWork = nil
         openReason = reason
+        self.page = page ?? (orders.isEmpty ? .conversation : .suggestions)
         state = .opened
+    }
+
+    /// Esc: from the conversation back to the cards when there are any, else
+    /// shut. False when there was nothing to do.
+    func escape() -> Bool {
+        guard isOpened else { return false }
+        if page == .conversation, !orders.isEmpty {
+            page = .suggestions
+        } else {
+            close()
+        }
+        return true
     }
 
     func close() {

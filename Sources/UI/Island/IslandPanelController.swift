@@ -53,9 +53,7 @@ final class IslandPanelController {
         hosting.controller = self
         panel.contentView = hosting
         panel.onEscape = { [weak self] in
-            guard let self, self.model.isOpened else { return false }
-            self.model.close()
-            return true
+            self?.model.escape() ?? false
         }
 
         self.panel = panel
@@ -75,7 +73,18 @@ final class IslandPanelController {
             self, selector: #selector(activeSpaceChanged),
             name: NSWorkspace.activeSpaceDidChangeNotification, object: nil
         )
+        // Switching to another app (⌘Tab, a click in its window) is leaving the
+        // island: shut what is open, as a click outside does.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appResignedActive),
+            name: NSApplication.didResignActiveNotification, object: nil
+        )
         updateVisibility()
+    }
+
+    @objc private func appResignedActive() {
+        guard model.isOpened, model.openReason != .event else { return }
+        model.close()
     }
 
     func uninstall() {
@@ -94,14 +103,28 @@ final class IslandPanelController {
         updateVisibility()
     }
 
-    /// Open the island with the command field focused (Cmd+N entry point).
+    /// Open on First Mate's conversation with the field prefilled (Cmd+N's "/new ").
     func openCommandBar(prefill: String) {
         presentCommandBar { model.pendingCommandPrefill = prefill }
     }
 
-    /// Open the island and focus the command field without changing its text (Cmd+P).
+    /// Open on First Mate's conversation, the field focused (Cmd+P).
     func openCommandBarFocused() {
         presentCommandBar { model.pendingCommandFocus = true }
+    }
+
+    /// First Mate's conversation (⌘J, Settings ▸ Open First Mate).
+    func openFirstMate() {
+        presentCommandBar { model.pendingCommandFocus = true }
+    }
+
+    /// ⌘J again shuts what ⌘J opened.
+    func toggleFirstMate() {
+        if model.isOpened, model.page == .conversation {
+            closeCommandBar()
+        } else {
+            openFirstMate()
+        }
     }
 
     /// True while the island is expanded — i.e. Cmd+P would toggle it shut.
@@ -122,7 +145,7 @@ final class IslandPanelController {
         guard let panel else { return }
         if !panel.isVisible { panel.orderFrontRegardless() }
         prepare()
-        model.open(reason: .click)
+        model.open(reason: .click, page: .conversation)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKey()
     }
@@ -441,6 +464,12 @@ private final class IslandEventMonitors {
             monitors.append(m)
         }
         if let m = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { onDown($0); return $0 }) {
+            monitors.append(m)
+        }
+        // Clicks that go to other apps: a local monitor never sees them, and an
+        // opened island has to shut on a click anywhere outside it. (Global
+        // monitors of mouse events need no Accessibility permission.)
+        if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { onDown($0) }) {
             monitors.append(m)
         }
     }

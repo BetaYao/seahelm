@@ -201,31 +201,31 @@ final class FirstMatePaneTests: XCTestCase {
     func testDockSaysWhatIsTrueNow() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         var state = AutopilotCoordinator.State()
-        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "Off — click to set it up")
+        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "Off — click to set it up")
 
         state.activity = .idle
         state.watching = 3
-        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "3 projects · CI & merges")
+        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "3 projects · CI & merges")
         state.latest = "ci.failed · wt-a · PR #7"
         state.latestAt = now.addingTimeInterval(-12 * 60)
-        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "12m ago · ci.failed · wt-a · PR #7")
+        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "12m ago · ci.failed · wt-a · PR #7")
         state.latestAt = now.addingTimeInterval(-7 * 3600)
-        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "3 projects · CI & merges",
+        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "3 projects · CI & merges",
                        "an old event is not news")
 
         state.activity = .thinking
         state.doing = "gh run view 123 --log-failed"
         state.queued = 2
-        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "2 queued · gh run view 123 --log-failed")
-        XCTAssertEqual(FirstMateDockView.tone(state), .working)
+        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "2 queued · gh run view 123 --log-failed")
+        XCTAssertEqual(FirstMateStateText.tone(state), .working)
 
         state.activity = .idle
         state.queued = 0
         state.pendingApprovals = 1
-        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "1 waiting for your approval")
-        XCTAssertEqual(FirstMateDockView.tone(state), .wantsYou)
+        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "1 waiting for your approval")
+        XCTAssertEqual(FirstMateStateText.tone(state), .wantsYou)
         state.activity = .needsYou
-        XCTAssertEqual(FirstMateDockView.detailLine(state, now: now), "Waiting for your answer in its terminal")
+        XCTAssertEqual(FirstMateStateText.detailLine(state, now: now), "Waiting for your answer in its terminal")
     }
 
     /// What the user said is not news to them.

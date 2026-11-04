@@ -763,6 +763,29 @@ final class AutopilotCoordinator {
         }
     }
 
+    /// Stop First Mate's turn: Esc into its session, which every agent TUI
+    /// reads as "stop". The core's session through the core.
+    func interrupt() {
+        if remote {
+            DispatchQueue.global(qos: .userInitiated).async {
+                _ = CoreSocketClient.call("pane.send_keys", ["pane_id": FirstMatePane.sessionName, "keys": ["escape"]])
+            }
+        } else {
+            _ = station?.interruptTurn()
+        }
+    }
+
+    /// First Mate's timeline: the core's while it runs First Mate (`remote`,
+    /// read on main by the caller), else the app's own. Blocking (a socket
+    /// call) — off main.
+    static func timeline(remote: Bool) -> [MessageEvent] {
+        if remote {
+            guard case .success(let r) = CoreSocketClient.call("message.snapshot", ["pane_id": FirstMatePane.sessionName]) else { return [] }
+            return (r["messages"] as? [[String: Any]] ?? []).compactMap(MessageEvent.init(dict:))
+        }
+        return MessageStreamHub.shared.snapshot(paneId: FirstMatePane.sessionName)
+    }
+
     private static func stripping(_ prefix: String, from text: String) -> String {
         text.hasPrefix(prefix) ? String(text.dropFirst(prefix.count)) : text
     }
