@@ -50,16 +50,6 @@ final class CommandSessionStoreTests: XCTestCase {
         XCTAssertFalse(store.session(for: "mail:t1").closed)
     }
 
-    func testPendingIsTakenOnceAndExpires() {
-        let store = CommandSessionStore(url: nil, legacyMailURL: nil)
-        let live = PendingAction(line: ParsedLine(.yes), summary: "x", expiresAt: Date().addingTimeInterval(60))
-        store.setPending(live, for: "s")
-        XCTAssertEqual(store.takePending(for: "s"), live)
-        XCTAssertNil(store.takePending(for: "s"))
-
-        store.setPending(PendingAction(line: ParsedLine(.yes), summary: "x", expiresAt: Date().addingTimeInterval(-1)), for: "s")
-        XCTAssertNil(store.takePending(for: "s"))
-    }
 
     /// The mail bindings written by the store this one replaced come across
     /// as `mail:<thread>` sessions, once.

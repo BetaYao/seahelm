@@ -114,50 +114,6 @@ struct FleetIndex: Equatable {
 
     // MARK: - Worktrees
 
-    /// `name`, or `repo/name` when several repos carry it. Case-insensitive, as
-    /// these are typed from memory. Matching is on `WorktreeRef.name`, so a
-    /// detached checkout answers to its directory.
-    ///
-    /// Branch names often contain `/` (`fix/foo`, `task/bar`). Those must match
-    /// as a whole name before we treat the first slash as a repo separator —
-    /// otherwise the label `@fix/foo` (emitted when the branch is unique) is
-    /// re-parsed as repo `fix` + branch `foo` and `/return` from the row menu
-    /// fails with only a beep on the desktop.
-    func worktree(named name: String) -> Result<WorktreeRef, CommandError> {
-        let needle = name.lowercased()
-
-        let exact = worktrees.filter { $0.name.lowercased() == needle }
-        switch exact.count {
-        case 1:
-            return .success(exact[0])
-        case let n where n > 1:
-            return .failure(.ambiguousWorktree(name, exact.map { "\($0.repo)/\($0.name)" }))
-        default:
-            break
-        }
-
-        if let slash = needle.firstIndex(of: "/") {
-            let repoPart = String(needle[..<slash])
-            let branchPart = String(needle[needle.index(after: slash)...])
-            // Only the disambiguated `@repo/branch` form — and only when the
-            // left side is actually a repo we know, so a mistyped
-            // `@fix/typo` does not get a second, confusing miss.
-            let knownRepo = worktrees.contains { $0.repo.lowercased() == repoPart }
-                || repo(named: repoPart) != nil
-            if knownRepo {
-                if let hit = worktrees.first(where: {
-                    $0.repo.lowercased() == repoPart && $0.name.lowercased() == branchPart
-                }) {
-                    return .success(hit)
-                }
-                return .failure(.unknownWorktree(name))
-            }
-        }
-
-        // Naming a repo where a worktree is expected is the one mistake the
-        // old `/return` grammar invited; say what the name actually is.
-        return .failure(repo(named: name) != nil ? .repoNotWorktree(name) : .unknownWorktree(name))
-    }
 
     /// `@name`, or `@repo/name` when the bare one would be ambiguous.
     /// The listing prints this form, so what you read is what you can type.
@@ -176,4 +132,9 @@ struct FleetIndex: Equatable {
         let needle = name.lowercased()
         return repos.first { $0.name.lowercased() == needle }
     }
+}
+
+extension PaneRef {
+    /// How a chat names a pane: `#3 seahelm/main`.
+    var target: String { "#\(handle) \(project)/\(branch)" }
 }

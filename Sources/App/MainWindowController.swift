@@ -1278,14 +1278,9 @@ dashboard.stationManager = terminalCoordinator.stationManager
     @discardableResult
     func submitBridgeCommand(_ text: String, onOutcome: ((HelmCommandOutcome) -> Void)? = nil) -> Bool {
         enum Kind { case new, sweep, other }
-        var kind = Kind.other
-        if case .success(let line) = CommandParser.parse(text, index: fleetIndex()) {
-            switch line.command {
-            case .new: kind = .new
-            case .returnAll: kind = .sweep
-            default: break
-            }
-        }
+        // `/new` makes a worktree; the language is the core's, so only that
+        // much is read here, to know what the spinner waits for.
+        let kind: Kind = text.trimmingCharacters(in: .whitespaces).hasPrefix("/new ") ? .new : .other
         var replies = 0
         routeCommand(text, surface: .desktop) { [weak self] reply in
             guard let self else { return }
@@ -1741,7 +1736,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
             .filter { !$0.isEmpty }
         return Array(NSOrderedSet(array: parts)).compactMap { $0 as? String }.joined(separator: " · ")
     }
-
 
 
     // MARK: - Forwarding to TabCoordinator
@@ -2926,312 +2920,6 @@ extension MainWindowController {
 
 }
 
-// MARK: - CommandHost
-
-extension MainWindowController: CommandHost {
-    var firstMateAvailable: Bool { tabCoordinator.firstMate.isRunning }
-
-    func sayToFirstMate(_ text: String, from surface: CommandSurface) -> Bool {
-        tabCoordinator.firstMate.sendUserMessage(text, replyTo: surface.isDesktop ? nil : surface.sessionKey)
-    }
-
-    /// The fleet as the command language sees it, with every pane's stable
-    /// handle minted on sight.
-    func fleetIndex() -> FleetIndex {
-        let registry = PaneHandleRegistry.shared
-        let panes = Fleet.shared.allPanes()
-            .filter { !FirstMatePane.isFirstMate(worktreePath: $0.worktreePath) }
-            .map { pane -> PaneRef in
-            let sessionKey = pane.station?.paneSessionKey ?? ""
-            let key = PaneHandleRegistry.key(sessionKey: sessionKey, paneId: pane.id)
-            return PaneRef(handle: registry.handle(for: key), handleKey: key, id: pane.id, sessionKey: sessionKey,
-                           project: pane.project, branch: pane.branch, worktreePath: pane.worktreePath,
-                           type: pane.agentType.displayName, title: PaneTitleResolver.title(for: pane),
-                           // `displayStatus`, the same field the dashboard
-                           // draws — a pane whose agent is idle while its
-                           // background work runs reads as busy on both. The
-                           // raw `status` is for edges and notifications; using
-                           // it here made `/status` on a phone disagree with
-                           // the fleet on screen, which is the one thing a
-                           // remote listing must not do.
-                           status: pane.displayStatus,
-                           // The assistant's own prose where there is any; a screen
-                           // scan makes poor reading in a chat or a mail.
-                           lastMessage: pane.lastAssistantMessage.isEmpty ? pane.lastMessage : pane.lastAssistantMessage)
-        }
-        let worktrees = tabCoordinator.allWorktrees.map {
-            WorktreeRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
-                        branch: $0.info.branch, path: $0.info.path, isMain: $0.info.isMainWorktree)
-        }
-        let repos = tabCoordinator.config.workspacePaths.map {
-            RepoRef(name: URL(fileURLWithPath: $0).lastPathComponent, path: $0)
-        }
-        return FleetIndex(panes: panes, worktrees: worktrees, repos: repos)
-    }
-
-    /// The desktop talks to the selected worktree's pane.
-    var desktopBoundPaneKey: String? {
-        guard let path = dashboardVC?.lastCommittedWorktreePath,
-              let pane = Fleet.shared.pane(forWorktree: path) else { return nil }
-        return PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "", paneId: pane.id)
-    }
-
-    var integrationEnabled: Bool { config.integrationEnabled }
-
-    func createWorktree(task: String, repoPath: String, completion: @escaping (String?) -> Void) {
-        performWorktreeCreate(task: task, repoPath: repoPath, agentType: .claudeCode, reuseEnv: false,
-                              onComplete: completion)
-    }
-
-    func selectWorktree(path: String) {
-        dashboardVC?.commitWorktreeSelection(path: path)
-    }
-
-    func sendText(paneId: String, text: String) -> Bool {
-        guard Fleet.shared.pane(for: paneId) != nil else { return false }
-        PaneInput.shared.sendCommand(to: paneId, command: text)
-        return true
-    }
-
-    func transcript(paneSessionKey: String) -> String? {
-        SeahelmdChannel(paneSessionKey: paneSessionKey).recentTranscript(lines: 60)
-    }
-
-    func messages(paneSessionKey: String) -> [MessageEvent] {
-        CoreMessages.shared.snapshot(paneId: paneSessionKey)
-    }
-
-    /// Recent tool activity for one pane, as plain lines.
-    func activity(paneId: String) -> [String] {
-        guard let pane = Fleet.shared.pane(for: paneId) else { return [] }
-        return pane.activityEvents.map {
-            "\($0.isError ? "✕ " : "")\($0.tool)\($0.detail.isEmpty ? "" : " — \($0.detail)")"
-        }
-    }
-
-    func isIntegrationCheckout(worktreePath: String) -> Bool {
-        IntegrationWorktreeStore.shared.isIntegrationWorktree(worktreePath)
-    }
-
-    /// Git subprocesses plus one network round trip (the fetch, and a PR
-    /// lookup when origin is GitHub) — off the main thread, with every piece
-    /// of main-thread state read first.
-    func assessReturn(worktreePath path: String, completion: @escaping (WorktreeReturnFacts) -> Void) {
-        let info = tabCoordinator.allWorktrees.first { $0.info.path == path }?.info
-        let running = Fleet.shared.hasRunningPane(inWorktree: path)
-        let task = WorktreeTaskStore.shared.task(forWorktree: path)
-        let recordedBase = WorktreeBaseBranchStore.shared.baseBranch(forWorktree: path)
-        let isIntegration = IntegrationWorktreeStore.shared.isIntegrationWorktree(path)
-        let repoCache = tabCoordinator.worktreeRepoCache
-        let tokenRepoPath = tabCoordinator.config.selectedWorktreePath
-        DispatchQueue.global(qos: .userInitiated).async {
-            let repoPath = repoCache[path] ?? WorktreeDiscovery.findRepoRoot(from: path) ?? path
-            var facts = WorktreeReturnAssessor.assess(
-                worktreePath: path, repoPath: repoPath, branch: info?.branch ?? "",
-                isMain: info?.isMainWorktree ?? false, isDetached: info?.isDetached ?? false,
-                recordedBase: recordedBase)
-            facts.agentRunning = running
-            facts.isIntegration = isIntegration
-            facts.taskDescription = task
-            if case .github(let owner, let repo) = facts.remote {
-                let token = Self.resolveGitHubToken(repoPath: tokenRepoPath)
-                facts.hasGitHubToken = !token.isEmpty
-                if !token.isEmpty, !facts.branch.isEmpty {
-                    let client = GitHubReturnPRClient(
-                        service: GitHubPRService(token: token, owner: owner, repo: repo), owner: owner)
-                    facts.existingPRURL = client.openPRURL(branch: facts.branch)
-                }
-            }
-            DispatchQueue.main.async { completion(facts) }
-        }
-    }
-
-    /// Commit, push and PR run on a background queue; the delete goes through
-    /// the coordinator so the panes and sessions come down with the tree.
-    func performReturn(_ plan: WorktreeReturnPlan, worktree: WorktreeRef,
-                       completion: @escaping (WorktreeReturnOutcome) -> Void) {
-        let path = worktree.path
-        let branch = worktree.branch
-        let task = WorktreeTaskStore.shared.task(forWorktree: path)
-        let tokenRepoPath = tabCoordinator.config.selectedWorktreePath
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var pr: WorktreeReturnPRClient?
-            if let url = GitProcess.run(["remote", "get-url", "origin"], in: path),
-               let remote = GitRemote.parse(url), case .github(let owner, let repo) = remote.kind {
-                let token = Self.resolveGitHubToken(repoPath: tokenRepoPath)
-                if !token.isEmpty {
-                    pr = GitHubReturnPRClient(
-                        service: GitHubPRService(token: token, owner: owner, repo: repo), owner: owner)
-                }
-            }
-            let outcome = WorktreeReturnRunner.run(plan, branch: branch, task: task,
-                                                   git: WorktreeReturnGitProcess(worktreePath: path), pr: pr)
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if outcome.deletesWorktree {
-                    // Row pending through the tear-down; clears when git finishes.
-                    self.pendingReturnPath = nil
-                    self.terminalCoordinator.deleteWorktreeWithoutConfirm(
-                        path: path, branch: branch, deleteBranch: outcome.deletesBranch, force: true
-                    ) { [weak self] pending in
-                        self?.dashboardVC?.setWorktreePending(path: path, pending: pending)
-                    }
-                } else {
-                    self.clearPendingReturn()
-                }
-                completion(outcome)
-            }
-        }
-    }
-
-    /// lastPathComponent is what the parser matched, so it is also the tab's
-    /// displayName. Kills sessions, leaves every worktree on disk.
-    func forgetRepo(path: String) {
-        tabCoordinator.performCloseRepo(projectName: URL(fileURLWithPath: path).lastPathComponent)
-    }
-
-    func integrate(mode: IntegrationConflictMode, force: Bool,
-                   completion: @escaping (String, Bool) -> Void) {
-        guard let selected = tabCoordinator.config.selectedWorktreePath,
-              let repoPath = WorktreeDiscovery.findRepoRoot(from: selected) else {
-            completion("No repo selected.", false)
-            return
-        }
-        let project = tabCoordinator.repoName(forWorktree: repoPath)
-        let worktrees = tabCoordinator.allWorktrees
-            .map(\.info)
-            .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }
-        let integrationPath = IntegrationWorktreeStore.shared.worktreePath(forRepo: repoPath)
-            ?? IntegrationWorktree.defaultPath(forRepo: repoPath)
-        let lastPublished = IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: integrationPath)
-        dashboardVC?.setIntegratePending(project: project, pending: true)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let outcome: Result<IntegrationRunReport, Error>
-            do {
-                outcome = .success(try IntegrationRunner.run(
-                    repoPath: repoPath,
-                    integrationPath: integrationPath,
-                    worktrees: worktrees,
-                    mode: mode,
-                    force: force,
-                    lastPublished: lastPublished,
-                    // A busy worktree comes in at HEAD rather than as a
-                    // half-written file that reads as a conflict it is not.
-                    isBusy: { Fleet.shared.hasRunningPane(inWorktree: $0) }
-                ))
-            } catch {
-                outcome = .failure(error)
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.dashboardVC?.setIntegratePending(project: project, pending: false)
-                switch outcome {
-                case .success(let report):
-                    IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
-                    IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
-                    if case .published(let commit) = report.outcome {
-                        IntegrationWorktreeStore.shared.recordPublished(commit, forCheckout: report.integrationWorktreePath)
-                    }
-                    // The desktop learns of a round that needs a decision from
-                    // its card, whichever surface asked for the round.
-                    if report.needsAttention {
-                        self?.enqueueIntegrationReport(report.summary, repoPath: repoPath,
-                                                       checkoutPath: report.integrationWorktreePath,
-                                                       options: report.cardOptions)
-                    }
-                    completion(report.summary, report.isHeld)
-                case .failure(let error):
-                    IntegrationStatusStore.shared.set(
-                        .failed(error.localizedDescription), forWorktree: integrationPath)
-                    completion("Integration failed: \(error.localizedDescription)", false)
-                }
-            }
-        }
-    }
-
-    func addIdea(text: String, source: String) -> String {
-        IdeaStore.shared.add(text: text, project: "external", source: source, tags: []).text
-    }
-
-    func openIssue(title: String) {
-        openGitHubIssue(title: title)
-    }
-
-    func addRepo() {
-        tabCoordinator.addRepoViaOpenPanel(window: window)
-    }
-
-    /// The desktop's `/yes`: one sheet, same wording as the chat question.
-    func confirm(_ summary: String, completion: @escaping (Bool) -> Void) {
-        // A confirmation sheet replaces the row spinner as feedback.
-        clearPendingReturn()
-        guard let window else {
-            completion(false)
-            return
-        }
-        let alert = NSAlert()
-        alert.messageText = summary
-            .replacingOccurrences(of: "**", with: "")
-            .replacingOccurrences(of: "`", with: "")
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Go ahead")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { completion($0 == .alertFirstButtonReturn) }
-    }
-
-    /// Telegram delivery for a pane-status banner. Bound chats hear only their
-    /// pane; the default / last-order chat hears the whole fleet while unbound.
-    ///
-    /// `fleetSilenced` drops the fleet-wide listeners for this one event — the
-    /// desktop already showed it. Chats bound to the pane are never dropped.
-    private func notifyTelegramSessions(terminalID: String, fleetSilenced: Bool = false,
-                                        text render: (_ handle: Int?) -> String) {
-        let pane = terminalID.isEmpty ? nil : Fleet.shared.pane(for: terminalID)
-        let paneKey: String?
-        if let pane {
-            paneKey = PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "",
-                                             paneId: pane.id)
-        } else {
-            paneKey = nil
-        }
-        let text = render(paneKey.map { PaneHandleRegistry.shared.handle(for: $0) })
-
-        var fleet: [String] = []
-        if !fleetSilenced {
-            if let chat = config.telegram?.resolvedDefaultChatId { fleet.append(chat) }
-            if let chat = telegramChannel?.fleetNotifyChatId, !fleet.contains(chat) {
-                fleet.append(chat)
-            }
-        }
-        deliverTelegram(terminalID: terminalID, text: text, paneKey: paneKey, fleet: fleet)
-    }
-
-    /// A pane-status notice. In a chat the pane's `#handle` leads the second
-    /// line: a fleet-wide chat hears many panes, and the handle is what `/go`
-    /// and `/order` take.
-    static func noticeText(icon: String, title: String, subtitle: String, body: String,
-                           handle: Int? = nil) -> String {
-        let place = handle.map { "#\($0) \(subtitle)" } ?? subtitle
-        return "\(icon) **\(title)**\n\(place)\n\n\(body)"
-    }
-
-    private func deliverTelegram(terminalID: String, text: String, paneKey: String?,
-                                 fleet: [String]) {
-        let chats = tabCoordinator.commandSessions.telegramChatsToNotify(
-            paneKey: paneKey, fleetListenerChatIds: fleet)
-        for chatId in chats {
-            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
-                channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
-            ) { [weak self] messageId in
-                // Remembered so an agent's next-step options, which land a beat
-                // after this, can be added to it as buttons.
-                guard !terminalID.isEmpty, let messageId else { return }
-                DispatchQueue.main.async {
-                    self?.rememberNotice(terminalID: terminalID, chatId: chatId, messageId: messageId)
-                }
-            }
-        }
-    }
-}
 
 // MARK: - Chat bindings
 
@@ -3523,8 +3211,8 @@ extension MainWindowController {
         let sent = station.interruptTurn()
         ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
             channelId: "telegram", targetChatId: chatId,
-            content: sent ? "Stopped **\(CommandFormatter.target(pane))** (sent Esc)."
-                          : "Couldn't reach **\(CommandFormatter.target(pane))** to stop it.",
+            content: sent ? "Stopped **\(pane.target)** (sent Esc)."
+                          : "Couldn't reach **\(pane.target)** to stop it.",
             format: .markdown))
     }
 
@@ -3555,12 +3243,6 @@ extension MainWindowController {
                 self?.replyToChat(callback, reply.text,
                                   buttons: ChatCallbackRegistry.shared.buttons(for: reply.buttons))
             }
-            return
-        case .cancelPending:
-            tabCoordinator.commandSessions.clearPending(
-                for: CommandSession.key(surface: "telegram", id: callback.chatId))
-            clearChatButtons(callback)
-            replyToChat(callback, "Cancelled.")
             return
         case .suggestionOption(let orderId, let index):
             guard let card = tabCoordinator.cards.card(id: orderId), index < card.labels.count else {
@@ -3619,7 +3301,7 @@ extension MainWindowController {
     /// Which card a tap belongs to, when it belongs to one.
     private static func orderId(of action: ChatCallbackAction) -> String? {
         switch action {
-        case .command, .cancelPending: return nil
+        case .command: return nil
         case .suggestionOption(let orderId, _): return orderId
         case .dismissSuggestion(let orderId): return orderId
         }
@@ -3740,3 +3422,114 @@ extension MainWindowController {
     }
 }
 
+// MARK: - Fleet facts and chat helpers
+
+extension MainWindowController {
+
+    func sayToFirstMate(_ text: String, from surface: CommandSurface) -> Bool {
+        tabCoordinator.firstMate.sendUserMessage(text, replyTo: surface.isDesktop ? nil : surface.sessionKey)
+    }
+
+    /// The fleet as the command language sees it, with every pane's stable
+    /// handle minted on sight.
+    func fleetIndex() -> FleetIndex {
+        let registry = PaneHandleRegistry.shared
+        let panes = Fleet.shared.allPanes()
+            .filter { !FirstMatePane.isFirstMate(worktreePath: $0.worktreePath) }
+            .map { pane -> PaneRef in
+            let sessionKey = pane.station?.paneSessionKey ?? ""
+            let key = PaneHandleRegistry.key(sessionKey: sessionKey, paneId: pane.id)
+            return PaneRef(handle: registry.handle(for: key), handleKey: key, id: pane.id, sessionKey: sessionKey,
+                           project: pane.project, branch: pane.branch, worktreePath: pane.worktreePath,
+                           type: pane.agentType.displayName, title: PaneTitleResolver.title(for: pane),
+                           // `displayStatus`, the same field the dashboard
+                           // draws — a pane whose agent is idle while its
+                           // background work runs reads as busy on both. The
+                           // raw `status` is for edges and notifications; using
+                           // it here made `/status` on a phone disagree with
+                           // the fleet on screen, which is the one thing a
+                           // remote listing must not do.
+                           status: pane.displayStatus,
+                           // The assistant's own prose where there is any; a screen
+                           // scan makes poor reading in a chat or a mail.
+                           lastMessage: pane.lastAssistantMessage.isEmpty ? pane.lastMessage : pane.lastAssistantMessage)
+        }
+        let worktrees = tabCoordinator.allWorktrees.map {
+            WorktreeRef(repo: tabCoordinator.repoName(forWorktree: $0.info.path),
+                        branch: $0.info.branch, path: $0.info.path, isMain: $0.info.isMainWorktree)
+        }
+        let repos = tabCoordinator.config.workspacePaths.map {
+            RepoRef(name: URL(fileURLWithPath: $0).lastPathComponent, path: $0)
+        }
+        return FleetIndex(panes: panes, worktrees: worktrees, repos: repos)
+    }
+
+    /// The desktop talks to the selected worktree's pane.
+    var desktopBoundPaneKey: String? {
+        guard let path = dashboardVC?.lastCommittedWorktreePath,
+              let pane = Fleet.shared.pane(forWorktree: path) else { return nil }
+        return PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "", paneId: pane.id)
+    }
+
+    func selectWorktree(path: String) {
+        dashboardVC?.commitWorktreeSelection(path: path)
+    }
+
+
+
+
+
+    /// Telegram delivery for a pane-status banner. Bound chats hear only their
+    /// pane; the default / last-order chat hears the whole fleet while unbound.
+    ///
+    /// `fleetSilenced` drops the fleet-wide listeners for this one event — the
+    /// desktop already showed it. Chats bound to the pane are never dropped.
+    private func notifyTelegramSessions(terminalID: String, fleetSilenced: Bool = false,
+                                        text render: (_ handle: Int?) -> String) {
+        let pane = terminalID.isEmpty ? nil : Fleet.shared.pane(for: terminalID)
+        let paneKey: String?
+        if let pane {
+            paneKey = PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "",
+                                             paneId: pane.id)
+        } else {
+            paneKey = nil
+        }
+        let text = render(paneKey.map { PaneHandleRegistry.shared.handle(for: $0) })
+
+        var fleet: [String] = []
+        if !fleetSilenced {
+            if let chat = config.telegram?.resolvedDefaultChatId { fleet.append(chat) }
+            if let chat = telegramChannel?.fleetNotifyChatId, !fleet.contains(chat) {
+                fleet.append(chat)
+            }
+        }
+        deliverTelegram(terminalID: terminalID, text: text, paneKey: paneKey, fleet: fleet)
+    }
+
+    /// A pane-status notice. In a chat the pane's `#handle` leads the second
+    /// line: a fleet-wide chat hears many panes, and the handle is what `/go`
+    /// and `/order` take.
+    static func noticeText(icon: String, title: String, subtitle: String, body: String,
+                           handle: Int? = nil) -> String {
+        let place = handle.map { "#\($0) \(subtitle)" } ?? subtitle
+        return "\(icon) **\(title)**\n\(place)\n\n\(body)"
+    }
+
+    private func deliverTelegram(terminalID: String, text: String, paneKey: String?,
+                                 fleet: [String]) {
+        let chats = tabCoordinator.commandSessions.telegramChatsToNotify(
+            paneKey: paneKey, fleetListenerChatIds: fleet)
+        for chatId in chats {
+            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
+                channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
+            ) { [weak self] messageId in
+                // Remembered so an agent's next-step options, which land a beat
+                // after this, can be added to it as buttons.
+                guard !terminalID.isEmpty, let messageId else { return }
+                DispatchQueue.main.async {
+                    self?.rememberNotice(terminalID: terminalID, chatId: chatId, messageId: messageId)
+                }
+            }
+        }
+    }
+}
