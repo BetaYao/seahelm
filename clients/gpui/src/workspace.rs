@@ -95,6 +95,8 @@ pub struct Workspace {
     /// seahelm-core's view of the worktrees it has panes in; where it has
     /// one, it decides the row's dot.
     core: HashMap<String, WorktreeState>,
+    /// Each worktree's pull request, from the core (`pr.list`).
+    prs: HashMap<String, core_client::Pr>,
 }
 
 impl Workspace {
@@ -117,6 +119,7 @@ impl Workspace {
             focus: cx.focus_handle(),
             memory: None,
             core: HashMap::new(),
+            prs: HashMap::new(),
         };
         Self::poll_core(cx);
         Self::poll_fleet(cx);
@@ -137,6 +140,10 @@ impl Workspace {
     fn poll_fleet(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| loop {
             let snap = cx.background_executor().spawn(async { fleet::read() }).await;
+            // The core watches the PRs of every worktree listed, panes or not.
+            let paths: Vec<String> =
+                snap.groups.iter().flat_map(|g| g.items.iter().map(|i| i.worktree_path.clone())).collect();
+            cx.background_executor().spawn(async move { core_client::set_worktrees(&paths) }).detach();
             let alive = this
                 .update(cx, |w, cx| {
                     w.fleet = snap;
@@ -159,11 +166,13 @@ impl Workspace {
         cx.spawn(async move |this, cx| {
             cx.background_executor().spawn(async { core_client::ensure() }).await;
             loop {
-                let states = cx.background_executor().spawn(async { core_client::worktrees() }).await;
+                let (states, prs) =
+                    cx.background_executor().spawn(async { (core_client::worktrees(), core_client::prs()) }).await;
                 let alive = this
                     .update(cx, |w, cx| {
-                        if w.core != states {
+                        if w.core != states || w.prs != prs {
                             w.core = states;
+                            w.prs = prs;
                             cx.notify();
                         }
                     })
@@ -785,6 +794,9 @@ impl Workspace {
             }
             line2 = line2.child(g);
         }
+        if let Some(pr) = self.prs.get(&item.worktree_path) {
+            line2 = line2.child(pr_badge(pr));
+        }
         line2 = line2.child(div().flex_1()).child(
             div()
                 .flex_none()
@@ -1029,3 +1041,78 @@ fn status_dot(dot: Dot, id: &str) -> gpui::AnyElement {
     }
 }
 
+/// What a PR badge says, piece by piece, as the app's row draws it
+/// (`DashboardOverviewView.prAttributed`): `#12 ✓ approved`,
+/// `#3 draft ✕`, `#4 merged`, `#5`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrTone {
+    Dim,
+    Faint,
+    Merged,
+    Good,
+    Bad,
+    Pending,
+}
+
+fn pr_badge_parts(pr: &core_client::Pr) -> Vec<(String, PrTone)> {
+    let n = pr.number;
+    let mut parts = match pr.state.as_str() {
+        "merged" => return vec![(format!("#{n} merged"), PrTone::Merged)],
+        "closed" => return vec![(format!("#{n} closed"), PrTone::Faint)],
+        "draft" => vec![(format!("#{n} draft"), PrTone::Faint)],
+        _ => vec![(format!("#{n}"), PrTone::Dim)],
+    };
+    match pr.checks.as_deref() {
+        Some("passing") => parts.push((" \u{2713}".into(), PrTone::Good)),
+        Some("failing") => parts.push((" \u{2715}".into(), PrTone::Bad)),
+        Some("pending") => parts.push((" \u{25CF}".into(), PrTone::Pending)),
+        _ => {}
+    }
+    match pr.review.as_deref() {
+        Some("approved") => parts.push((" approved".into(), PrTone::Good)),
+        Some("changes_requested") => parts.push((" changes".into(), PrTone::Bad)),
+        _ => {}
+    }
+    parts
+}
+
+fn pr_badge(pr: &core_client::Pr) -> impl IntoElement {
+    let mut d = div().flex_none().flex().flex_row().text_size(px(10.)).line_height(px(13.));
+    for (text, tone) in pr_badge_parts(pr) {
+        let colour = match tone {
+            PrTone::Dim => tokens::ink_dim(),
+            PrTone::Faint => tokens::ink_faint(),
+            PrTone::Merged => tokens::merged(),
+            PrTone::Good => tokens::running(),
+            PrTone::Bad => tokens::danger(),
+            PrTone::Pending => tokens::attention(),
+        };
+        d = d.child(div().text_color(colour).child(text));
+    }
+    d
+}
+
+#[cfg(test)]
+mod pr_badge_tests {
+    use super::*;
+
+    fn text(state: &str, checks: Option<&str>, review: Option<&str>, n: u64) -> String {
+        let pr = core_client::Pr {
+            number: n,
+            url: "u".into(),
+            state: state.into(),
+            checks: checks.map(Into::into),
+            review: review.map(Into::into),
+        };
+        pr_badge_parts(&pr).into_iter().map(|(t, _)| t).collect()
+    }
+
+    /// The app's `testRowBadgeReadsLikeTheSummary`.
+    #[test]
+    fn row_badge_reads_like_the_summary() {
+        assert_eq!(text("open", Some("passing"), Some("approved"), 12), "#12 \u{2713} approved");
+        assert_eq!(text("draft", Some("failing"), None, 3), "#3 draft \u{2715}");
+        assert_eq!(text("merged", None, None, 4), "#4 merged");
+        assert_eq!(text("open", None, Some("review_required"), 5), "#5");
+    }
+}

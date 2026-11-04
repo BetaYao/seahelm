@@ -17,6 +17,7 @@ mod bridge;
 mod core;
 mod install;
 mod poller;
+mod pr;
 mod rpc;
 mod shadow;
 
@@ -76,6 +77,7 @@ fn serve() -> Result<()> {
     let listener = rpc::bind(&path)?;
     let core = core::Core::start()?;
     poller::spawn(Arc::clone(&core));
+    pr::spawn(Arc::clone(&core));
     eprintln!("seahelm-core listening on {}", path.display());
     rpc::serve(listener, core)
 }
