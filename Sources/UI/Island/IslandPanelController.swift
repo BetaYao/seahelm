@@ -73,7 +73,18 @@ final class IslandPanelController {
             self, selector: #selector(activeSpaceChanged),
             name: NSWorkspace.activeSpaceDidChangeNotification, object: nil
         )
+        // Switching to another app (⌘Tab, a click in its window) is leaving the
+        // island: shut what is open, as a click outside does.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appResignedActive),
+            name: NSApplication.didResignActiveNotification, object: nil
+        )
         updateVisibility()
+    }
+
+    @objc private func appResignedActive() {
+        guard model.isOpened, model.openReason != .event else { return }
+        model.close()
     }
 
     func uninstall() {
@@ -453,6 +464,12 @@ private final class IslandEventMonitors {
             monitors.append(m)
         }
         if let m = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { onDown($0); return $0 }) {
+            monitors.append(m)
+        }
+        // Clicks that go to other apps: a local monitor never sees them, and an
+        // opened island has to shut on a click anywhere outside it. (Global
+        // monitors of mouse events need no Accessibility permission.)
+        if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { onDown($0) }) {
             monitors.append(m)
         }
     }
