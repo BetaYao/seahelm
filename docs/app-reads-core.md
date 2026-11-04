@@ -1,7 +1,7 @@
 # The macOS app as a client of seahelm-core
 
-Status: plan, 2026-11-04. A hard cut: no switch, no shadow phase, no
-fallback, no compatibility with old sessions.
+Status: steps 1–7 done (2026-11-04, one PR); step 8 in progress. A hard cut:
+no switch, no shadow phase, no fallback, no compatibility with old sessions.
 
 ## Goal
 
@@ -122,12 +122,12 @@ seahelmd from before `Snapshot`) were restarted on 2026-11-04.
 | | Scope |
 |---|---|
 | 1 | Core: the whole pane on the wire (`pane_detail`), `pane.location` pushed, aliases updated on `pane.sync`, visibility kept per client. **Done.** |
-| 2 | Core: the only hook receiver (`seahelm-hook` v8 sends to `core.sock` only) and the only First Mate owner (no `autopilot_owner`; the app's First Mate host goes). |
-| 3 | App: `CoreClient` and `Fleet`. Every reader of `AgentRegistry` moves to `Fleet`; `ChannelHub` takes the channel half. `AgentRegistry`, the scan, the hook sink and every decider listed above are deleted. |
-| 4 | App: notices through `NotificationPresenter`; unseen from `Fleet`. |
-| 5 | App: cards from the core only; integration reports raised with `cards.raise`. `PendingOrdersQueue` goes. |
-| 6 | App: timelines from `message.*`; `MessageStreamHub` goes. |
-| 7 | App: fork, auto-fork and repo auto-add on `pane.location`. |
+| 2 | Core: the only hook receiver (`seahelm-hook` v8 sends to `core.sock` only) and the only First Mate owner (no `autopilot_owner`; the app's First Mate host goes). **Done.** |
+| 3 | App: `CoreClient` and `Fleet`. Every reader of `AgentRegistry` moves to `Fleet`; `ChannelHub` takes the channel half. `AgentRegistry`, the scan, the hook sink and every decider listed above are deleted. **Done.** |
+| 4 | App: notices through `NotificationPresenter`; unseen from `Fleet`. **Done.** |
+| 5 | App: cards from the core only; integration reports raised with `cards.raise`. `PendingOrdersQueue` goes. **Done.** |
+| 6 | App: timelines from `message.*`; `MessageStreamHub` goes. **Done.** |
+| 7 | App: fork, auto-fork and repo auto-add on `pane.location`. **Done.** |
 | 8 | App: PR and usage from `pr.list` / `usage.summary`; the GitHub poller, usage providers and the `CommandExecutor` fallback go. |
 
 Steps 3–5 land together: `Fleet` replacing `AgentRegistry` takes the
