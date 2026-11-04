@@ -11,6 +11,7 @@
 //! takes `now`, and the manifest authority comes in as an argument because
 //! the scan crate owns manifests. See docs/core-crates.md for the contract.
 
+pub mod cards;
 pub mod events;
 pub mod notify;
 pub mod pane;

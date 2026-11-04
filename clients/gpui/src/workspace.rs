@@ -102,6 +102,12 @@ pub struct Workspace {
     prs: HashMap<String, core_client::Pr>,
     /// Claude's and Codex's rate limits (`usage.summary`), at the column's foot.
     usage: Vec<core_client::UsageReadout>,
+    /// What waits on the user, from the core (`cards.changed`).
+    cards: Vec<core_client::Card>,
+    /// Per card, the `fresh_at` last announced, so a card pops once per ask.
+    cards_announced: HashMap<String, f64>,
+    cards_loaded: bool,
+    window_active: bool,
 }
 
 impl Workspace {
@@ -127,6 +133,10 @@ impl Workspace {
             core: HashMap::new(),
             prs: HashMap::new(),
             usage: Vec::new(),
+            cards: Vec::new(),
+            cards_announced: HashMap::new(),
+            cards_loaded: false,
+            window_active: true,
         };
         Self::poll_core(cx);
         Self::listen_core(cx);
@@ -175,6 +185,10 @@ impl Workspace {
     fn poll_core(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().spawn(async { core_client::ensure() }).await;
+            let cards = cx.background_executor().spawn(async { core_client::cards() }).await;
+            if this.update(cx, |w, cx| w.set_cards(cards, cx)).is_err() {
+                return;
+            }
             loop {
                 let (states, prs) =
                     cx.background_executor().spawn(async { (core_client::worktrees(), core_client::prs()) }).await;
@@ -201,13 +215,19 @@ impl Workspace {
     /// banner. Both are logged for comparing with the macOS app.
     fn listen_core(cx: &mut Context<Self>) {
         let (tx, mut rx) = futures::channel::mpsc::unbounded();
-        core_client::subscribe(&["pane.status_changed", "pane.notice"], tx);
+        core_client::subscribe(&["pane.status_changed", "pane.notice", "cards.changed"], tx);
         cx.spawn(async move |this, cx| {
             use futures::StreamExt;
             while let Some(ev) = rx.next().await {
                 let kind = ev.get("type").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
                 let get = |k: &str| ev.get(k).cloned().unwrap_or_default();
                 match kind.as_str() {
+                    "cards.changed" => {
+                        let cards = core_client::parse_cards(&ev);
+                        if this.update(cx, |w, cx| w.set_cards(cards, cx)).is_err() {
+                            break;
+                        }
+                    }
                     "pane.notice" => {
                         let shown = notify::text(&ev);
                         notify::log(
@@ -272,6 +292,157 @@ impl Workspace {
     /// What is on screen, for the core's unseen-completion and banner
     /// decisions: the selected worktree, and whether the window is the
     /// active one.
+    /// A new card list. A card that is fresh (new, or asking something new)
+    /// and not on screen gets a banner pointing at it; the core holds back
+    /// its "needs you" notice while a card shows the question. Answering
+    /// happens in the window, never in the banner.
+    fn set_cards(&mut self, cards: Vec<core_client::Card>, cx: &mut Context<Self>) {
+        let shown = self.selected_worktree();
+        let mut announced = HashMap::new();
+        for c in &cards {
+            let last = self.cards_announced.get(&c.id).copied();
+            let on_screen = self.window_active && shown.as_deref() == Some(c.worktree_path.as_str());
+            if last.is_none_or(|t| c.fresh_at > t) {
+                notify::log("card", serde_json::json!({"id": c.id, "kind": c.kind, "worktree": c.worktree_path, "on_screen": on_screen}));
+                // The first list is what was already waiting at launch: shown,
+                // not announced.
+                if !on_screen && self.cards_loaded {
+                    let title = format!("{} asks", short_name(&c.worktree_path));
+                    let body = c.message.split_whitespace().collect::<Vec<_>>().join(" ");
+                    cx.background_executor().spawn(async move { notify::deliver(&title, &body) }).detach();
+                }
+            }
+            announced.insert(c.id.clone(), c.fresh_at);
+        }
+        self.cards_announced = announced;
+        self.cards_loaded = true;
+        if self.cards != cards {
+            self.cards = cards;
+            cx.notify();
+        }
+    }
+
+    fn selected_worktree(&self) -> Option<String> {
+        self.selected.as_deref().and_then(|id| self.fleet.find(id)).map(|i| i.worktree_path.clone())
+    }
+
+    fn answer_card(&mut self, id: String, index: usize, cx: &mut Context<Self>) {
+        notify::log("card.answer", serde_json::json!({"id": id, "index": index}));
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(e) = core_client::answer_card(&id, index) {
+                    eprintln!("seahelm-gpui: answer {id}: {e}");
+                }
+            })
+            .detach();
+    }
+
+    /// A card's button took the click; typing goes back to the terminal.
+    fn refocus_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(view) = self.selected.clone().and_then(|id| self.terminal_for(&id, window, cx)) {
+            window.focus(&view.focus_handle(cx));
+        }
+    }
+
+    fn dismiss_card(&mut self, id: String, cx: &mut Context<Self>) {
+        notify::log("card.dismiss", serde_json::json!({"id": id}));
+        cx.background_executor().spawn(async move { core_client::dismiss_card(&id) }).detach();
+    }
+
+    /// The selected worktree's cards, above its terminals: what is asked,
+    /// and a button per answer.
+    fn card_strip(&self, worktree: &str, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let cards: Vec<&core_client::Card> = self.cards.iter().filter(|c| c.worktree_path == worktree).collect();
+        if cards.is_empty() {
+            return None;
+        }
+        let fg = theme::rgb(theme::fg());
+        let mut strip = div().flex_none().flex().flex_col().gap(px(6.)).px(px(12.)).py(px(8.)).bg(tokens::sidebar_tint());
+        for card in cards {
+            let tint = match card.kind.as_str() {
+                "suggestion" => tokens::accent(),
+                "approval" | "proposal" => tokens::attention(),
+                _ => tokens::waiting(),
+            };
+            let what = match card.kind.as_str() {
+                "question" | "choice" => "Needs an answer",
+                "suggestion" => "Next",
+                "approval" => "First Mate asks",
+                "proposal" => "First Mate suggests",
+                _ => "Report",
+            };
+            let mut options = div().flex().flex_row().flex_wrap().gap(px(6.));
+            for (i, label) in card.labels.iter().enumerate() {
+                let id = card.id.clone();
+                options = options.child(
+                    div()
+                        .id(SharedString::from(format!("card-{}-{i}", card.id)))
+                        .cursor_pointer()
+                        .px(px(9.))
+                        .py(px(3.))
+                        .rounded(px(5.))
+                        .border_1()
+                        .border_color(tokens::alpha(tint, 0.45))
+                        .hover(|s| s.bg(tokens::alpha(tint, 0.14)))
+                        .text_size(px(11.5))
+                        .line_height(px(16.))
+                        .text_color(fg)
+                        .child(label.clone())
+                        .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
+                            w.answer_card(id.clone(), i, cx);
+                            w.refocus_terminal(window, cx);
+                        })),
+                );
+            }
+            let dismiss = card.id.clone();
+            strip = strip.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(5.))
+                    .pl(px(9.))
+                    .border_l_2()
+                    .border_color(tint)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(div().text_size(px(10.5)).line_height(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(tint).child(what))
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!("card-x-{}", card.id)))
+                                    .cursor_pointer()
+                                    .text_size(px(11.))
+                                    .text_color(tokens::ink_faint())
+                                    .hover(|s| s.text_color(tokens::ink()))
+                                    .child("×")
+                                    .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
+                                        w.dismiss_card(dismiss.clone(), cx);
+                                        w.refocus_terminal(window, cx);
+                                    })),
+                            ),
+                    )
+                    .when(!card.message.trim().is_empty(), |d| {
+                        d.child(
+                            div()
+                                .max_h(px(64.))
+                                .overflow_hidden()
+                                .font_family(SYSTEM)
+                                .text_size(px(12.))
+                                .line_height(px(16.))
+                                .text_color(fg)
+                                .child(card.message.trim().to_string()),
+                        )
+                    })
+                    .child(options),
+            );
+        }
+        Some(strip.child(div().h(px(1.)).w_full().bg(tokens::hairline())).into_any_element())
+    }
+
     fn report_visible(&self, active: bool, cx: &mut Context<Self>) {
         let path = self.selected.as_deref().and_then(|id| self.fleet.find(id)).map(|i| i.worktree_path.clone());
         cx.background_executor()
@@ -699,6 +870,7 @@ impl Render for Workspace {
             cx.observe_window_activation(window, |w, window, cx| {
                 let active = window.is_window_active();
                 notify::log(if active { "activate" } else { "deactivate" }, serde_json::json!({}));
+                w.window_active = active;
                 w.report_visible(active, cx);
             })
             .detach();
@@ -714,6 +886,7 @@ impl Render for Workspace {
             None => "Seahelm".into(),
         };
         let width = self.sidebar_width;
+        let cards = self.selected_worktree().and_then(|wt| self.card_strip(&wt, cx));
 
         let mut root = div()
             .id("workspace")
@@ -767,7 +940,7 @@ impl Render for Workspace {
                 .size_0(),
             );
         }
-        root = root.child(self.terminal_column(title, body, window.is_maximized(), cx));
+        root = root.child(self.terminal_column(title, cards, body, window.is_maximized(), cx));
         if self.sidebar_visible {
             root = root.child(self.divider(width, cx));
         }
@@ -948,6 +1121,21 @@ impl Workspace {
         if let Some(pr) = self.prs.get(&item.worktree_path) {
             line2 = line2.child(pr_badge(pr));
         }
+        let waiting = self.cards.iter().filter(|c| c.worktree_path == item.worktree_path).count();
+        if waiting > 0 {
+            line2 = line2.child(
+                div()
+                    .flex_none()
+                    .px(px(5.))
+                    .rounded(px(4.))
+                    .bg(tokens::alpha(tokens::waiting(), 0.18))
+                    .text_size(px(10.))
+                    .line_height(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(tokens::waiting())
+                    .child(format!("? {waiting}")),
+            );
+        }
         line2 = line2.child(div().flex_1()).child(
             div()
                 .flex_none()
@@ -994,6 +1182,7 @@ impl Workspace {
     fn terminal_column(
         &self,
         title: SharedString,
+        cards: Option<gpui::AnyElement>,
         body: Option<gpui::AnyElement>,
         maximized: bool,
         cx: &mut Context<Self>,
@@ -1044,7 +1233,16 @@ impl Workspace {
             Some(b) => b,
             None => div().flex_1().bg(theme::rgb(theme::bg())).into_any_element(),
         };
-        div().flex_1().min_w_0().h_full().flex().flex_col().bg(theme::rgb(theme::bg())).child(header).child(body)
+        div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(theme::rgb(theme::bg()))
+            .child(header)
+            .children(cards)
+            .child(body)
     }
 
     /// No width of its own: a 16pt strip over the seam, a 1pt line in it.
@@ -1069,6 +1267,10 @@ impl Workspace {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_divider_down))
             .child(div().h_full().w(px(if active { 2. } else { 1. })).bg(if active { tokens::accent() } else { tokens::separator() }))
     }
+}
+
+fn short_name(path: &str) -> String {
+    std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("Seahelm").to_string()
 }
 
 fn format_memory(bytes: u64) -> String {
