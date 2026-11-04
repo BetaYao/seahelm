@@ -6,7 +6,9 @@
 //!   seahelm-core shadow [--follow-app] [--seconds N]
 //!                                 compare our verdicts with the macOS app's
 //!   seahelm-core hook [SOURCE]    an agent's hook command: stdin JSON to the core
-//!   seahelm-core install-hooks    wire Claude Code and Codex hooks to `hook`
+//!   seahelm-core install-hooks    wire Claude Code and Codex hooks to `hook`,
+//!                                 and Claude's statusline to `statusline`
+//!   seahelm-core statusline [-- CMD]  Claude's statusline: cache the payload, run CMD
 //!   seahelm-core version
 //!
 //! The service reads each registered pane's screen from its seahelmd session,
@@ -20,6 +22,8 @@ mod poller;
 mod pr;
 mod rpc;
 mod shadow;
+mod statusline;
+mod usage;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -57,6 +61,7 @@ fn run() -> Result<()> {
             Ok(())
         }
         "install-hooks" => install::run(rest),
+        "statusline" => std::process::exit(statusline::run(rest)),
         "version" => {
             println!("seahelm-core {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -68,10 +73,17 @@ fn run() -> Result<()> {
 fn serve() -> Result<()> {
     // An ignored signal survives exec, so a core started by a client that
     // ignores SIGTERM (a GUI toolkit may) could not be stopped by it.
+    // A blocked mask survives exec too (the GPUI client's threads block
+    // them), and a blocked SIGTERM never arrives whatever its handler.
     #[cfg(unix)]
     unsafe {
         libc::signal(libc::SIGTERM, libc::SIG_DFL);
         libc::signal(libc::SIGINT, libc::SIG_DFL);
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        libc::sigaddset(&mut set, libc::SIGTERM);
+        libc::sigaddset(&mut set, libc::SIGINT);
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut());
     }
     let path = rpc::core_socket();
     let listener = rpc::bind(&path)?;
@@ -85,6 +97,7 @@ fn serve() -> Result<()> {
     };
     core.spawn_event_log(event_log);
     pr::spawn(Arc::clone(&core));
+    usage::spawn();
     eprintln!("seahelm-core listening on {}", path.display());
     rpc::serve(listener, core)
 }

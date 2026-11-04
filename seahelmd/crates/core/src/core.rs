@@ -298,6 +298,7 @@ impl Core {
                 Ok(json!({"agent_sessions": st.session_refs}))
             }
             "pane.wait_agent_status" | "wait.agent_status" => self.wait_status(&p),
+            "usage.summary" => Ok(crate::usage::summary(now)),
             "events.subscribe" => return self.subscribe(p),
             other => Err(RpcError::not_found(other)),
         };
