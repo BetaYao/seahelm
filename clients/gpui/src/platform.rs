@@ -22,8 +22,7 @@ pub fn home() -> PathBuf {
         .unwrap_or_default()
 }
 
-/// `~/.config/seahelm`, the same on every platform (the app and seahelm-core
-/// read their config from there too).
+/// `~/.config/seahelm`, the same on every platform (seahelm-core's too).
 pub fn config_dir() -> PathBuf {
     home().join(".config").join("seahelm")
 }
@@ -45,31 +44,33 @@ pub fn core_socket() -> PathBuf {
     config_dir().join("core.sock")
 }
 
-/// The macOS app's control socket: `$SEAHELM_SOCKET_PATH`, else its default
-/// (`seahelm-core`'s `rpc::app_socket`).
-pub fn app_socket() -> PathBuf {
-    if let Some(p) = std::env::var_os("SEAHELM_SOCKET_PATH") {
+/// A companion binary (`seahelmd`, `seahelm-core`): `$<env>`, else the one
+/// beside this executable (how a packaged client ships them), else the
+/// one cargo built in this checkout, else whatever PATH finds.
+pub fn tool(name: &str, env: &str) -> PathBuf {
+    if let Some(p) = std::env::var_os(env).filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
     }
-    #[cfg(windows)]
-    return PathBuf::from(format!(r"\\.\pipe\seahelm-{}", user()));
-    #[cfg(not(windows))]
-    config_dir().join("seahelm.sock")
+    let exe = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    if let Some(beside) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(&exe))) {
+        if beside.exists() {
+            return beside;
+        }
+    }
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../seahelmd/target"));
+    for profile in ["release", "debug"] {
+        let built = target.join(profile).join(&exe);
+        if built.exists() {
+            return built;
+        }
+    }
+    PathBuf::from(exe)
 }
 
 pub fn connect(path: &Path) -> io::Result<Stream> {
     Stream::connect(path)
-}
-
-/// The terminal face when the Ghostty config names none: what the macOS app
-/// falls back to there, and the bundled JetBrains Mono elsewhere (Menlo is
-/// Apple's).
-pub fn default_terminal_font() -> &'static str {
-    if MAC {
-        "Menlo"
-    } else {
-        crate::tokens::MONO
-    }
 }
 
 /// The app's shortcut modifier: cmd on macOS. Elsewhere ctrl belongs to the

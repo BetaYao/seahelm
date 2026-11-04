@@ -16,19 +16,28 @@ pub fn socket() -> PathBuf {
 
 /// `$SEAHELM_CORE_BIN`, then `seahelm-core` on PATH.
 fn binary() -> PathBuf {
-    std::env::var_os("SEAHELM_CORE_BIN").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("seahelm-core"))
+    crate::platform::tool("seahelm-core", "SEAHELM_CORE_BIN")
 }
 
-/// Start the service unless it answers already. Errors are reported, not
-/// fatal: without it the window still works, with the app's statuses only.
+/// Start the service unless it answers already, and wire the agents'
+/// hooks to it (`seahelm-core install-hooks`, idempotent: it leaves hooks
+/// that already reach the core alone). Errors are reported, not fatal:
+/// without the core the window still works, with no statuses.
 pub fn ensure() {
-    if call("core.ping", json!({})).is_ok() {
-        return;
+    if call("core.ping", json!({})).is_err() {
+        match std::process::Command::new(binary()).arg("ensure").status() {
+            Ok(s) if s.success() => {}
+            Ok(s) => eprintln!("seahelm-gpui: seahelm-core ensure exited {s}"),
+            Err(e) => {
+                eprintln!("seahelm-gpui: cannot start seahelm-core ({e}); no statuses");
+                return;
+            }
+        }
     }
-    match std::process::Command::new(binary()).arg("ensure").status() {
-        Ok(s) if s.success() => {}
-        Ok(s) => eprintln!("seahelm-gpui: seahelm-core ensure exited {s}"),
-        Err(e) => eprintln!("seahelm-gpui: cannot start seahelm-core ({e}); statuses come from the app only"),
+    match std::process::Command::new(binary()).arg("install-hooks").output() {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => eprintln!("seahelm-gpui: seahelm-core install-hooks: {}", String::from_utf8_lossy(&out.stderr).trim()),
+        Err(e) => eprintln!("seahelm-gpui: seahelm-core install-hooks: {e}"),
     }
 }
 

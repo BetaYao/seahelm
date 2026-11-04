@@ -1,52 +1,35 @@
-//! The fleet: every project's worktrees, as the macOS app sees them.
+//! The fleet: every project's worktrees, read from git on this machine.
 //!
-//! Read from the running app's control socket (`fleet.groups`, `pane.list`),
-//! the same calls the web client makes; read only, nothing is changed there.
-//! Git stats are not in that payload, so they are worked out here, on a
-//! thread of their own, from each worktree's checkout.
-
-use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+//! The client has no app behind it: the projects are its own list
+//! (`~/.config/seahelm/gpui-projects.json`, added with the folder button),
+//! their worktrees come from `git worktree list`, and what each one is doing
+//! from seahelm-core, which the workspace lays over the rows. Grouping is
+//! done here, from that. Git stats are worked out on a thread of their own
+//! from each worktree's checkout.
 
 use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Item {
+    /// The worktree's path, which is also its id.
     pub id: String,
     pub title: String,
-    #[serde(default)]
+    /// The branch.
     pub subtitle: String,
-    #[serde(default)]
     pub repository: String,
-    #[serde(default)]
+    /// seahelm-core's status word ("Running", "Idle", …), empty when the
+    /// core has no pane there.
     pub status: String,
     pub worktree_path: String,
-    #[serde(default)]
-    pub is_main_worktree: bool,
     pub last_activity_at: Option<f64>,
     pub running_since: Option<f64>,
-    #[serde(default)]
     pub unseen: bool,
-    pub pr: Option<Pr>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct Pr {
-    pub number: u64,
-    #[serde(default)]
-    pub state: String,
-    pub checks: Option<String>,
-    pub review: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Group {
-    pub id: String,
     pub title: String,
-    #[serde(default)]
     pub items: Vec<Item>,
 }
 
@@ -58,12 +41,11 @@ pub struct GitStats {
     pub behind: u64,
 }
 
-/// One reading of the fleet.
+/// One reading of the fleet: projects and their worktrees, as git has
+/// them.
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     pub groups: Vec<Group>,
-    pub panes: HashMap<String, usize>,
-    pub running: usize,
     /// Why there is no fleet, when there is none.
     pub error: Option<String>,
 }
@@ -75,6 +57,26 @@ impl Snapshot {
 
     pub fn find(&self, id: &str) -> Option<&Item> {
         self.groups.iter().flat_map(|g| g.items.iter()).find(|i| i.id == id)
+    }
+}
+
+/// How the fleet column groups worktrees (the app's `WorktreeGroupingMode`,
+/// less the pane mode).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Grouping {
+    #[default]
+    Repository,
+    Status,
+    Activity,
+}
+
+impl Grouping {
+    pub fn next(self) -> Self {
+        match self {
+            Grouping::Repository => Grouping::Status,
+            Grouping::Status => Grouping::Activity,
+            Grouping::Activity => Grouping::Repository,
+        }
     }
 }
 
@@ -152,41 +154,122 @@ pub fn relative_age(secs: f64) -> String {
     }
 }
 
-/// One JSON-RPC call to the app.
-fn call(method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
-    let mut sock = crate::platform::connect(&crate::platform::app_socket()).map_err(|e| format!("Seahelm is not running ({e})"))?;
-    sock.set_read_timeout(Some(Duration::from_secs(5))).ok();
-    let req = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-    let mut line = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
-    line.push(b'\n');
-    sock.write_all(&line).map_err(|e| e.to_string())?;
-    let mut reply = String::new();
-    BufReader::new(sock).read_line(&mut reply).map_err(|e| e.to_string())?;
-    let mut value: serde_json::Value = serde_json::from_str(&reply).map_err(|e| e.to_string())?;
-    if let Some(err) = value.get("error") {
-        return Err(err.to_string());
-    }
-    Ok(value.get_mut("result").map(serde_json::Value::take).unwrap_or(value))
+/// The projects: this client's own list.
+pub fn projects() -> Vec<String> {
+    std::fs::read_to_string(projects_file()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
-pub fn read() -> Snapshot {
-    let groups = match call("fleet.groups", serde_json::json!({"mode": "repository"})) {
-        Ok(v) => v.get("groups").cloned().and_then(|g| serde_json::from_value::<Vec<Group>>(g).ok()),
-        Err(e) => return Snapshot { error: Some(e), ..Snapshot::default() },
-    };
-    let Some(groups) = groups else {
-        return Snapshot { error: Some("unexpected fleet.groups reply".into()), ..Snapshot::default() };
-    };
-    let mut panes = HashMap::new();
-    if let Ok(v) = call("pane.list", serde_json::json!({})) {
-        for p in v.get("panes").and_then(|p| p.as_array()).into_iter().flatten() {
-            if let Some(path) = p.get("worktree_path").and_then(|w| w.as_str()) {
-                *panes.entry(path.to_string()).or_insert(0) += 1;
+fn projects_file() -> std::path::PathBuf {
+    crate::platform::config_dir().join("gpui-projects.json")
+}
+
+/// Add a project (a directory in a git repository) to the list.
+pub fn add_project(path: &str) -> Result<(), String> {
+    git(path, &["rev-parse", "--show-toplevel"]).ok_or_else(|| format!("{path} is not in a git repository"))?;
+    let mut list = projects();
+    if !list.iter().any(|p| p == path) {
+        list.push(path.to_string());
+    }
+    std::fs::create_dir_all(crate::platform::config_dir()).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?;
+    std::fs::write(projects_file(), text).map_err(|e| e.to_string())
+}
+
+/// `git worktree list --porcelain`: each worktree's path and branch.
+pub fn parse_worktrees(porcelain: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut path: Option<String> = None;
+    let mut branch = String::new();
+    for line in porcelain.lines().chain(std::iter::once("")) {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            path = Some(p.to_string());
+            branch.clear();
+        } else if let Some(b) = line.strip_prefix("branch ") {
+            branch = b.trim_start_matches("refs/heads/").to_string();
+        } else if line == "detached" {
+            branch = "detached".into();
+        } else if line.is_empty() {
+            if let Some(p) = path.take() {
+                out.push((p, std::mem::take(&mut branch)));
             }
         }
     }
-    let running = groups.iter().flat_map(|g| &g.items).filter(|i| i.status == "Running").count();
-    Snapshot { groups, panes, running, error: None }
+    out
+}
+
+fn base_name(path: &str) -> String {
+    std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path).to_string()
+}
+
+/// The fleet from git: one group per project, its worktrees as rows, the
+/// main checkout first.
+pub fn read() -> Snapshot {
+    let projects = projects();
+    if projects.is_empty() {
+        return Snapshot { error: Some("No projects yet. Add one with the folder button above.".into()), ..Snapshot::default() };
+    }
+    let mut groups = Vec::new();
+    for project in projects {
+        let name = base_name(&project);
+        let Some(list) = git(&project, &["worktree", "list", "--porcelain"]) else { continue };
+        let items: Vec<Item> = parse_worktrees(&list)
+            .into_iter()
+            .enumerate()
+            .map(|(i, (path, branch))| Item {
+                id: path.clone(),
+                title: if i == 0 { name.clone() } else { base_name(&path) },
+                subtitle: branch,
+                repository: name.clone(),
+                worktree_path: path,
+                ..Item::default()
+            })
+            .collect();
+        groups.push(Group { title: name, items });
+    }
+    Snapshot { groups, error: None }
+}
+
+/// The groups the column shows: by project as read, by status (the
+/// app's order: needs input, finished, running, idle, error, dormant,
+/// unknown; newest activity first within each), or by when each last did
+/// anything.
+pub fn regroup(groups: &[Group], mode: Grouping, now: f64) -> Vec<Group> {
+    if mode == Grouping::Repository {
+        return groups.to_vec();
+    }
+    let mut items: Vec<Item> = groups.iter().flat_map(|g| g.items.iter().cloned()).collect();
+    items.sort_by(|a, b| b.last_activity_at.unwrap_or(0.0).total_cmp(&a.last_activity_at.unwrap_or(0.0)));
+    let titles: &[&str] = match mode {
+        Grouping::Status => &["Needs input", "Finished", "Running", "Idle", "Error", "Dormant", "Unknown"],
+        _ => &["Recent hour", "Today", "Recent 7 days", "Earlier", "No activity"],
+    };
+    let bucket = |i: &Item| -> usize {
+        match mode {
+            Grouping::Status => match i.dot() {
+                Dot::Waiting => 0,
+                Dot::Unseen => 1,
+                Dot::Running => 2,
+                Dot::Idle => 3,
+                Dot::Error => 4,
+                Dot::Exited => 5,
+                Dot::Unknown => 6,
+            },
+            _ => match i.last_activity_at.map(|at| (now - at).max(0.0)) {
+                Some(age) if age < 3600.0 => 0,
+                Some(age) if age < 86400.0 => 1,
+                Some(age) if age < 7.0 * 86400.0 => 2,
+                Some(_) => 3,
+                None => 4,
+            },
+        }
+    };
+    let mut out: Vec<Group> = titles.iter().map(|t| Group { title: t.to_string(), items: Vec::new() }).collect();
+    for item in items {
+        let b = bucket(&item);
+        out[b].items.push(item);
+    }
+    out.retain(|g| !g.items.is_empty());
+    out
 }
 
 fn git(path: &str, args: &[&str]) -> Option<String> {
@@ -235,15 +318,64 @@ mod tests {
     }
 
     #[test]
-    fn a_fleet_groups_reply_parses() {
-        let json = r#"[{"id":"repository:seahelm","title":"seahelm","items":[
-            {"id":"/w/a","title":"main","subtitle":"main","repository":"seahelm","status":"Running",
-             "worktree_path":"/w/a","is_main_worktree":true,"running_since":100,
-             "pr":{"number":12,"url":"u","state":"OPEN","checks":"SUCCESS"}}]}]"#;
-        let groups: Vec<Group> = serde_json::from_str(json).unwrap();
-        let item = &groups[0].items[0];
-        assert_eq!(item.dot(), Dot::Running);
-        assert_eq!(item.time_label(112.0), "12s");
-        assert_eq!(item.pr.as_ref().unwrap().number, 12);
+    fn worktree_lists_parse() {
+        let porcelain = "worktree /r/main\nHEAD abc\nbranch refs/heads/main\n\nworktree /r/wt-a\nHEAD def\nbranch refs/heads/feat/a\n\nworktree /r/wt-b\nHEAD 123\ndetached\n";
+        assert_eq!(
+            parse_worktrees(porcelain),
+            vec![
+                ("/r/main".to_string(), "main".to_string()),
+                ("/r/wt-a".to_string(), "feat/a".to_string()),
+                ("/r/wt-b".to_string(), "detached".to_string()),
+            ]
+        );
+    }
+
+    fn item(id: &str, status: &str, unseen: bool, last: Option<f64>) -> Item {
+        Item { id: id.into(), status: status.into(), unseen, last_activity_at: last, ..Item::default() }
+    }
+
+    #[test]
+    fn grouping_by_status_follows_the_apps_order() {
+        let groups = vec![Group {
+            title: "p".into(),
+            items: vec![
+                item("idle", "Idle", false, Some(10.0)),
+                item("run-old", "Running", false, Some(5.0)),
+                item("waiting", "Waiting", false, None),
+                item("run-new", "Running", false, Some(20.0)),
+                item("done", "Idle", true, Some(1.0)),
+                item("none", "", false, None),
+            ],
+        }];
+        let out = regroup(&groups, Grouping::Status, 100.0);
+        let shape: Vec<(String, Vec<String>)> =
+            out.iter().map(|g| (g.title.clone(), g.items.iter().map(|i| i.id.clone()).collect())).collect();
+        assert_eq!(
+            shape,
+            vec![
+                ("Needs input".into(), vec!["waiting".into()]),
+                ("Finished".into(), vec!["done".into()]),
+                ("Running".into(), vec!["run-new".into(), "run-old".into()]),
+                ("Idle".into(), vec!["idle".into()]),
+                ("Unknown".into(), vec!["none".into()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn grouping_by_activity_buckets_by_age() {
+        let now = 10.0 * 86400.0;
+        let groups = vec![Group {
+            title: "p".into(),
+            items: vec![
+                item("hour", "", false, Some(now - 60.0)),
+                item("day", "", false, Some(now - 7200.0)),
+                item("week", "", false, Some(now - 3.0 * 86400.0)),
+                item("old", "", false, Some(now - 9.0 * 86400.0)),
+                item("never", "", false, None),
+            ],
+        }];
+        let titles: Vec<String> = regroup(&groups, Grouping::Activity, now).into_iter().map(|g| g.title).collect();
+        assert_eq!(titles, vec!["Recent hour", "Today", "Recent 7 days", "Earlier", "No activity"]);
     }
 }

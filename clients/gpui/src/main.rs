@@ -12,6 +12,7 @@ mod fonts;
 mod keys;
 mod platform;
 mod session;
+mod split;
 mod terminal_view;
 mod theme;
 mod tokens;
@@ -51,6 +52,10 @@ fn main() {
 
     Application::new().with_assets(assets::Assets).run(move |cx: &mut App| {
         load_fonts(cx);
+        // Start as the system is, as the app's `terminal_theme_mode = app`
+        // does; the contrast button flips it.
+        theme::set_dark(!matches!(cx.window_appearance(), gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight));
+        workspace::bind_keys(cx);
         let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),

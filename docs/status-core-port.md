@@ -143,9 +143,10 @@ argv on macOS, Linux and Windows. The root pid comes from the daemon's
   Windows), keeps the same argv (`seahelm-hook <source>`) and the same
   payload splice, and stays fire-and-forget with exit 0. The same binary can
   replace the python3 `seahelm` CLI later.
-- During migration the Swift app's `"hook"` and `"suggest"` methods
-  **forward the payload to core.sock** in addition to handling it. Agents'
-  hook config does not change until the core owns `seahelm.sock`.
+- During migration the Swift app's `"hook"` method forwarded the payload
+  to core.sock in addition to handling it. That is replaced (M6): the
+  bridge sends to both sockets itself, so the core hears hooks while the
+  app is closed, and machines without the app use `seahelm-core hook`.
 - Port the installers as pure merge functions with their tests:
   `HookEventMerge`, Claude, Codex (TOML features plus hooks.json), Cursor,
   OpenCode (plural `plugins/`, per-session `info.directory`) and Pi. On
@@ -259,9 +260,10 @@ right.
 |---|---|
 | M0 | Done. `seahelmd snapshot`, OSC 7501 / 133 / 9;4 scanning, the 7501 store, the 7501 support query answered while detached, and answered *in order* with the queries around it (Claude Code reads the DA1 answer as "nothing else is coming"). Verified against a real detached Claude Code: `idle` → `working` → `done`. |
 | M1–M3 | Done as four crates (`docs/core-crates.md`): `seahelm-core-types`, `seahelm-core-hooks` (241 tests), `seahelm-core-scan` (127), `seahelm-core-registry` (143). Each ports its Swift tests by name. |
-| core binary | `seahelm-core` (`serve`, `ensure`, `call`, `shadow`, `version`): JSON-RPC on `~/.config/seahelm/core.sock` with `hook`/`suggest`, `pane.register`/`unregister`/`sync`, `worktrees.set`, `client.visible`, `pane.seen`, `pane.list`, `pane.explain`, `worktree.list`, `pane.locations`, `agent.sessions`, `pane.wait_agent_status`, `events.subscribe` (replay + stream). Completion decisions as the app makes them (unseen marking, held completions while the hooks still say running, the notification policy's dedupe / cooldown / stability gate) end in a `pane.notice` event for clients to show. Polls every registered pane's `snapshot` every 2 s. Sessions from a seahelmd older than `Snapshot` fall back to the tail of `history`, every third cycle. |
-| M4 | Shadow mode in place: the app forwards every hook payload to the core (`CoreHookForwarder`), and `seahelm-core shadow --follow-app` mirrors the app's panes into the core and logs every disagreement that outlasts 8 s to `~/.config/seahelm/core-shadow.jsonl`. |
+| core binary | `seahelm-core` (`serve`, `ensure`, `call`, `shadow`, `hook`, `install-hooks`, `version`): JSON-RPC on `~/.config/seahelm/core.sock` with `hook`/`suggest`, `pane.register`/`unregister`/`sync`, `worktrees.set`, `client.visible`, `pane.seen`, `pane.list`, `pane.explain`, `worktree.list`, `pane.locations`, `agent.sessions`, `pane.wait_agent_status`, `events.subscribe` (replay + stream). Completion decisions as the app makes them (unseen marking, held completions while the hooks still say running, the notification policy's dedupe / cooldown / stability gate) end in a `pane.notice` event for clients to show. Polls every registered pane's `snapshot` every 2 s. Sessions from a seahelmd older than `Snapshot` fall back to the tail of `history`, every third cycle. |
+| M4 | Shadow mode in place: hooks reach the core (first forwarded by the app, now sent by the bridge itself, see M6), and `seahelm-core shadow --follow-app` mirrors the app's panes into the core and logs every disagreement that outlasts 8 s to `~/.config/seahelm/core-shadow.jsonl`. |
 | M5 | The GPUI client starts the core, registers the panes it opens, reports what it shows, and takes each worktree's dot from the core where the core has one. The installers and the Rust `seahelm-hook` are ported (`seahelm-core-hooks::install`, `src/bin/seahelm-hook.rs`); nothing installs them yet, since the app still installs its own shim. |
+| M6 | Hooks reach the core with no app in between. The app's `seahelm-hook` (v7) sends each payload to `core.sock` as well as `seahelm.sock`, and the app no longer forwards (`CoreHookForwarder` is gone, so nothing arrives twice). Without the app, `seahelm-core install-hooks` wires Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`, `[features].hooks`) to `seahelm-core hook <source>`, a bridge with the shim's contract (the `wire` splice, no stdout, exit 0, 2 s watchdog) that talks to the core's socket or, on Windows, its named pipe. It leaves an event alone when it already runs `seahelm-hook`, migrates its own entry when the exe moves, and never touches anyone else's. |
 
 Found while porting, beyond the table above:
 
@@ -279,6 +281,6 @@ Still open:
   assessment: keep's `pipe.rs`). The hook binary's Windows client side is
   written but untested.
 - **The app as a client of the core.** The app still decides status itself
-  and only forwards hooks. Moving its consumers over (rows, island,
+  (the core gets hooks from the bridge, not from the app). Moving its consumers over (rows, island,
   notifications, Telegram, First Mate) is a separate plan, to be written once
   shadow mode has run for a few days of real work.

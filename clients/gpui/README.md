@@ -19,8 +19,8 @@ export KEEP_GHOSTTY_VT_DIR=~/.cache/seahelm/libghostty-vt/<commit>-aarch64-macos
 (cd ../../seahelmd && cargo build --release -p seahelmd)
 cargo build --release
 
-# The whole window. Fleet data comes, read only, from the running Seahelm
-# app's control socket (fleet.groups, pane.list).
+# The whole window. Projects are the client's own (folder button), their
+# worktrees come from git, statuses from seahelm-core (started if needed).
 SEAHELMD_DIR=/tmp/sgd SEAHELMD_BIN=<path to seahelmd> seahelm-gpui
 
 # One bare terminal on one session, for measuring.
@@ -70,15 +70,33 @@ chatty program filled the 64-chunk client backlog and the client was repaid
 with whole-screen repaints, hundreds per second. Each frame now carries
 everything already queued, up to 256 KiB.
 
+## What works
+
+- Scrollback (wheel, overlay thumb), mouse selection (drag, double-click
+  word, triple-click line, alt for a rectangle, autoscroll), copy (cmd+c /
+  ctrl+shift+c), paste.
+- Input methods: composition drawn at the cursor, candidates placed there.
+- Splits per worktree, each pane its own seahelmd session: cmd+d /
+  cmd+shift+d / cmd+w / cmd+alt+arrows on macOS; ctrl+shift+e / o / w and
+  ctrl+alt+arrows elsewhere; the header's split button. Dividers drag (ratio
+  0.1–0.9) and double-click back to even; unfocused panes are washed. The
+  layout is kept in `~/.config/seahelm/gpui-layout.json`.
+- No macOS app behind it. Projects are the client's own list
+  (`gpui-projects.json`, folder button), worktrees come from `git worktree
+  list`, statuses from seahelm-core, and agents' hooks reach the core
+  directly (`seahelm-core install-hooks`, run when the core is started).
+  The font is set in `gpui.json` (`font_family`, `font_size`).
+- The group button cycles repository / status / activity grouping.
+- Dark and light (Catppuccin Mocha / Latte): starts as the system is; the
+  contrast button flips the chrome and every pane live, and programs that
+  asked (DEC 2031) are told.
+
 ## Not done yet
 
-- IME (Chinese input): needs `EntityInputHandler`. Keys go through a legacy
-  xterm encoder (`keys.rs`), not libghostty-vt's Kitty-protocol key encoder.
-- Scrollback and selection: on the alternate screen the wheel sends arrow
-  keys; elsewhere it does nothing.
-- Splits and several panes per worktree.
-- The toolbar buttons do nothing except the sidebar toggle. First Mate
-  always reads "off".
+- Light theme fills (sidebar, rows, hairlines) are worked out from the
+  light semantic colours, not measured off the app as the dark ones were.
+- The side panels (Files, Changes), edit mode, sharing, PR badges, First
+  Mate and the per-group buttons are the macOS app's and are not here.
 - Diff stats are measured against the merge-base with the default branch.
   The app counts "what still has to go in a PR" (merged-PR heads,
   `git merge-tree`), so the numbers can differ.
@@ -87,5 +105,3 @@ everything already queued, up to 256 KiB.
   Under GPUI's blurred background, translucent fills at 10% or less barely
   showed. Inactive traffic lights draw black because the window does not
   take the dark appearance.
-- Windows and Linux: seahelmd itself has to be ported first (named pipes,
-  ConPTY, job objects). See the port assessment.

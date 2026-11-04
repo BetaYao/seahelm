@@ -59,7 +59,6 @@ final class SeahelmControlDataSource: ControlDataSource {
     }
 
     func ingestHook(json: [String: Any]) {
-        CoreHookForwarder.forward(json)
         guard let data = try? JSONSerialization.data(withJSONObject: json),
               let event = try? WebhookEvent.parse(from: data) else { return }
         hookSink(event)
