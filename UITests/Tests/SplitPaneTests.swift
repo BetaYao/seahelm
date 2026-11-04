@@ -42,9 +42,9 @@ class SplitPaneTests: SeahelmUITestCase {
         let secondPane = page.splitPane.panes.element(boundBy: 1)
         XCTAssertTrue(secondPane.waitForExistence(timeout: 5))
 
-        page.app.typeKey("w", modifierFlags: [.command, .shift])
+        page.app.typeKey("w", modifierFlags: .command)
 
-        XCTAssertTrue(secondPane.waitForNonExistence(timeout: 5), "Second pane should disappear after Cmd+Shift+W")
+        XCTAssertTrue(secondPane.waitForNonExistence(timeout: 5), "Second pane should disappear after Cmd+W")
         XCTAssertEqual(page.splitPane.paneCount, 1)
         XCTAssertEqual(page.splitPane.dividerCount, 0)
     }
@@ -56,7 +56,7 @@ class SplitPaneTests: SeahelmUITestCase {
         }
 
         XCTAssertEqual(page.splitPane.paneCount, 1)
-        page.app.typeKey("w", modifierFlags: [.command, .shift])
+        page.app.typeKey("w", modifierFlags: .command)
         XCTAssertEqual(page.splitPane.paneCount, 1)
     }
 
