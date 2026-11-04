@@ -81,7 +81,8 @@ sign_app() {
   # build-phase signing of seahelmd is skipped here because we build with
   # CODE_SIGNING_ALLOWED=NO. Left unsigned inside an otherwise signed bundle,
   # notarization rejects it as Invalid.
-  local nested=("$APP_PATH/Contents/Resources/bin/seahelmd" "$APP_PATH/Contents/Resources/bin/seahelm-core")
+  local nested=("$APP_PATH/Contents/Resources/bin/seahelmd" "$APP_PATH/Contents/Resources/bin/seahelm-core"
+                "$APP_PATH/Contents/Resources/bin/seahelm" "$APP_PATH/Contents/Resources/bin/seahelm-gateway")
   for binary in "${nested[@]}"; do
     if [[ -f "$binary" ]]; then
       echo "==> Signing nested binary: ${binary#"$APP_PATH/"}"
@@ -127,6 +128,7 @@ sign_app() {
   # for a notarization round-trip.
   codesign --verify --verbose=2 "$APP_PATH/Contents/Resources/bin/seahelmd" 2>&1 | sed 's/^/    /'
   codesign --verify --verbose=2 "$APP_PATH/Contents/Resources/bin/seahelm-core" 2>&1 | sed 's/^/    /'
+  codesign --verify --verbose=2 "$APP_PATH/Contents/Resources/bin/seahelm-gateway" 2>&1 | sed 's/^/    /'
 }
 
 notarize_artifact() {

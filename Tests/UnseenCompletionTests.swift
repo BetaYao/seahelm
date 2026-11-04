@@ -76,15 +76,4 @@ final class UnseenCompletionTests: XCTestCase {
         info.unseenCompletion = true
         XCTAssertTrue(info.rehomed(to: "/b", branch: "b", project: "P").unseenCompletion)
     }
-
-    func testGatewayPassesTheFlagOnAsAStatusUpdate() {
-        var sent: [String: String] = [:]
-        let note = HostGatewaySession.paneNotify(
-            for: ["type": "pane.unseen_changed", "pane_id": "p1", "pane_session_key": "k1",
-                  "worktree_path": "/a", "unseen": false],
-            sentAgentTypes: &sent)
-        XCTAssertEqual(note?.method, "pane.status")
-        XCTAssertEqual(note?.params["unseen"] as? Bool, false)
-        XCTAssertEqual(note?.params["pane_session_key"] as? String, "k1")
-    }
 }

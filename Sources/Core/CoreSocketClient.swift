@@ -1,18 +1,21 @@
 import Foundation
 
-/// A blocking JSON-RPC call to seahelm-core (`~/.config/seahelm/core.sock`,
-/// or `$SEAHELM_CORE_SOCKET`): one request, one newline-terminated reply.
-/// Used where the core owns something the app only shows — First Mate when
-/// `autopilot_owner` is `core`. Never call on main.
+/// A blocking newline-delimited JSON-RPC call over a Unix socket: one
+/// request, one newline-terminated reply. By default the socket is
+/// seahelm-core's (`~/.config/seahelm/core.sock`, or `$SEAHELM_CORE_SOCKET`);
+/// `GatewayClient` passes seahelm-gateway's. Never call on main.
 enum CoreSocketClient {
-    static var path: String {
+    static var path: String { socketPath(envKey: "SEAHELM_CORE_SOCKET", fileName: "core.sock") }
+
+    /// `$<envKey>` if set, else `~/.config/seahelm/<fileName>`. Unit tests never
+    /// reach the user's live services: under XCTest the default is a path that
+    /// does not exist, and a test that wants a socket sets the variable.
+    static func socketPath(envKey: String, fileName: String) -> String {
         let env = ProcessInfo.processInfo.environment
-        if let path = env["SEAHELM_CORE_SOCKET"], !path.isEmpty { return path }
-        // Unit tests never reach the user's live core: a test that wants a
-        // core sets SEAHELM_CORE_SOCKET to one of its own.
-        if env["XCTestConfigurationFilePath"] != nil { return "/nonexistent/seahelm-core.sock" }
+        if let path = env[envKey], !path.isEmpty { return path }
+        if env["XCTestConfigurationFilePath"] != nil { return "/nonexistent/\(fileName)" }
         return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/seahelm/core.sock").path
+            .appendingPathComponent(".config/seahelm/\(fileName)").path
     }
 
     enum Failure: Error, Equatable {

@@ -4,7 +4,7 @@ import Foundation
 ///
 /// This table is the single source of truth for the command language: the
 /// parser accepts exactly these verbs, `/help` prints them, the Helm line
-/// completes them and the mail signature lists them. Two of those used to be
+/// completes them. Two of those used to be
 /// hand-written copies, and they had drifted.
 struct CommandSpec: Equatable {
     let verb: String
@@ -32,8 +32,7 @@ struct CommandSpec: Equatable {
 
 enum CommandSpecs {
     /// The language as cut on 2026-11-04 (docs/command-redesign.md §0): run by
-    /// seahelm-core (`command.run`); this table names it for the Helm menu,
-    /// Telegram's command list and the mail signature.
+    /// seahelm-core (`command.run`); this table names it for the Helm menu.
     static let all: [CommandSpec] = [
         CommandSpec(
             verb: "go", usage: "/go #pane | @worktree | mate",
@@ -94,21 +93,5 @@ enum CommandSpecs {
     /// The Helm line's `/` menu: verb and a one-liner.
     static var menu: [(name: String, desc: String)] {
         all.filter { $0.verb != "yes" }.map { ($0.verb, $0.summary) }
-    }
-
-    /// What every outbound mail carries below the `-- ` marker.
-    static var mailEntries: [(command: String, detail: String)] {
-        all.filter { !$0.desktopOnly }.map { ($0.usage, $0.summary) }
-    }
-
-    /// What `setMyCommands` publishes, so typing `/` in a Telegram chat lists
-    /// the verbs rather than requiring the user to have read `/help` once.
-    ///
-    /// Desktop-only verbs are left out: offering `/add` in a chat whose only
-    /// possible answer is "there is no chat equivalent" is worse than an
-    /// absence. Telegram caps a description at 256 characters, which every
-    /// summary in this table is comfortably inside.
-    static var botCommands: [(command: String, description: String)] {
-        all.filter { !$0.desktopOnly }.map { ($0.verb, $0.summary) }
     }
 }

@@ -1,30 +1,11 @@
 import Foundation
 
-/// Where a line came from. Decides only what the surface *can do* — show a
-/// sheet, open a panel — never what a command means.
-struct CommandSurface: Equatable {
-    /// `CommandSession` key: `desktop`, `telegram:<chat>`, `mail:<thread>`.
-    let sessionKey: String
-    /// The desktop has a selection to bind through and sheets to confirm with.
-    let isDesktop: Bool
-    /// Who is speaking, where the surface knows — a mail address, a Telegram id.
-    let commander: String?
-
-    static let desktop = CommandSurface(sessionKey: "desktop", isDesktop: true, commander: nil)
-
-    init(sessionKey: String, isDesktop: Bool = false, commander: String? = nil) {
-        self.sessionKey = sessionKey
-        self.isDesktop = isDesktop
-        self.commander = commander
-    }
-}
-
 /// A button offered beside a reply.
 ///
-/// The command language has no idea how a surface draws one: Telegram makes it
-/// an inline keyboard, the desktop ignores it (its answer is the dashboard) and
-/// mail drops it (a mail client cannot call back). What the layer below is told
-/// is only what the button *means*.
+/// The command language has no idea how a surface draws one: the desktop
+/// ignores it (its answer is the dashboard), a chat in seahelm-gateway makes it
+/// an inline keyboard. What the layer below is told is only what the button
+/// *means*.
 struct CommandButton: Equatable {
     enum Effect: Equatable {
         /// Run this line, as if the tapper had typed it.

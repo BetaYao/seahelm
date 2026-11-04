@@ -813,6 +813,9 @@ impl FirstMate {
             self.latest = Some((e.headline(), e.at.clone()));
         }
         self.audit.append(&e);
+        if let Ok(entry) = serde_json::to_value(&e) {
+            self.core.publish_event(json!({"type": "autopilot.audit", "entry": entry}));
+        }
     }
 
     fn mint(&mut self, prefix: &str) -> String {

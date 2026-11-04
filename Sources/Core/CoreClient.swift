@@ -20,8 +20,14 @@ enum CoreEvent {
     case session(paneSessionKey: String, ref: [String: Any])
     /// An agent is working in a worktree nobody tracks yet.
     case worktreeDiscovered(path: String, paneSessionKey: String?)
+    /// The core registered a pane (`pane.registered`): one the app synced, or
+    /// a session the core started itself (`pane.new`, from the web).
+    case paneRegistered(paneSessionKey: String, worktreePath: String)
+    /// The core ended a pane at someone's request (`pane.close`, from the web;
+    /// `pane.closed` with `by_request: true`). Its session is already gone.
+    case paneClosedByRequest(paneSessionKey: String, terminalID: String?)
     /// Every event, as the core sent it, for the app's own subscribers
-    /// (`EventHub`, until the gateway takes them from the core itself).
+    /// (`EventHub`: the control socket's subscribers).
     case raw([String: Any])
     case connected(Bool)
 }
@@ -44,7 +50,8 @@ final class CoreClient {
 
     private static let types = [
         "pane.status_changed", "pane.updated", "pane.notice", "pane.unseen_changed", "pane.location",
-        "pane.closed", "pane.rehomed", "cards.changed", "card.answered", "agent.session", "worktree.discovered",
+        "pane.closed", "pane.rehomed", "pane.registered", "cards.changed", "card.answered", "agent.session",
+        "worktree.discovered",
     ]
 
     /// Add an observer. Main thread.
@@ -167,6 +174,14 @@ final class CoreClient {
         case "worktree.discovered":
             guard let path = ev["worktree_path"] as? String else { return }
             emit(.worktreeDiscovered(path: path, paneSessionKey: ev["pane_session_key"] as? String))
+        case "pane.registered":
+            let pane = ev["pane"] as? [String: Any] ?? ev
+            let session = pane["pane_session_key"] as? String ?? key
+            guard !session.isEmpty, let path = pane["worktree_path"] as? String, !path.isEmpty else { return }
+            emit(.paneRegistered(paneSessionKey: session, worktreePath: path))
+        case "pane.closed":
+            guard ev["by_request"] as? Bool == true, !key.isEmpty else { return }
+            emit(.paneClosedByRequest(paneSessionKey: key, terminalID: id))
         default:
             break
         }

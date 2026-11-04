@@ -58,7 +58,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         bootstrapMainApp(config: config)
     }
 
-    /// Hooks, stores, channels, Ghostty, and main window.
+    /// Hooks, stores, the gateway, Ghostty, and main window.
     private func bootstrapMainApp(config: Config) {
         AgentHookInstaller.installForLaunch(config: config)
         NSAppearance.current = NSApp.effectiveAppearance
@@ -69,19 +69,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         NotificationManager.shared.requestPermission()
 
-        // Telegram is the phone-side remote-control transport.
-        if let telegramConfig = config.telegram, telegramConfig.resolvedAutoConnect {
-            let channel = TelegramChannel(config: telegramConfig)
-            ChannelHub.shared.registerChannel(channel)
-            channel.connect()
-            NSLog("[App] Telegram bridge connecting (\(telegramConfig.allowedUsers.count) allowed users)")
-        }
+        // Web access, share links and Telegram are seahelm-gateway's; the app
+        // only makes sure it runs (`GatewayLink`).
+        if !DebugFlags.forceEmptyState { GatewayLink.shared.start() }
 
         GhosttyBridge.shared.initialize()
 
         mainWindowController = MainWindowController()
         mainWindowController?.showWindow(nil)
-        mainWindowController?.startGmailMailChannel(config: config.gmailMail)
     }
 
     /// Schedule periodic cleanup of seahelmd sessions whose worktree no longer exists.

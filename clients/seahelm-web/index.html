@@ -678,7 +678,7 @@
     <button id="rendererBadge" class="renderer-badge" type="button" role="menuitem">Renderer <span class="val"></span></button>
     <hr />
     <button id="copyBtn" type="button" role="menuitem">Copy selection</button>
-    <button id="splitBtn" type="button" role="menuitem">Split pane</button>
+    <button id="splitBtn" type="button" role="menuitem">New pane</button>
     <button id="closePaneBtn" type="button" role="menuitem" class="danger">Close pane…</button>
   </div>
 
@@ -724,6 +724,7 @@
 <script src="./composer-keys.js"></script>
 <script src="./pane-pick.js"></script>
 <script src="./composer-action.js"></script>
+<script src="./card-model.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -760,8 +761,11 @@ const S = {
   mac:'testmac', transport:null,   // transport: null | 'gateway'
   gw:null,   // gateway WebSocket state
   panes:new Map(), worktrees:new Map(),
-  firstMate:null,   // autopilot.state: First Mate as the Mac reports it
-  focus:null, dnd:null, events:new Map(),
+  firstMate:null,   // autopilot.state, as the core reports it
+  // Decisions, rebuilt from every `cards` notify (card-model.js): `events` is
+  // one per pane, keyed by pane_session_key; `mateCards` are First Mate's
+  // approvals, proposals and reports, keyed by card id.
+  focus:null, dnd:null, events:new Map(), mateCards:[],
   // Tool runs the reader has opened, by the run's first `seq` (tool-group.js).
   toolOpen:new Set(),
   // `sel` is the selected worktree path; `selPane` the pane whose terminal is shown.
@@ -1046,10 +1050,12 @@ function openGatewaySocket(){
       S.gw.deflate = !!(r && r.vt_deflate);
       S.gw.keysBinary = !!(r && r.keys_binary);
       if (r.mac_id) S.mac = r.mac_id;
-      if (r.token) S.authPass = r.token;
+      // Every paired sign-in (code, token, Telegram) hands back the token to
+      // use next time, possibly a fresh one: keep whatever comes. A share
+      // sign-in is scoped to one pane, so its token never replaces the pairing.
+      if (r.token && !usedShare) S.authPass = r.token;
       S.pendingCode = null;
-      // A share sign-in issues no token; keep whatever pairing was stored.
-      if (S.authPass) try {
+      if (S.authPass && !usedShare) try {
         localStorage.setItem(CREDS_KEY, JSON.stringify({ m: S.mac, t: S.authPass }));
       } catch (e) {}
       if ($('mac')) $('mac').value = S.mac;
@@ -1057,9 +1063,9 @@ function openGatewaySocket(){
       hadLink = true;
       reconnector.succeeded();
       setStatus(true, 'Connected');
-      // The Mac folds the snapshot into the auth reply, because a round trip
-      // over the tunnel costs far more than the query does. Ask separately only
-      // when talking to one that predates it.
+      // The gateway folds the snapshot into the auth reply, because a round
+      // trip over the tunnel costs far more than the query does; the cards
+      // follow as a `cards` notify.
       // First Mate travels on its own channel: asked for once, then pushed.
       if (!SHARE_PANE) gwSend('autopilot.state', {}, (st) => { if (st) applyFirstMate(st); });
       if (r.panes) {
@@ -1239,14 +1245,13 @@ function onGatewayNotify(method, params){
     applyFirstMate(params);
     return;
   }
-  // Open questions / suggestions — pushed by the Mac and replayed on auth.
-  if (method === 'pane.event') {
-    const key = params.pane_session_key || params.pane_id;
-    if (!key) return;
-    if (params.cleared) S.events.delete(key);
-    else S.events.set(key, params);
-    renderSuggestions();
-    refreshFleetSoon(false);   // the row and the pane's tab say so too
+  // Everything waiting on the user: the full list, after auth and on every change.
+  if (method === 'cards') {
+    applyCards(params.cards);
+    return;
+  }
+  if (method === 'pane.added') {
+    onPaneAdded(params);
     return;
   }
   if (method === 'pane.message') {
@@ -1302,6 +1307,27 @@ function markShownPaneSeen(){
   pane.unseen = false;
   refreshFleetSoon(false);
   sendCommand('pane.seen', { pane_session_key: key });
+}
+
+/** The core's whole card list: rebuild every decision from it. */
+function applyCards(cards){
+  const { byPane, mate } = SeahelmCardModel.buildDecisions(cards);
+  S.events = byPane;
+  S.mateCards = SHARE_PANE ? [] : mate;
+  renderSuggestions();
+  renderMateButton();
+  refreshFleetSoon(false);   // the row and the pane's tab say so too
+}
+
+/** A pane the core just registered (`pane.new`, or one started elsewhere). */
+function onPaneAdded(p){
+  const key = p.pane_session_key || p.pane_id;
+  if (!key) return;
+  if (!SeahelmPanePick.panesMatchingShare([p], SHARE_PANE).length) return;
+  S.panes.set(key, Object.assign({}, S.panes.get(key) || {}, p));
+  refreshFleetSoon(false);
+  // The worktree on screen grew a pane: remount so it shows.
+  if (p.worktree_path && p.worktree_path === S.sel) { S.vt.worktree = null; renderDetail(); }
 }
 
 function onPaneClosed(p){
@@ -2281,7 +2307,8 @@ function renderSuggestions(){
 function renderReplyBar(){
   const bar = $('replyBar');
   const pid = S.selPane;
-  if (pid === FM_KEY) { renderMateCards(bar); return; }
+  // First Mate's own agent asking something comes first; its cards after.
+  if (pid === FM_KEY && !S.events.has(FM_KEY)) { renderMateCards(bar); return; }
   const e = pid ? S.events.get(pid) : null;
   bar.hidden = !e;
   bar.innerHTML = '';
@@ -2300,9 +2327,10 @@ function renderReplyBar(){
     + '<button class="rb-skip" type="button">Skip</button>';
   card.setAttribute('aria-label', question ? (e.prompt || 'Needs your approval') : 'What next?');
   head.querySelector('.rb-skip').onclick = () => {
+    // Optimistic; the next `cards` notify is the truth either way.
     S.events.delete(pid);
     renderSuggestions();
-    sendCommand('decision.dismiss', { pane_session_key: pid });
+    sendCommand('cards.dismiss', { id: e.id });
   };
   card.appendChild(head);
   bar.appendChild(card);
@@ -2312,20 +2340,17 @@ function renderReplyBar(){
   const options = e.options || [];
   const checked = new Set(e.checked || []);
   // A multi-select row only toggles: the card stays up, ticked, and Done —
-  // index options.length, as on the desktop card — is what answers it.
+  // index options.length, the card's last label — is what answers it.
   const answer = (i, toggle) => {
-    // Optimistic, like dismissing: the Mac pushes the card it now holds (new
-    // ticks, the next question, or none) to every client once the answer
-    // lands, and puts nothing back if it does not.
+    // Optimistic, like dismissing: the core pushes the card list it now holds
+    // (new ticks, the next question, or none) once the answer lands.
     if (toggle) {
-      const next = new Set(checked);
-      if (next.has(i)) next.delete(i); else next.add(i);
-      S.events.set(pid, Object.assign({}, e, { checked: [...next].sort((a, b) => a - b) }));
+      S.events.set(pid, Object.assign({}, e, { checked: SeahelmCardModel.toggleChecked(checked, i) }));
     } else {
       S.events.delete(pid);
     }
     renderSuggestions();
-    sendCommand(question ? 'question.answer' : 'suggest.pick', { pane_session_key: pid, index: i }, (r) => {
+    sendCommand('cards.answer', { id: e.id, index: i }, (r) => {
       if (r && r.ok === false) {
         S.events.set(pid, e);
         renderSuggestions();
@@ -2382,7 +2407,9 @@ function renderMateButton(){
   if (!st) return;
   const tone = st.enabled ? (st.tone || 'watching') : 'quiet';
   btn.className = 'icon-btn ' + ({ wants_you: 'wants', working: 'working', watching: 'watching' }[tone] || '');
-  if (st.pending > 0) btn.setAttribute('data-count', st.pending > 9 ? '9+' : String(st.pending));
+  // The count is the cards waiting above First Mate's composer.
+  const pending = S.mateCards.length;
+  if (pending > 0) btn.setAttribute('data-count', pending > 9 ? '9+' : String(pending));
   else btn.removeAttribute('data-count');
   const label = st.enabled ? `First Mate — ${st.activity}. ${st.detail || ''}` : 'First Mate is off';
   btn.title = label;
@@ -2392,16 +2419,17 @@ function renderMateButton(){
 function openFirstMate(){
   const st = S.firstMate;
   if (!st || !st.enabled) {
-    showActionToast('First Mate is off — turn it on on the Mac: Settings ▸ First Mate', true);
+    showActionToast('First Mate is off — turn it on in Seahelm: Settings ▸ First Mate', true);
     return;
   }
   const row = buildFleet().find(r => r.firstMate);
   if (row) selectWorktree(row, FM_KEY);
 }
 
-/** First Mate's cards above its composer: approve / reject, or pick a proposal's option. */
+/** First Mate's cards above its composer — approvals, proposals and reports,
+ *  keyed by card id: tap a label to answer, Skip to dismiss. */
 function renderMateCards(bar){
-  const cards = (S.firstMate && S.firstMate.cards) || [];
+  const cards = S.mateCards;
   bar.hidden = !cards.length;
   bar.innerHTML = '';
   for (const c of cards){
@@ -2409,26 +2437,30 @@ function renderMateCards(bar){
     card.className = 'rb-card';
     card.setAttribute('role', 'group');
     const head = document.createElement('div');
-    head.className = 'rb-head';
+    head.className = 'rb-head' + (c.danger ? ' danger' : '');
     head.innerHTML = '<span class="rb-ic" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.2"/><path d="M12 4v5.8M12 14.2V20M4 12h5.8M14.2 12H20"/></svg></span>'
-      + `<span>${esc(c.message || '')}</span>`;
+      + `<span>${esc(c.message || '')}</span>`
+      + '<button class="rb-skip" type="button">Skip</button>';
+    // Optimistic: the core pushes the cards that remain once it has the answer.
+    const drop = () => {
+      S.mateCards = S.mateCards.filter(x => x.id !== c.id);
+      renderReplyBar();
+      renderMateButton();
+    };
+    const failed = (r) => {
+      if (r && r.ok === false) showActionToast((r.error && r.error.message) || 'Not sent', true);
+    };
+    head.querySelector('.rb-skip').onclick = () => { drop(); sendCommand('cards.dismiss', { id: c.id }, failed); };
     card.appendChild(head);
     const opts = document.createElement('div');
     opts.className = 'rb-opts';
-    for (const option of c.options || []){
+    SeahelmCardModel.mateLabels(c).forEach((label, index) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.textContent = option;
-      b.onclick = () => {
-        // Optimistic: the Mac pushes the cards that remain once it is answered.
-        S.firstMate.cards = (S.firstMate.cards || []).filter(x => x.card !== c.card);
-        renderReplyBar();
-        sendCommand('autopilot.answer', { card: c.card, option }, (r) => {
-          if (r && r.ok === false) showActionToast((r.error && r.error.message) || 'Not sent', true);
-        });
-      };
+      b.textContent = label;
+      b.onclick = () => { drop(); sendCommand('cards.answer', { id: c.id, index }, failed); };
       opts.appendChild(b);
-    }
+    });
     card.appendChild(opts);
     bar.appendChild(card);
   }
@@ -3210,7 +3242,7 @@ function renderVtModeBadge(){
   const el = $('vtModeBadge');
   if (!el) return;
   const mode = loadVtMode();
-  el.innerHTML = `Terminal layout <span class="val">${mode === 'mirror' ? 'Mirror the Mac' : 'One pane'}</span>`;
+  el.innerHTML = `Terminal layout <span class="val">${mode === 'mirror' ? 'Every pane' : 'One pane'}</span>`;
   el.title = mode === 'mirror'
     ? 'Mirror: one VT stream per pane — click for single'
     : 'Single: only the focused pane is subscribed — click for mirror';
@@ -3341,21 +3373,29 @@ function sendRawKey(bytes){
   if (!COARSE.matches) restoreTermFocus();   // a mouse click took the caret; hand it back
 }
 
-/** Structural changes happen on the Mac; we re-read the tree rather than guess. */
-function paneAction(method, extra){
+/** New pane / close pane, by session key. The pane list is re-read rather
+ *  than guessed: `pane.added` / `pane.closed` follow, and so does the snapshot. */
+function paneAction(method){
   const key = S.vt.focus || S.selPane;
   if (!key || !isLinked()) return;
-  const pane = S.panes.get(key) || {};
-  sendCommand(method, Object.assign({ pane_id: pane.pane_id || key }, extra), (r) => {
+  sendCommand(method, { pane_session_key: key }, (r) => {
     if (r && r.ok === false){
       log('sys', '(pane action failed)', JSON.stringify(r.error || r));
       showActionToast((r.error && r.error.message) || 'Action failed', true);
       return;
     }
-    showActionToast(method === 'pane.split' ? 'Pane split' : 'Pane closed');
-    const path = S.sel;
-    S.vt.worktree = null;        // force a remount of the changed layout
-    if (path) requestLayout(path);
+    showActionToast(method === 'pane.new' ? 'New pane started' : 'Pane closed');
+    const added = method === 'pane.new' && r.result && r.result.pane_session_key;
+    gwSend('session.snapshot', {}, (snap) => {
+      if (snap && snap.panes) applySessionSnapshot(snap);
+      // Land on the new pane once it is in the list.
+      if (added && S.panes.has(added)) S.selPane = added;
+      else if (S.selPane && !S.panes.has(S.selPane)) S.selPane = null;
+      S.vt.worktree = null;        // force a remount of the changed worktree
+      if (S.sel && !buildFleet().some(row => row.path === S.sel)) S.sel = null;
+      renderTree();
+      renderDetail();
+    });
   });
 }
 
@@ -3370,13 +3410,9 @@ function showActionToast(message, isError){
   actionToastTimer = setTimeout(() => { toast.hidden = true; }, 2600);
 }
 
-// ── Mirrored pane layout ────────────────────────────────────────────────────
-// The mid column shows the whole worktree, not one pane: the Mac ships its live
-// split tree (`layout.live`) and we rebuild it here as nested flex boxes. Two
-// reasons this beats picking a pane and scaling it up. It is the same window the
-// user already knows, and — less obviously — a slot in the mirrored tree has
-// roughly the aspect ratio of the pane that lives in it, so fitting a grid into
-// it stops being a fight. Dividers are deliberately inert: this is a mirror, and
+// ── Pane layout ─────────────────────────────────────────────────────────────
+// The mid column shows the whole worktree, not one pane: its panes stacked top
+// to bottom as nested flex boxes (`stackedTreeFor`). Dividers are inert;
 // resizing belongs to the machine that owns the panes.
 
 /** The mid column is the worktree. Selecting one mounts its whole layout. */
@@ -3411,33 +3447,21 @@ function renderDetail(){
   requestLayout(S.sel);
 }
 
-/** Fetch the worktree's live tree; fall back to a stack if the Mac has none. */
+/** Mount the worktree's panes, stacked: the gateway serves no split tree. */
 function requestLayout(path){
   // The terminal code only when a terminal is wanted — the timeline draws
-  // without it, and it is ~190KB a phone reading messages has no use for. When
-  // it is wanted, fetch it alongside the layout rather than after: on a weak
-  // link that is a second, and the layout's round trip can hide it.
+  // without it, and it is ~190KB a phone reading messages has no use for.
   const wantsTerminal = loadSurfaceMode() === 'vt';
   const renderer = wantsTerminal ? ensureRenderer() : Promise.resolve(null);
   if (wantsTerminal && RENDERER !== 'ghostty') loadWebglAddon().catch(() => {});
-  renderer.catch(() => {});
-  sendCommand('layout.live', { worktree_path: path }, (r) => {
-    if (S.sel !== path) return;                    // selection moved while in flight
-    const root = r && r.ok !== false && r.result && r.result.root;
-    renderer.then((active) => {
-      if (S.sel !== path) return;
-      // Asked for in timeline mode, answered after a switch to the terminal:
-      // that switch sent its own request, with the renderer, which mounts.
-      if (!active && loadSurfaceMode() === 'vt') return;
-      if (active) renderRendererBadge(active);
-      if (!root){
-        // No live tree (worktree closed on the Mac) — stack what we know of it.
-        mountPanes(stackedTreeFor(path), null, path);
-        return;
-      }
-      mountPanes(root, r.result.focused_pane_session_key || null, path);
-    }).catch((e) => log('sys', '(renderer failed)', String(e && e.message || e)));
-  });
+  renderer.then((active) => {
+    if (S.sel !== path) return;                    // selection moved while loading
+    // Asked for in timeline mode, answered after a switch to the terminal:
+    // that switch sent its own request, with the renderer, which mounts.
+    if (!active && loadSurfaceMode() === 'vt') return;
+    if (active) renderRendererBadge(active);
+    mountPanes(stackedTreeFor(path), null, path);
+  }).catch((e) => log('sys', '(renderer failed)', String(e && e.message || e)));
 }
 
 /** Fallback shape: every known pane of the worktree, stacked top to bottom. */
@@ -4055,12 +4079,13 @@ $('paneMenuBtn').onclick = (ev) => {
   const vt = loadSurfaceMode() === 'vt';
   $('copyBtn').hidden = !vt;
   $('copyBtn').disabled = !focusedEntry();
-  $('splitBtn').disabled = !live;
+  // First Mate's session is the core's; a pane beside it is not a thing.
+  $('splitBtn').disabled = !live || (S.vt.focus || S.selPane) === FM_KEY;
   $('closePaneBtn').disabled = !live;
   openMenu(m, ev.currentTarget);
 };
 $('copyBtn').onclick = () => copySelection();
-$('splitBtn').onclick = () => paneAction('pane.split', { direction: 'right', focus: false });
+$('splitBtn').onclick = () => paneAction('pane.new');
 $('closePaneBtn').onclick = () => {
   const key = S.vt.focus || S.selPane;
   const pane = S.panes.get(key) || {};
@@ -4068,7 +4093,7 @@ $('closePaneBtn').onclick = () => {
   const name = label + (raw && !raw.includes(label) ? ` (${raw})` : '');
   // Closing takes a running agent with it.
   if (!confirm(`Close ${name}? Anything running in it is killed.`)) return;
-  paneAction('pane.close', {});
+  paneAction('pane.close');
 };
 
 // ── the keyboard and the viewport ───────────────────────────────────────────

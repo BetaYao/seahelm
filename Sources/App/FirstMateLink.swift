@@ -3,8 +3,8 @@ import Foundation
 /// First Mate as the app sees it. First Mate lives in seahelm-core and
 /// nowhere else (docs/app-reads-core.md): the core runs its session, rules,
 /// gates, cards and audit. The app shows its state, talks to it, stops its
-/// turn, shows its conversation, and passes its answers and actions on to the
-/// chats that asked.
+/// turn and shows its conversation. Its answers to chats and its audit lines
+/// are seahelm-gateway's to deliver.
 final class FirstMateLink {
     struct State: Equatable {
         enum Activity: Equatable { case off, starting, idle, thinking, needsYou, paused }
@@ -24,47 +24,24 @@ final class FirstMateLink {
         didSet { if state != oldValue { onStateChange?(state) } }
     }
     var onStateChange: ((State) -> Void)?
-    /// First Mate finished a turn the chats in `targets` asked for.
-    var onReply: ((_ targets: [String], _ text: String) -> Void)?
-    /// A line the core wrote to First Mate's audit log since the last look.
-    var onAudit: ((AutopilotAudit.Entry) -> Void)?
 
     /// The core says First Mate is running.
     private(set) var isRunning = false
     private(set) var agent: AgentType = .claudeCode
 
-    /// Chats waiting on First Mate's answer.
-    private var replyTargets: [String] = []
     private var timer: Timer?
-    private var auditOffset: UInt64 = 0
 
     func start() {
         guard timer == nil else { return }
-        CoreClient.shared.observe { [weak self] in self?.coreEvent($0) }
-        auditOffset = (try? FileManager.default.attributesOfItem(atPath: FirstMatePane.auditPath))?[.size] as? UInt64 ?? 0
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.poll() }
         poll()
     }
 
-    /// First Mate's turn ended (its pane's completion, from the core): its
-    /// answer goes to the chats that asked.
-    private func coreEvent(_ event: CoreEvent) {
-        guard case .raw(let ev) = event,
-              ev["pane_session_key"] as? String == FirstMatePane.sessionName,
-              ev["is_completion"] as? Bool == true, !replyTargets.isEmpty else { return }
-        let answer = (ev["final_message"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !answer.isEmpty else { return }
-        onReply?(replyTargets, answer)
-        replyTargets = []
-    }
-
-    /// The user's own words, now. `replyTo` is a chat (a `CommandSession`
-    /// key) that gets First Mate's answer. False when it is not running.
+    /// The user's own words, now. False when it is not running.
     @discardableResult
-    func sendUserMessage(_ text: String, replyTo: String? = nil) -> Bool {
+    func sendUserMessage(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isRunning, !trimmed.isEmpty else { return false }
-        if let replyTo, !replyTargets.contains(replyTo) { replyTargets.append(replyTo) }
         DispatchQueue.global(qos: .userInitiated).async {
             _ = CoreSocketClient.call("autopilot.say", ["text": trimmed])
         }
@@ -92,17 +69,9 @@ final class FirstMateLink {
     // MARK: - Following the core
 
     private func poll() {
-        let path = FirstMatePane.auditPath
-        let offset = auditOffset
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let reply = Self.remoteState()
-            let (entries, next) = Self.readAudit(path: path, from: offset)
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.auditOffset = next
-                for entry in entries { self.onAudit?(entry) }
-                self.apply(reply)
-            }
+            DispatchQueue.main.async { self?.apply(reply) }
         }
     }
 
@@ -132,26 +101,4 @@ final class FirstMateLink {
         default: return .off
         }
     }
-
-    /// Lines appended to `audit.jsonl` (the core writes it) since `offset`.
-    static func readAudit(path: String, from offset: UInt64) -> ([AutopilotAudit.Entry], UInt64) {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return ([], 0) }
-        defer { try? handle.close() }
-        let size = (try? handle.seekToEnd()) ?? 0
-        let start = offset > size ? 0 : offset
-        guard size > start else { return ([], size) }
-        try? handle.seek(toOffset: start)
-        let data = handle.readDataToEndOfFile()
-        guard let lastNewline = data.lastIndex(of: 0x0A) else { return ([], start) }
-        let complete = data[data.startIndex...lastNewline]
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let entries = complete.split(separator: 0x0A).compactMap { try? decoder.decode(AutopilotAudit.Entry.self, from: Data($0)) }
-        return (entries, start + UInt64(complete.count))
-    }
-}
-
-extension Notification.Name {
-    /// First Mate's state changed; `userInfo` is the core's `autopilot.state`.
-    static let firstMateStateChanged = Notification.Name("seahelm.firstMateStateChanged")
 }

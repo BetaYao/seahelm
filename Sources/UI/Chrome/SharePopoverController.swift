@@ -31,7 +31,7 @@ final class SharePopoverController: NSViewController, NSTextFieldDelegate {
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         let subtitle = NSTextField(wrappingLabelWithString: offer.gatewayListening
             ? "Anyone with it can see and type into this pane, and nothing else."
-            : "Host Gateway is not running, so nothing is listening yet.")
+            : "seahelm-gateway's web access is off, so nothing is listening yet.")
         subtitle.font = .systemFont(ofSize: 11)
         subtitle.textColor = offer.gatewayListening ? .secondaryLabelColor : .systemOrange
         subtitle.preferredMaxLayoutWidth = Self.width
@@ -160,20 +160,27 @@ final class SharePopoverController: NSViewController, NSTextFieldDelegate {
     func controlTextDidEndEditing(_ obj: Notification) { recipientCommitted() }
 
     @objc private func recipientCommitted() {
-        let name = ShareLinkStore.senderName(recipientField.stringValue)
-        guard name != offer.recipient,
-              let updated = sharing?.changeShare(offer, recipient: name) else { return }
-        offer = updated
-        render()
+        let name = ShareLinkLifetime.recipientName(recipientField.stringValue)
+        guard name != offer.recipient else { return }
+        // Recorded now so a second commit (Return, then clicking away) does
+        // not send the same change twice.
+        offer.recipient = name
+        sharing?.changeShare(offer, recipient: name) { [weak self] updated in
+            guard let self, let updated else { return }
+            self.offer = updated
+            self.render()
+        }
     }
 
     @objc private func expiryChanged() {
         guard let raw = expiryPopup.selectedItem?.representedObject as? String,
-              let lifetime = ShareLinkLifetime(rawValue: raw),
-              let updated = sharing?.changeShare(offer, lifetime: lifetime) else { return }
+              let lifetime = ShareLinkLifetime(rawValue: raw) else { return }
         ShareLinkLifetime.lastChosen = lifetime
-        offer = updated
-        render()
+        sharing?.changeShare(offer, lifetime: lifetime) { [weak self] updated in
+            guard let self, let updated else { return }
+            self.offer = updated
+            self.render()
+        }
     }
 
     @objc private func revokeClicked() {
@@ -193,4 +200,28 @@ final class SharePopoverController: NSViewController, NSTextFieldDelegate {
         f.doesRelativeDateFormatting = true
         return f
     }()
+}
+
+/// What the share button shows when seahelm-gateway did not mint a link: one
+/// line, so the click is not met with nothing.
+final class ShareUnavailableController: NSViewController {
+    private let message: String
+
+    init(message: String) {
+        self.message = message
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func loadView() {
+        let label = NSTextField(labelWithString: message)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .systemOrange
+        label.setAccessibilityIdentifier("share.unavailable")
+        let stack = NSStackView(views: [label])
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        view = stack
+        preferredContentSize = stack.fittingSize
+    }
 }
