@@ -131,12 +131,9 @@ final class ChannelHub {
         callbackRoute?(callback)
     }
 
-    /// What answers before the window has wired a host — tests, headless runs:
-    /// the command language over an empty fleet, with nothing persisted.
-    private lazy var headlessExecutor = CommandExecutor(host: HeadlessCommandHost.shared,
-                                                        sessions: CommandSessionStore(url: nil, legacyMailURL: nil))
+    /// What answers before the window has wired a route: nothing runs.
     private var headlessCommandRoute: (String, CommandSurface, @escaping (CommandReply) -> Void) -> Void {
-        { [weak self] text, surface, reply in self?.headlessExecutor.run(text, surface: surface, reply: reply) }
+        { _, _, reply in reply(.error("seahelm is starting — try again in a moment.")) }
     }
 
     /// Send a reply back through the same external channel

@@ -24,7 +24,7 @@ final class MockExternalChannel: ExternalChannel {
     func disconnect() { disconnectCalled = true }
 }
 
-final class FleetExternalTests: XCTestCase {
+final class ChannelHubTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
@@ -68,63 +68,11 @@ final class FleetExternalTests: XCTestCase {
 
     // MARK: - Command Handling
 
-    func testHelpCommand() {
-        let ch = MockExternalChannel()
-        ChannelHub.shared.registerChannel(ch)
-        ChannelHub.shared.handleInbound(makeMessage(content: "/help"))
 
-        XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("/status"))
-    }
 
-    func testStatusCommandNoPanes() {
-        let ch = MockExternalChannel()
-        ChannelHub.shared.registerChannel(ch)
-        ChannelHub.shared.handleInbound(makeMessage(content: "/status"))
 
-        XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("No panes"))
-    }
 
-    /// `/list` is no verb. With no route injected (as here and in any headless
-    /// run) the headless executor still answers, with the unknown-command reply.
-    func testListVerbIsGone() {
-        let ch = MockExternalChannel()
-        ChannelHub.shared.registerChannel(ch)
-        ChannelHub.shared.handleInbound(makeMessage(content: "/list"))
 
-        XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("Unknown command"))
-    }
-
-    func testIdeaCommand() {
-        let ch = MockExternalChannel()
-        ChannelHub.shared.registerChannel(ch)
-        ChannelHub.shared.handleInbound(makeMessage(content: "/idea 做一个暗色模式"))
-
-        XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("做一个暗色模式"))
-    }
-
-    /// Bare prose steers the current agent. With no route injected there is
-    /// nothing to steer, so it points at `/new` rather than dumping help.
-    func testNonCommandWithNoAgentPointsAtNew() {
-        let ch = MockExternalChannel()
-        ChannelHub.shared.registerChannel(ch)
-        ChannelHub.shared.handleInbound(makeMessage(content: "hello"))
-
-        XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("/new"))
-    }
-
-    func testUnknownCommandShowsHelp() {
-        let ch = MockExternalChannel()
-        ChannelHub.shared.registerChannel(ch)
-        ChannelHub.shared.handleInbound(makeMessage(content: "/foobar"))
-
-        XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("/help"))
-    }
 
     // MARK: - Broadcast
 

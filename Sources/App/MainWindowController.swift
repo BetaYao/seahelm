@@ -92,7 +92,6 @@ class MainWindowController: NSWindowController {
     /// run their lines through it, so a command means one thing everywhere.
     /// The app's own runner of the command language, for when seahelm-core
     /// does not answer (`routeCommand`).
-    lazy var commandExecutor = CommandExecutor(host: self, sessions: tabCoordinator.commandSessions)
     private var gmailOAuthCoordinator: GmailOAuthCoordinator?
     private var gmailMailPoller: GmailMailPoller?
     /// Suppresses repeat alerts while the same failure persists.
@@ -412,7 +411,7 @@ class MainWindowController: NSWindowController {
         setupMenuShortcuts()
         // Before the layout: the Changes panel asks GitHub what has merged.
         MergedPRLookup.shared.resolveToken = { Self.resolveGitHubToken(repoPath: $0) }
-        WorktreePRStore.shared.resolveToken = { Self.resolveGitHubToken(repoPath: $0) }
+        WorktreePRStore.shared.start()
         setupLayout()
         updateCoordinator.setup(config: config)
         normalizeBackendAvailabilityIfNeeded()

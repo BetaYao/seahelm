@@ -513,12 +513,11 @@ class TabCoordinator {
                 probe: WorktreeCleanupStore.shared.probe(worktreePath: agent.worktreePath),
                 now: now)
 
-            // The branch's PR and its CI, from a per-repo cache refreshed in the
-            // background. Main and the integration checkout are not PR work.
+            // The branch's PR and its CI, as seahelm-core last fetched them.
+            // Main and the integration checkout are not PR work.
             let branch = worktreeInfoByPath[agent.worktreePath]?.branch ?? agent.branch
             var prStatus: WorktreePRStatus?
             if !isMain, !isIntegration, !branch.isEmpty {
-                WorktreePRStore.shared.refresh(worktreePath: agent.worktreePath, now: now)
                 prStatus = WorktreePRStore.shared.status(worktreePath: agent.worktreePath, branch: branch)
             }
 

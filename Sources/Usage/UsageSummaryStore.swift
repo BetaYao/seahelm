@@ -1,189 +1,49 @@
 import Foundation
 
+/// Claude's and Codex's rate limits and today's tokens, as seahelm-core
+/// reads them (`usage.summary`, `crates/core/src/usage.rs`: Claude from the
+/// statusline cache the app's bridge feeds, Codex from `codex app-server` and
+/// its session logs). The app asks every 30 s and hands the snapshots on.
 final class UsageSummaryStore {
     typealias UpdateHandler = (_ claude: UsageSnapshot, _ codex: UsageSnapshot) -> Void
-    private static let defaultCacheFallbackMaxAge: TimeInterval = 10 * 60
-
-    private let claudeProvider: ClaudeUsageSummaryProvider
-    private let codexProvider: CodexUsageSummaryProvider
-    private let refreshInterval: TimeInterval
-    private let cacheFallbackMaxAge: TimeInterval
-    private let queue = DispatchQueue(label: "usage-summary-store", qos: .utility)
-    private let lock = NSLock()
-    private var timer: DispatchSourceTimer?
-    private var isRefreshing = false
-    private var cachedClaudeSnapshot: ProviderSnapshotCache?
-    private var cachedCodexSnapshot: ProviderSnapshotCache?
 
     var onUpdate: UpdateHandler?
-
-    convenience init(refreshInterval: TimeInterval = 60) {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        var calendar = Calendar.current
-        calendar.timeZone = TimeZone.current
-        self.init(
-            claudeProvider: ClaudeUsageSummaryProvider(
-                cacheReader: ClaudeStatuslineCacheReader(
-                    cacheURL: home.appendingPathComponent("Library/Caches/seahelm/claude-statusline.json"),
-                    staleInterval: 6 * 60 * 60
-                )
-            ),
-            codexProvider: CodexUsageSummaryProvider(
-                rateLimitClient: CodexAppServerRateLimitClient(),
-                sessionUsageAggregator: CodexSessionUsageAggregator(
-                    rootURL: home.appendingPathComponent(".codex/sessions"),
-                    calendar: calendar,
-                    modificationGraceInterval: 24 * 60 * 60
-                )
-            ),
-            refreshInterval: refreshInterval
-        )
-    }
-
-    init(
-        claudeProvider: ClaudeUsageSummaryProvider,
-        codexProvider: CodexUsageSummaryProvider,
-        refreshInterval: TimeInterval = 60,
-        cacheFallbackMaxAge: TimeInterval = UsageSummaryStore.defaultCacheFallbackMaxAge
-    ) {
-        self.claudeProvider = claudeProvider
-        self.codexProvider = codexProvider
-        self.refreshInterval = refreshInterval
-        self.cacheFallbackMaxAge = cacheFallbackMaxAge
-    }
-
-    deinit {
-        stop()
-    }
+    private var timer: Timer?
 
     func start() {
-        lock.lock()
-        defer { lock.unlock() }
         guard timer == nil else { return }
-
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: refreshInterval)
-        timer.setEventHandler { [weak self] in
-            self?.refresh()
-        }
-        self.timer = timer
-        timer.resume()
+        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.refresh() }
+        refresh()
     }
 
     func stop() {
-        lock.lock()
-        let timer = self.timer
-        self.timer = nil
-        lock.unlock()
-
-        timer?.setEventHandler {}
-        timer?.cancel()
+        timer?.invalidate()
+        timer = nil
     }
 
     private func refresh() {
-        lock.lock()
-        guard !isRefreshing else {
-            lock.unlock()
-            return
-        }
-        isRefreshing = true
-        lock.unlock()
-
-        let claudeCandidate = claudeProvider.snapshot()
-        let codexCandidate = codexProvider.snapshot()
-
-        lock.lock()
-        let now = Date()
-        let claudeResult = Self.resolveSnapshotForDisplay(
-            candidate: claudeCandidate,
-            cached: cachedClaudeSnapshot,
-            now: now,
-            maxCacheAge: cacheFallbackMaxAge
-        )
-        let codexResult = Self.resolveSnapshotForDisplay(
-            candidate: codexCandidate,
-            cached: cachedCodexSnapshot,
-            now: now,
-            maxCacheAge: cacheFallbackMaxAge
-        )
-        cachedClaudeSnapshot = claudeResult.cache
-        cachedCodexSnapshot = codexResult.cache
-        isRefreshing = false
-        lock.unlock()
-
-        DispatchQueue.main.async { [weak self] in
-            self?.onUpdate?(claudeResult.snapshot, codexResult.snapshot)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard case .success(let r) = CoreSocketClient.call("usage.summary") else { return }
+            let claude = Self.snapshot(r["claude"], provider: .claude)
+            let codex = Self.snapshot(r["codex"], provider: .codex)
+            DispatchQueue.main.async { self?.onUpdate?(claude, codex) }
         }
     }
 
-    static func resolveSnapshotForDisplay(
-        candidate: UsageSnapshot,
-        cached: ProviderSnapshotCache?,
-        now: Date = Date(),
-        maxCacheAge: TimeInterval = defaultCacheFallbackMaxAge
-    ) -> (snapshot: UsageSnapshot, cache: ProviderSnapshotCache) {
-        var cache = cached ?? ProviderSnapshotCache(provider: candidate.provider)
-        cache.ingest(candidate, now: now)
-        return (cache.displaySnapshot(now: now, maxCacheAge: maxCacheAge), cache)
-    }
-}
-
-extension UsageSummaryStore {
-    struct ProviderSnapshotCache: Equatable {
-        let provider: UsageProvider
-        private(set) var rateLimit: UsageRateLimitWindow?
-        private(set) var rateLimitUpdatedAt: Date?
-        private(set) var weeklyRateLimit: UsageRateLimitWindow?
-        private(set) var weeklyRateLimitUpdatedAt: Date?
-        private(set) var todayTokens: Int?
-        private(set) var todayTokensUpdatedAt: Date?
-        private(set) var isStale = true
-
-        mutating func ingest(_ snapshot: UsageSnapshot, now: Date = Date()) {
-            let snapshotTime = snapshot.updatedAt ?? now
-            if let rateLimit = snapshot.rateLimit {
-                self.rateLimit = rateLimit
-                self.rateLimitUpdatedAt = snapshotTime
-            }
-            if let weeklyRateLimit = snapshot.weeklyRateLimit {
-                self.weeklyRateLimit = weeklyRateLimit
-                self.weeklyRateLimitUpdatedAt = snapshotTime
-            }
-            if let todayTokens = snapshot.todayTokens {
-                self.todayTokens = todayTokens
-                self.todayTokensUpdatedAt = snapshotTime
-            }
-            isStale = snapshot.isStale
+    /// One provider's snapshot as the core sends it; empty and stale when
+    /// the core has nothing for it.
+    static func snapshot(_ v: Any?, provider: UsageProvider) -> UsageSnapshot {
+        let d = v as? [String: Any] ?? [:]
+        func window(_ w: Any?) -> UsageRateLimitWindow? {
+            guard let w = w as? [String: Any], let used = w["used_percent"] as? Int else { return nil }
+            return UsageRateLimitWindow(usedPercent: used,
+                                        resetsAt: (w["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) },
+                                        label: w["label"] as? String)
         }
-
-        func displaySnapshot(now: Date = Date(), maxCacheAge: TimeInterval) -> UsageSnapshot {
-            let displayRateLimit = isFresh(rateLimitUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? rateLimit : nil
-            let displayWeeklyRateLimit = isFresh(weeklyRateLimitUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? weeklyRateLimit : nil
-            let displayTodayTokens = isFreshForToday(todayTokensUpdatedAt, now: now, maxCacheAge: maxCacheAge) ? todayTokens : nil
-            let displayUpdatedAt = [displayRateLimit == nil ? nil : rateLimitUpdatedAt,
-                                    displayWeeklyRateLimit == nil ? nil : weeklyRateLimitUpdatedAt,
-                                    displayTodayTokens == nil ? nil : todayTokensUpdatedAt]
-                .compactMap { $0 }
-                .max()
-            return UsageSnapshot(
-                provider: provider,
-                rateLimit: displayRateLimit,
-                weeklyRateLimit: displayWeeklyRateLimit,
-                todayTokens: displayTodayTokens,
-                updatedAt: displayUpdatedAt,
-                isStale: isStale || displayUpdatedAt == nil
-            )
-        }
-
-        private func isFresh(_ date: Date?, now: Date, maxCacheAge: TimeInterval) -> Bool {
-            guard let date else { return false }
-            return now.timeIntervalSince(date) <= maxCacheAge
-        }
-
-        private func isFreshForToday(_ date: Date?, now: Date, maxCacheAge: TimeInterval) -> Bool {
-            guard isFresh(date, now: now, maxCacheAge: maxCacheAge),
-                  let date else { return false }
-            return Calendar.current.isDate(date, inSameDayAs: now)
-        }
+        return UsageSnapshot(provider: provider, rateLimit: window(d["rate_limit"]),
+                             weeklyRateLimit: window(d["weekly_rate_limit"]),
+                             todayTokens: d["today_tokens"] as? Int,
+                             updatedAt: (d["updated_at"] as? Double).map { Date(timeIntervalSince1970: $0) },
+                             isStale: d["is_stale"] as? Bool ?? true)
     }
 }
