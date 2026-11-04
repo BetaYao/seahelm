@@ -301,6 +301,53 @@ impl Core {
         }
     }
 
+    /// Append what the core decides to `path`, one JSON line per event, for
+    /// reading back afterwards (`seahelm-core log`, A/B against a client):
+    /// status changes, notices, panes closing or moving, unseen
+    /// completions. `pane.updated` (every refresh) is left out. Each line
+    /// carries the wall-clock time. The file rolls over to `<path>.1` past
+    /// 20 MB. Runs for the life of the core on a thread of its own.
+    pub fn spawn_event_log(self: &Arc<Self>, path: PathBuf) {
+        const LOGGED: [&str; 5] = ["pane.status_changed", "pane.notice", "pane.closed", "pane.rehomed", "pane.unseen_changed"];
+        const ROLL_AT: u64 = 20 << 20;
+        let core = Arc::clone(self);
+        let _ = std::thread::Builder::new().name("seahelm-core-event-log".into()).spawn(move || {
+            let mut after = core.lock().registry.seq();
+            loop {
+                let batch = {
+                    let mut st = core.lock();
+                    while st.registry.seq() <= after {
+                        st = core.changed.wait_timeout(st, Duration::from_secs(60)).unwrap_or_else(|e| e.into_inner()).0;
+                    }
+                    let batch = st.registry.events().entries_after(after);
+                    after = st.registry.seq().max(after);
+                    batch
+                };
+                let lines: Vec<String> = batch
+                    .into_iter()
+                    .filter(|(_, ev)| ev.get("type").and_then(Value::as_str).is_some_and(|t| LOGGED.contains(&t)))
+                    .filter_map(|(_, mut ev)| {
+                        if let Some(o) = ev.as_object_mut() {
+                            o.insert("logged_at".into(), json!(wall_clock()));
+                        }
+                        serde_json::to_string(&ev).ok()
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    continue;
+                }
+                if std::fs::metadata(&path).map(|m| m.len() > ROLL_AT).unwrap_or(false) {
+                    let _ = std::fs::rename(&path, path.with_extension("jsonl.1"));
+                }
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                    for line in lines {
+                        let _ = writeln!(f, "{line}");
+                    }
+                }
+            }
+        });
+    }
+
     /// `events.subscribe {types?, pane_id?, events_after?}`: replay what the
     /// ring still holds after `events_after`, then stream as it happens.
     fn subscribe(self: Arc<Self>, p: Value) -> Reply {
@@ -743,4 +790,9 @@ fn registration(p: &Value) -> Option<Registration> {
         agent_type: p.get("agent_type").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default(),
         started_at: p.get("started_at").and_then(Value::as_f64),
     })
+}
+
+/// Seconds since the epoch, for the event log.
+fn wall_clock() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }

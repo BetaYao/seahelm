@@ -10,6 +10,7 @@ mod core_client;
 mod fleet;
 mod fonts;
 mod keys;
+mod notify;
 mod platform;
 mod session;
 mod split;

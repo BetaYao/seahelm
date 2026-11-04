@@ -13,6 +13,7 @@ use gpui::{
 
 use crate::assets::icon;
 use crate::core_client::{self, WorktreeState};
+use crate::notify;
 use crate::fleet::{self, Dot, GitStats, Group, Grouping, Item, Snapshot};
 use crate::platform;
 use crate::session;
@@ -86,6 +87,8 @@ pub struct Workspace {
     /// Nothing has had the keyboard yet: the first frame with a terminal
     /// gives it the focused pane, so typing works without a click.
     needs_focus: bool,
+    /// Whether the window's activation is being reported to the core yet.
+    watching_activation: bool,
     sidebar_width: f32,
     sidebar_visible: bool,
     dragging_divider: bool,
@@ -110,6 +113,7 @@ impl Workspace {
             split_drag: None,
             grouping: Grouping::default(),
             needs_focus: true,
+            watching_activation: false,
             sidebar_width: SIDEBAR_DEFAULT,
             sidebar_visible: true,
             dragging_divider: false,
@@ -119,6 +123,8 @@ impl Workspace {
             core: HashMap::new(),
         };
         Self::poll_core(cx);
+        Self::listen_core(cx);
+        notify::log("launch", serde_json::json!({"version": env!("CARGO_PKG_VERSION")}));
         Self::poll_fleet(cx);
         Self::poll_git(cx);
         Self::poll_memory(cx);
@@ -177,6 +183,67 @@ impl Workspace {
         .detach();
     }
 
+    /// The core's events as they happen: a status change refreshes the rows
+    /// at once rather than at the next poll, and a notice is shown as a
+    /// banner. Both are logged for comparing with the macOS app.
+    fn listen_core(cx: &mut Context<Self>) {
+        let (tx, mut rx) = futures::channel::mpsc::unbounded();
+        core_client::subscribe(&["pane.status_changed", "pane.notice"], tx);
+        cx.spawn(async move |this, cx| {
+            use futures::StreamExt;
+            while let Some(ev) = rx.next().await {
+                let kind = ev.get("type").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+                let get = |k: &str| ev.get(k).cloned().unwrap_or_default();
+                match kind.as_str() {
+                    "pane.notice" => {
+                        let shown = notify::text(&ev);
+                        notify::log(
+                            "notice",
+                            serde_json::json!({"pane": get("pane_session_key"), "worktree": get("worktree_path"),
+                                "status": get("new_status"), "shown": shown.is_some()}),
+                        );
+                        if let Some((title, body)) = shown {
+                            cx.background_executor().spawn(async move { notify::deliver(&title, &body) }).detach();
+                        }
+                    }
+                    _ => {
+                        notify::log(
+                            "status",
+                            serde_json::json!({"pane": get("pane_session_key"), "worktree": get("worktree_path"),
+                                "from": get("old_status"), "to": get("status")}),
+                        );
+                        let states = cx.background_executor().spawn(async { core_client::worktrees() }).await;
+                        let alive = this
+                            .update(cx, |w, cx| {
+                                if w.core != states {
+                                    w.core = states;
+                                    cx.notify();
+                                }
+                            })
+                            .is_ok();
+                        if !alive {
+                            break;
+                        }
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// What is on screen, for the core's unseen-completion and banner
+    /// decisions: the selected worktree, and whether the window is the
+    /// active one.
+    fn report_visible(&self, active: bool, cx: &mut Context<Self>) {
+        let path = self.selected.as_deref().and_then(|id| self.fleet.find(id)).map(|i| i.worktree_path.clone());
+        cx.background_executor()
+            .spawn(async move {
+                let worktrees: Vec<String> = path.into_iter().collect();
+                let _ = core_client::call("client.visible", serde_json::json!({"worktrees": worktrees, "app_active": active}));
+            })
+            .detach();
+    }
+
     /// Diff stats for every worktree, every fifteen seconds.
     fn poll_git(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| loop {
@@ -231,13 +298,8 @@ impl Workspace {
     fn select(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         self.selected = Some(id.clone());
         // On screen in a frontmost window: a turn that ends here is seen.
-        if let Some(path) = self.fleet.find(&id).map(|i| i.worktree_path.clone()) {
-            cx.background_executor()
-                .spawn(async move {
-                    let _ = core_client::call("client.visible", serde_json::json!({"worktrees": [path], "app_active": true}));
-                })
-                .detach();
-        }
+        self.report_visible(window.is_window_active(), cx);
+        notify::log("select", serde_json::json!({"worktree": id}));
         if let Some(term) = self.terminal_for(&id, window, cx) {
             window.focus(&term.focus_handle(cx));
         }
@@ -316,6 +378,7 @@ impl Workspace {
     fn split(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else { return };
         let leaf = self.panes.entry(id.clone()).or_default().tree.split(axis);
+        notify::log("split", serde_json::json!({"worktree": id, "axis": format!("{axis:?}")}));
         self.save_layouts();
         if let Some(v) = self.view_for(&id, leaf, window, cx) {
             window.focus(&v.focus_handle(cx));
@@ -333,6 +396,7 @@ impl Workspace {
             return;
         }
         panes.views.remove(&leaf);
+        notify::log("close_pane", serde_json::json!({"worktree": id, "leaf": leaf}));
         let name = pane_session(&id, leaf);
         cx.background_executor()
             .spawn(async move {
@@ -452,6 +516,7 @@ impl Workspace {
     /// The contrast button: dark ↔ light, the chrome and every pane.
     fn toggle_theme(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         theme::set_dark(!theme::is_dark());
+        notify::log("theme", serde_json::json!({"dark": theme::is_dark()}));
         for panes in self.panes.values() {
             for view in panes.views.values() {
                 view.update(cx, |v, cx| v.refresh_theme(cx));
@@ -588,6 +653,15 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected.clone().filter(|id| self.fleet.find(id).is_some());
         let body = selected.as_deref().map(|id| self.panes_body(id, window, cx));
+        if !self.watching_activation {
+            self.watching_activation = true;
+            cx.observe_window_activation(window, |w, window, cx| {
+                let active = window.is_window_active();
+                notify::log(if active { "activate" } else { "deactivate" }, serde_json::json!({}));
+                w.report_visible(active, cx);
+            })
+            .detach();
+        }
         if self.needs_focus {
             if let Some(view) = selected.as_deref().and_then(|id| self.terminal_for(id, window, cx)) {
                 window.focus(&view.focus_handle(cx));

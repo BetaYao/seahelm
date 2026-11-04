@@ -87,3 +87,34 @@ pub fn worktrees() -> std::collections::HashMap<String, WorktreeState> {
         })
         .collect()
 }
+
+/// Follow the core's event stream (`events.subscribe`) on a thread of its
+/// own, handing each event to `tx`; reconnects (after the core restarts,
+/// say) with a growing pause. Ends when `tx` is closed.
+pub fn subscribe(types: &[&str], tx: futures::channel::mpsc::UnboundedSender<Value>) {
+    let types: Vec<String> = types.iter().map(|t| t.to_string()).collect();
+    let _ = std::thread::Builder::new().name("seahelm-core-events".into()).spawn(move || {
+        let mut pause = Duration::from_secs(1);
+        while !tx.is_closed() {
+            if let Ok(mut stream) = crate::platform::connect(&socket()) {
+                let req = json!({"jsonrpc": "2.0", "id": 1, "method": "events.subscribe", "params": {"types": types}});
+                let mut line = serde_json::to_vec(&req).unwrap_or_default();
+                line.push(b'\n');
+                if stream.write_all(&line).is_ok() {
+                    pause = Duration::from_secs(1);
+                    // The core pings every 15 s; a minute of silence is a dead core.
+                    stream.set_read_timeout(Some(Duration::from_secs(60))).ok();
+                    for line in BufReader::new(stream).lines() {
+                        let Ok(line) = line else { break };
+                        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+                        if v.get("type").is_some() && tx.unbounded_send(v).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(pause);
+            pause = (pause * 2).min(Duration::from_secs(30));
+        }
+    });
+}

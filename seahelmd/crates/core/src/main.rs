@@ -76,6 +76,13 @@ fn serve() -> Result<()> {
     let listener = rpc::bind(&path)?;
     let core = core::Core::start()?;
     poller::spawn(Arc::clone(&core));
+    // Beside a socket given by the environment (a scratch core), so a test
+    // core never writes into the real log.
+    let event_log = match std::env::var_os("SEAHELM_CORE_SOCKET") {
+        Some(sock) => std::path::PathBuf::from(format!("{}.events.jsonl", sock.to_string_lossy())),
+        None => rpc::config_dir().join("core-events.jsonl"),
+    };
+    core.spawn_event_log(event_log);
     eprintln!("seahelm-core listening on {}", path.display());
     rpc::serve(listener, core)
 }
