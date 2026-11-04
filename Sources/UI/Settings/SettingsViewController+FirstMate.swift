@@ -13,6 +13,9 @@ extension SettingsViewController {
         fm.enabled.action = #selector(firstMateGlobalChanged)
         fm.paused.target = self
         fm.paused.action = #selector(firstMateGlobalChanged)
+        fm.inCore.state = config.autopilotRunsInCore ? .on : .off
+        fm.inCore.target = self
+        fm.inCore.action = #selector(firstMateGlobalChanged)
         let defaults = AutomationConfig.defaults(overriding: config.autopilotAutonomy)
         var autonomyRows: [NSView] = []
         for action in AutopilotAction.allCases {
@@ -71,6 +74,7 @@ extension SettingsViewController {
                 SettingsRow.make("Enabled", subtitle: "An agent session of its own, woken by your repos' rules: CI going red, PRs merging.", control: fm.enabled),
                 SettingsRow.make("Paused", subtitle: "Events are still recorded; nothing is handed to First Mate until you resume.", control: fm.paused),
                 SettingsRow.make("Agent", subtitle: "Changing it restarts First Mate's session as the new agent.", control: fm.agent),
+                SettingsRow.make("Run in seahelm-core", subtitle: "The background service runs First Mate instead of this app, so it keeps working with the app closed and every seahelm window (and Windows / Linux) shares it. Switching restarts its session.", control: fm.inCore),
                 SettingsRow.stacked(nil, content: fm.agentGuard),
                 SettingsRow.actions([open, orders]),
             ]),
@@ -107,6 +111,7 @@ extension SettingsViewController {
         guard pages["firstMate"] != nil else { return }
         config.autopilotEnabled = fm.enabled.state == .on
         config.autopilotPaused = fm.paused.state == .on
+        config.autopilotOwner = fm.inCore.state == .on ? "core" : nil
         var raw: [String: String] = [:]
         for (action, popup) in fm.autonomy {
             if let title = popup.titleOfSelectedItem, AutomationConfig.defaultAutonomy[action]?.rawValue != title {
@@ -231,6 +236,7 @@ extension SettingsViewController {
 final class FirstMateSettingsControls {
     let enabled = NSSwitch()
     let paused = NSSwitch()
+    let inCore = NSSwitch()
     let agent = NSPopUpButton()
     let agentGuard = NSTextField(wrappingLabelWithString: "")
     var autonomy: [AutopilotAction: NSPopUpButton] = [:]

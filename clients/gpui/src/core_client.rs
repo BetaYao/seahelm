@@ -135,6 +135,10 @@ pub struct Card {
     #[serde(default)]
     pub worktree_path: String,
     #[serde(default)]
+    pub project: String,
+    #[serde(default)]
+    pub branch: String,
+    #[serde(default)]
     pub message: String,
     /// What to show and tap, in order (ticks and Done on a multi-select).
     #[serde(default)]
@@ -157,8 +161,34 @@ pub fn answer_card(id: &str, index: usize) -> Result<(), String> {
     call("cards.answer", json!({"id": id, "index": index})).map(|_| ())
 }
 
-pub fn dismiss_card(id: &str) {
-    let _ = call("cards.dismiss", json!({"id": id}));
+/// First Mate as the core reports it (`autopilot.state`), plus whether its
+/// seahelmd session is up — it may be the macOS app's, when the core does
+/// not own First Mate. None when the core does not answer.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FirstMate {
+    /// The core runs First Mate.
+    pub enabled: bool,
+    /// off / starting / watching / thinking / needs you / paused.
+    pub activity: String,
+    pub detail: String,
+    pub session_live: bool,
+}
+
+pub const FIRST_MATE_SESSION: &str = "seahelm-first-mate";
+
+pub fn first_mate() -> Option<FirstMate> {
+    let v = call("autopilot.state", json!({})).ok()?;
+    let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+    Some(FirstMate {
+        enabled: v.get("enabled").and_then(Value::as_bool).unwrap_or(false),
+        activity: s("activity"),
+        detail: s("detail"),
+        session_live: seahelmd::client::connect(FIRST_MATE_SESSION).is_ok(),
+    })
+}
+
+pub fn dismiss_card(id: &str) -> Result<(), String> {
+    call("cards.dismiss", json!({"id": id})).map(|_| ())
 }
 
 /// The event in one line of the stream: `{"method": "event", "params": {…}}`.

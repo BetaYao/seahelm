@@ -108,6 +108,14 @@ pub struct Workspace {
     cards_announced: HashMap<String, f64>,
     cards_loaded: bool,
     window_active: bool,
+    /// Cards being answered or dismissed, and the ones that failed (with
+    /// why): a card is not done until the core takes it off the list.
+    card_submits: HashMap<String, Submit>,
+    /// The First Mate workbench is in the main area instead of a worktree.
+    first_mate_open: bool,
+    /// What the core says about First Mate; None while it does not answer.
+    first_mate: Option<core_client::FirstMate>,
+    first_mate_view: Option<Entity<TerminalView>>,
 }
 
 impl Workspace {
@@ -136,6 +144,10 @@ impl Workspace {
             cards: Vec::new(),
             cards_announced: HashMap::new(),
             cards_loaded: false,
+            card_submits: HashMap::new(),
+            first_mate_open: false,
+            first_mate: None,
+            first_mate_view: None,
             window_active: true,
         };
         Self::poll_core(cx);
@@ -190,13 +202,21 @@ impl Workspace {
                 return;
             }
             loop {
-                let (states, prs) =
-                    cx.background_executor().spawn(async { (core_client::worktrees(), core_client::prs()) }).await;
+                let (states, prs, fm) = cx
+                    .background_executor()
+                    .spawn(async { (core_client::worktrees(), core_client::prs(), core_client::first_mate()) })
+                    .await;
                 let alive = this
                     .update(cx, |w, cx| {
-                        if w.core != states || w.prs != prs {
+                        if w.core != states || w.prs != prs || w.first_mate != fm {
                             w.core = states;
                             w.prs = prs;
+                            // The session went away under an open view: let it go,
+                            // so a new one is attached when it comes back.
+                            if !fm.as_ref().is_some_and(|f| f.session_live) {
+                                w.first_mate_view = None;
+                            }
+                            w.first_mate = fm;
                             cx.notify();
                         }
                     })
@@ -316,6 +336,7 @@ impl Workspace {
         }
         self.cards_announced = announced;
         self.cards_loaded = true;
+        self.card_submits.retain(|id, _| cards.iter().any(|c| &c.id == id));
         if self.cards != cards {
             self.cards = cards;
             cx.notify();
@@ -328,13 +349,35 @@ impl Workspace {
 
     fn answer_card(&mut self, id: String, index: usize, cx: &mut Context<Self>) {
         notify::log("card.answer", serde_json::json!({"id": id, "index": index}));
-        cx.background_executor()
-            .spawn(async move {
-                if let Err(e) = core_client::answer_card(&id, index) {
-                    eprintln!("seahelm-gpui: answer {id}: {e}");
+        self.submit_card(id.clone(), cx, move || core_client::answer_card(&id, index));
+    }
+
+    /// Hand a card's answer to the core and show it as in flight until the
+    /// core says how it went: done, it leaves the list (`cards.changed`);
+    /// failed, it stays with the reason and can be tried again.
+    fn submit_card(&mut self, id: String, cx: &mut Context<Self>, run: impl FnOnce() -> Result<(), String> + Send + 'static) {
+        if matches!(self.card_submits.get(&id), Some(Submit::Sending)) {
+            return;
+        }
+        self.card_submits.insert(id.clone(), Submit::Sending);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_executor().spawn(async move { run() }).await;
+            let _ = this.update(cx, |w, cx| {
+                match result {
+                    // A card that stays (a multi-select tick) is ready again.
+                    Ok(()) => {
+                        w.card_submits.remove(&id);
+                    }
+                    Err(e) => {
+                        eprintln!("seahelm-gpui: card {id}: {e}");
+                        w.card_submits.insert(id, Submit::Failed(failure_text(&e)));
+                    }
                 }
-            })
-            .detach();
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// A card's button took the click; typing goes back to the terminal.
@@ -346,7 +389,7 @@ impl Workspace {
 
     fn dismiss_card(&mut self, id: String, cx: &mut Context<Self>) {
         notify::log("card.dismiss", serde_json::json!({"id": id}));
-        cx.background_executor().spawn(async move { core_client::dismiss_card(&id) }).detach();
+        self.submit_card(id.clone(), cx, move || core_client::dismiss_card(&id));
     }
 
     /// The selected worktree's cards, above its terminals: what is asked,
@@ -356,91 +399,314 @@ impl Workspace {
         if cards.is_empty() {
             return None;
         }
-        let fg = theme::rgb(theme::fg());
         let mut strip = div().flex_none().flex().flex_col().gap(px(6.)).px(px(12.)).py(px(8.)).bg(tokens::sidebar_tint());
         for card in cards {
-            let tint = match card.kind.as_str() {
-                "suggestion" => tokens::accent(),
-                "approval" | "proposal" => tokens::attention(),
-                _ => tokens::waiting(),
-            };
-            let what = match card.kind.as_str() {
-                "question" | "choice" => "Needs an answer",
-                "suggestion" => "Next",
-                "approval" => "First Mate asks",
-                "proposal" => "First Mate suggests",
-                _ => "Report",
-            };
-            let mut options = div().flex().flex_row().flex_wrap().gap(px(6.));
-            for (i, label) in card.labels.iter().enumerate() {
-                let id = card.id.clone();
-                options = options.child(
-                    div()
-                        .id(SharedString::from(format!("card-{}-{i}", card.id)))
-                        .cursor_pointer()
-                        .px(px(9.))
-                        .py(px(3.))
-                        .rounded(px(5.))
-                        .border_1()
-                        .border_color(tokens::alpha(tint, 0.45))
-                        .hover(|s| s.bg(tokens::alpha(tint, 0.14)))
-                        .text_size(px(11.5))
-                        .line_height(px(16.))
-                        .text_color(fg)
-                        .child(label.clone())
-                        .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
-                            w.answer_card(id.clone(), i, cx);
-                            w.refocus_terminal(window, cx);
-                        })),
-                );
-            }
-            let dismiss = card.id.clone();
-            strip = strip.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(5.))
-                    .pl(px(9.))
-                    .border_l_2()
-                    .border_color(tint)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.))
-                            .child(div().text_size(px(10.5)).line_height(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(tint).child(what))
-                            .child(div().flex_1())
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!("card-x-{}", card.id)))
-                                    .cursor_pointer()
-                                    .text_size(px(11.))
-                                    .text_color(tokens::ink_faint())
-                                    .hover(|s| s.text_color(tokens::ink()))
-                                    .child("×")
-                                    .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
-                                        w.dismiss_card(dismiss.clone(), cx);
-                                        w.refocus_terminal(window, cx);
-                                    })),
-                            ),
-                    )
-                    .when(!card.message.trim().is_empty(), |d| {
-                        d.child(
-                            div()
-                                .max_h(px(64.))
-                                .overflow_hidden()
-                                .font_family(SYSTEM)
-                                .text_size(px(12.))
-                                .line_height(px(16.))
-                                .text_color(fg)
-                                .child(card.message.trim().to_string()),
-                        )
-                    })
-                    .child(options),
-            );
+            strip = strip.child(self.card_view(card, false, cx));
         }
         Some(strip.child(div().h(px(1.)).w_full().bg(tokens::hairline())).into_any_element())
+    }
+
+    /// One card: what kind, where (when `place`), what is asked, a button
+    /// per answer from the card's own labels, and how its answer is going.
+    /// Without a core, nothing can be answered.
+    fn card_view(&self, card: &core_client::Card, place: bool, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let fg = theme::rgb(theme::fg());
+        let tint = match card.kind.as_str() {
+            "suggestion" => tokens::accent(),
+            "approval" | "proposal" => tokens::attention(),
+            _ => tokens::waiting(),
+        };
+        let what = match card.kind.as_str() {
+            "question" | "choice" => "Needs an answer",
+            "suggestion" => "Next",
+            "approval" => "First Mate asks",
+            "proposal" => "First Mate suggests",
+            _ => "Report",
+        };
+        let submit = self.card_submits.get(&card.id);
+        let live = self.first_mate.is_some() && !matches!(submit, Some(Submit::Sending));
+        let mut options = div().flex().flex_row().flex_wrap().gap(px(6.));
+        for (i, label) in card.labels.iter().enumerate() {
+            let id = card.id.clone();
+            let mut button = div()
+                .id(SharedString::from(format!("card-{}-{i}{}", card.id, if place { "-wb" } else { "" })))
+                .px(px(9.))
+                .py(px(3.))
+                .rounded(px(5.))
+                .border_1()
+                .border_color(tokens::alpha(tint, 0.45))
+                .text_size(px(11.5))
+                .line_height(px(16.))
+                .text_color(fg)
+                .child(label.clone());
+            if live {
+                button = button
+                    .cursor_pointer()
+                    .hover(|s| s.bg(tokens::alpha(tint, 0.14)))
+                    .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
+                        w.answer_card(id.clone(), i, cx);
+                        w.refocus_after_card(window, cx);
+                    }));
+            } else {
+                button = button.opacity(0.45);
+            }
+            options = options.child(button);
+        }
+        let dismiss = card.id.clone();
+        let mut head = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.))
+            .child(div().flex_none().text_size(px(10.5)).line_height(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(tint).child(what));
+        // First Mate's own asks name no worktree: their kind says whose they are.
+        let own = card.project == "First Mate";
+        if place && !own {
+            let wt = if card.branch.is_empty() { short_name(&card.worktree_path) } else { card.branch.clone() };
+            let where_ = if card.project.is_empty() { wt } else { format!("{} · {wt}", card.project) };
+            head = head.child(div().min_w_0().one_line().text_size(px(10.5)).line_height(px(14.)).text_color(tokens::ink_faint()).child(where_));
+        }
+        head = head.child(div().flex_1()).child(
+            div()
+                .id(SharedString::from(format!("card-x-{}{}", card.id, if place { "-wb" } else { "" })))
+                .when(live, |d| {
+                    d.cursor_pointer().hover(|s| s.text_color(tokens::ink())).on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
+                        w.dismiss_card(dismiss.clone(), cx);
+                        w.refocus_after_card(window, cx);
+                    }))
+                })
+                .text_size(px(11.))
+                .text_color(tokens::ink_faint())
+                .child("×"),
+        );
+        let status = match submit {
+            Some(Submit::Sending) => Some(("Sending…".to_string(), tokens::ink_faint())),
+            Some(Submit::Failed(why)) => Some((format!("{why} — try again"), tokens::danger())),
+            None => None,
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(5.))
+            .pl(px(9.))
+            .border_l_2()
+            .border_color(tint)
+            .child(head)
+            .when(!card.message.trim().is_empty(), |d| {
+                d.child(
+                    div()
+                        .max_h(px(if place { 120. } else { 64. }))
+                        .overflow_hidden()
+                        .font_family(SYSTEM)
+                        .text_size(px(12.))
+                        .line_height(px(16.))
+                        .text_color(fg)
+                        .child(card_body(card)),
+                )
+            })
+            .child(options)
+            .when_some(status, |d, (text, colour)| d.child(div().text_size(px(10.5)).line_height(px(14.)).text_color(colour).child(text)))
+            .into_any_element()
+    }
+
+    /// After a card's click, typing goes back to the terminal that was in use.
+    fn refocus_after_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.first_mate_open {
+            if let Some(view) = self.first_mate_view.clone() {
+                window.focus(&view.focus_handle(cx));
+            }
+        } else {
+            self.refocus_terminal(window, cx);
+        }
+    }
+
+    // MARK: First Mate
+
+    /// The dock opens the workbench over the main area, or closes it.
+    fn toggle_first_mate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.first_mate_open = !self.first_mate_open;
+        notify::log(if self.first_mate_open { "first_mate.open" } else { "first_mate.close" }, serde_json::json!({}));
+        if self.first_mate_open {
+            if let Some(view) = self.first_mate_terminal(cx) {
+                window.focus(&view.focus_handle(cx));
+            }
+        } else {
+            self.refocus_terminal(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// First Mate's terminal, attached only once its session is up:
+    /// attaching never creates it (a session under that name without the
+    /// agent would be a bare shell posing as First Mate).
+    fn first_mate_terminal(&mut self, cx: &mut Context<Self>) -> Option<Entity<TerminalView>> {
+        if !self.first_mate.as_ref().is_some_and(|f| f.session_live) {
+            return None;
+        }
+        if self.first_mate_view.is_none() {
+            self.first_mate_view = Some(cx.new(|cx| {
+                let mut v = TerminalView::new(core_client::FIRST_MATE_SESSION.into(), cx);
+                v.font_size = px(crate::fonts::terminal_size());
+                v
+            }));
+        }
+        self.first_mate_view.clone()
+    }
+
+    /// The dock's two words about First Mate, and their colour.
+    fn first_mate_status(&self) -> (String, Rgba) {
+        match &self.first_mate {
+            None => ("Core offline".into(), tokens::ink_faint()),
+            Some(f) if !f.enabled && f.session_live => ("In the macOS app".into(), tokens::ink_dim()),
+            Some(f) if !f.enabled => ("Off".into(), tokens::ink_faint()),
+            Some(f) => match f.activity.as_str() {
+                "thinking" => ("Working".into(), tokens::running()),
+                "needs you" => ("Needs you".into(), tokens::attention()),
+                "paused" => ("Paused".into(), tokens::ink_faint()),
+                "starting" => ("Starting".into(), tokens::ink_dim()),
+                _ => ("Watching".into(), tokens::waiting()),
+            },
+        }
+    }
+
+    /// The workbench: First Mate's real terminal on the left, every card
+    /// waiting on the user on the right, each scrolling on its own.
+    fn workbench(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let bg = theme::rgb(theme::bg());
+        let left = match self.first_mate_terminal(cx) {
+            Some(view) => div().relative().flex_1().min_w_0().h_full().child(div().absolute().inset_0().child(view)),
+            None => {
+                let (title, body) = match &self.first_mate {
+                    None => ("seahelm-core is not answering", "Cards and First Mate come back when it does."),
+                    Some(f) if f.enabled => ("First Mate is starting", "Its session is being launched; the terminal appears here when it is up."),
+                    Some(_) => ("First Mate is off", "Turn it on in the macOS app (Settings ▸ First Mate), or set autopilot_enabled and autopilot_owner: \"core\" in config.json."),
+                };
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(6.))
+                    .px(px(40.))
+                    .font_family(SYSTEM)
+                    .child(div().text_size(px(22.)).text_color(tokens::accent()).child("⎈"))
+                    .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child(title))
+                    .child(div().max_w(px(420.)).text_size(px(12.)).line_height(px(17.)).text_color(tokens::ink_dim()).child(body))
+            }
+        };
+        let n = self.cards.len();
+        let mut list = div().id("workbench-cards").flex_1().min_h_0().overflow_y_scroll().px(px(12.)).py(px(12.)).flex().flex_col().gap(px(14.));
+        if n == 0 {
+            list = list.child(
+                div()
+                    .pt(px(36.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(6.))
+                    .font_family(SYSTEM)
+                    .child(div().text_size(px(20.)).text_color(tokens::running()).child("✓"))
+                    .child(div().text_size(px(12.)).text_color(tokens::ink_dim()).child("Nothing waiting on you")),
+            );
+        } else {
+            let cards = self.cards.clone();
+            for card in cards.iter().rev() {
+                list = list.child(self.card_view(card, true, cx));
+            }
+        }
+        let header = div()
+            .h(px(36.))
+            .flex_none()
+            .px(px(14.))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.))
+            .border_b_1()
+            .border_color(tokens::hairline())
+            .child(div().text_size(px(11.5)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child("Cards"))
+            .child(div().text_size(px(11.)).text_color(tokens::ink_faint()).child(if n == 0 { String::new() } else { n.to_string() }))
+            .child(div().flex_1())
+            .when(self.first_mate.is_none(), |d| d.child(div().text_size(px(10.5)).text_color(tokens::danger()).child("not connected")));
+        let right = div()
+            .w(px(WORKBENCH_CARDS_W))
+            .flex_none()
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(tokens::sidebar_tint())
+            .border_l_1()
+            .border_color(tokens::hairline())
+            .child(header)
+            .child(list);
+        div().flex_1().min_h_0().flex().flex_row().bg(bg).child(left).child(right).into_any_element()
+    }
+
+    /// At the foot of the fleet: First Mate, its state, the usage it was
+    /// given, and how many cards wait. Opens the workbench.
+    fn first_mate_dock(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (status, colour) = self.first_mate_status();
+        let n = self.cards.len();
+        let mut usage = div().flex().flex_row().items_center().gap(px(4.)).text_size(px(10.5)).line_height(px(14.));
+        for (i, r) in self.usage.iter().enumerate() {
+            if let Some(seg) = r.segments.first() {
+                let tint = match seg.severity.as_str() {
+                    "warn" => tokens::attention(),
+                    "critical" => tokens::danger(),
+                    _ => tokens::ink_dim(),
+                };
+                usage = usage
+                    .when(i > 0, |d| d.child(div().ml(px(4.)).text_color(tokens::ink_faint()).child("·")))
+                    .child(div().text_color(tokens::ink_faint()).child(format!("{} {}", r.name, seg.label)))
+                    .child(div().font_weight(FontWeight::MEDIUM).text_color(tint).child(seg.percent.clone()));
+            }
+        }
+        let open = self.first_mate_open;
+        div()
+            .id("first-mate-dock")
+            .flex_none()
+            .mt(px(10.))
+            .mb(px(12.))
+            .mx(px(12.))
+            .px(px(11.))
+            .py(px(10.))
+            .rounded(px(10.))
+            .border_1()
+            .border_color(tokens::alpha(tokens::accent(), if open { 0.55 } else { 0.22 }))
+            .bg(tokens::alpha(tokens::accent(), if open { 0.12 } else { 0.04 }))
+            .hover(|s| s.bg(tokens::alpha(tokens::accent(), 0.09)))
+            .cursor_pointer()
+            .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.toggle_first_mate(window, cx)))
+            .flex()
+            .flex_col()
+            .gap(px(7.))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(div().text_size(px(14.)).text_color(tokens::accent()).child("⎈"))
+                    .child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child("First Mate"))
+                    .child(div().flex_1())
+                    .child(div().size(px(6.)).rounded_full().bg(colour))
+                    .child(div().text_size(px(10.5)).text_color(colour).child(status)),
+            )
+            .when(!self.usage.is_empty(), |d| d.child(usage))
+            .child(
+                div()
+                    .text_size(px(10.5))
+                    .line_height(px(14.))
+                    .text_color(if n > 0 { tokens::attention() } else { tokens::ink_faint() })
+                    .child(match n {
+                        0 => "Nothing waiting · standing by".to_string(),
+                        1 => "1 card waiting for you".to_string(),
+                        n => format!("{n} cards waiting for you"),
+                    }),
+            )
     }
 
     fn report_visible(&self, active: bool, cx: &mut Context<Self>) {
@@ -505,6 +771,8 @@ impl Workspace {
     }
 
     fn select(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        // Picking a worktree is leaving First Mate; its session lives on.
+        self.first_mate_open = false;
         self.selected = Some(id.clone());
         // On screen in a frontmost window: a turn that ends here is seen.
         self.report_visible(window.is_window_active(), cx);
@@ -864,7 +1132,11 @@ impl Focusable for Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected.clone().filter(|id| self.fleet.find(id).is_some());
-        let body = selected.as_deref().map(|id| self.panes_body(id, window, cx));
+        let body = if self.first_mate_open {
+            Some(self.workbench(cx))
+        } else {
+            selected.as_deref().map(|id| self.panes_body(id, window, cx))
+        };
         if !self.watching_activation {
             self.watching_activation = true;
             cx.observe_window_activation(window, |w, window, cx| {
@@ -882,11 +1154,12 @@ impl Render for Workspace {
             }
         }
         let title: SharedString = match selected.as_deref().and_then(|id| self.fleet.find(id)) {
+            _ if self.first_mate_open => "First Mate".into(),
             Some(item) => item.title.clone().into(),
             None => "Seahelm".into(),
         };
         let width = self.sidebar_width;
-        let cards = self.selected_worktree().and_then(|wt| self.card_strip(&wt, cx));
+        let cards = if self.first_mate_open { None } else { self.selected_worktree().and_then(|wt| self.card_strip(&wt, cx)) };
 
         let mut root = div()
             .id("workspace")
@@ -961,51 +1234,7 @@ impl Workspace {
             .child(self.fleet_header(cx))
             .child(div().mt(px(11.)).h(px(1.)).w_full().bg(tokens::hairline()))
             .child(self.fleet_list(cx))
-            .when(!self.usage.is_empty(), |d| d.child(self.usage_foot()))
-    }
-
-    /// `─ Claude 5h 42% · 7d 18%   Codex 5h 12% ───` where the app's First
-    /// Mate dock sits: mono 11, muted, each percentage tinted by how much of
-    /// the window is used.
-    fn usage_foot(&self) -> impl IntoElement {
-        let rule = || div().h(px(1.)).bg(tokens::hairline());
-        let mut line = div().flex().flex_row().items_center().gap(px(6.)).child(rule().w(px(14.)).flex_none());
-        for (i, r) in self.usage.iter().enumerate() {
-            let mut group = div()
-                .flex()
-                .flex_row()
-                .flex_none()
-                .gap(px(4.))
-                .when(i > 0, |d| d.ml(px(6.)))
-                .child(div().font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink_dim()).child(r.name.clone()));
-            for (j, s) in r.segments.iter().enumerate() {
-                let tint = match s.severity.as_str() {
-                    "warn" => tokens::attention(),
-                    "critical" => tokens::danger(),
-                    _ => tokens::ink_dim(),
-                };
-                if j > 0 {
-                    group = group.child(div().text_color(tokens::ink_faint()).child("·"));
-                }
-                group = group
-                    .child(div().text_color(tokens::ink_faint()).child(s.label.clone()))
-                    .child(div().font_weight(FontWeight::MEDIUM).text_color(tint).child(s.percent.clone()));
-            }
-            line = line.child(group);
-        }
-        div()
-            .id("usage-foot")
-            .flex_none()
-            .mt(px(10.))
-            .mb(px(12.))
-            .mr(px(12.))
-            .ml(px(6.))
-            .px(px(6.))
-            .py(px(6.))
-            .overflow_hidden()
-            .text_size(px(11.))
-            .line_height(px(15.))
-            .child(line.child(rule().flex_1().min_w(px(8.))))
+            .child(self.first_mate_dock(cx))
     }
 
     /// 40pt: the traffic lights' 70×14 slot on the left, the icon cluster on
@@ -1221,13 +1450,29 @@ impl Workspace {
                     ),
             )
             .child(div().flex_1())
-            .child(
-                div().mr(px(8.)).child(
-                    icon_button("columns-2", tokens::alpha(fg, 0.55))
-                        .id("split-right")
-                        .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.split(Axis::Horizontal, window, cx))),
-                ),
-            )
+            .when(self.first_mate_open, |d| {
+                d.child(
+                    div()
+                        .id("close-first-mate")
+                        .mr(px(12.))
+                        .px(px(6.))
+                        .cursor_pointer()
+                        .text_size(px(14.))
+                        .text_color(tokens::alpha(fg, 0.55))
+                        .hover(|s| s.text_color(fg))
+                        .child("×")
+                        .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.toggle_first_mate(window, cx))),
+                )
+            })
+            .when(!self.first_mate_open, |d| {
+                d.child(
+                    div().mr(px(8.)).child(
+                        icon_button("columns-2", tokens::alpha(fg, 0.55))
+                            .id("split-right")
+                            .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.split(Axis::Horizontal, window, cx))),
+                    ),
+                )
+            })
             .when(!platform::MAC, |d| d.child(caption_buttons(maximized)));
         let body = match body {
             Some(b) => b,
@@ -1266,6 +1511,42 @@ impl Workspace {
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_divider_down))
             .child(div().h_full().w(px(if active { 2. } else { 1. })).bg(if active { tokens::accent() } else { tokens::separator() }))
+    }
+}
+
+/// The workbench's card column.
+const WORKBENCH_CARDS_W: f32 = 340.0;
+
+/// A card's answer, on its way to the core or failed there.
+#[derive(Clone, Debug, PartialEq)]
+enum Submit {
+    Sending,
+    Failed(String),
+}
+
+/// What a card says under its kind label, without repeating the label
+/// ("First Mate asks: …" under "First Mate asks").
+fn card_body(card: &core_client::Card) -> String {
+    let text = card.message.trim();
+    ["First Mate asks: ", "First Mate suggests: "]
+        .iter()
+        .find_map(|p| text.strip_prefix(p))
+        .unwrap_or(text)
+        .to_string()
+}
+
+/// A core error in a few words for the card.
+fn failure_text(e: &str) -> String {
+    let message = serde_json::from_str::<serde_json::Value>(e)
+        .ok()
+        .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_string))
+        .unwrap_or_else(|| e.to_string());
+    if message.contains("no such card") {
+        "Already answered elsewhere".into()
+    } else if message.contains("onnect") || message.contains("os error") {
+        "seahelm-core did not answer".into()
+    } else {
+        message
     }
 }
 
