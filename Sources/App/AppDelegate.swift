@@ -25,8 +25,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         _ = NotificationManager.shared
 
         var config = Config.load()
-        NotificationManager.shared.cooldown = config.notifications.cooldown
-        NotificationManager.shared.stabilityDelay = config.notifications.stabilityDelay
         NotificationManager.shared.soundPreference = config.notificationSound
 
         cleanOrphanSeahelmdSessions()

@@ -2,9 +2,6 @@ import Foundation
 
 protocol WorktreeStatusDelegate: AnyObject {
     func worktreeStatusDidUpdate(_ status: WorktreeStatus)
-    func paneStatusDidChange(worktreePath: String, paneIndex: Int,
-                             oldStatus: AgentStatus, newStatus: AgentStatus,
-                             lastMessage: String)
 }
 
 /// Thread safety: All methods must be called on the main queue.
@@ -123,16 +120,6 @@ class WorktreeStatusAggregator {
             backgroundBusy: backgroundBusy
         )
         paneStates[terminalID] = newPaneState
-
-        if statusChanged, let oldStatus = oldPaneState?.status {
-            delegate?.paneStatusDidChange(
-                worktreePath: worktreePath,
-                paneIndex: paneIndex,
-                oldStatus: oldStatus,
-                newStatus: status,
-                lastMessage: lastMessage
-            )
-        }
 
         rebuildWorktreeStatus(worktreePath: worktreePath)
     }

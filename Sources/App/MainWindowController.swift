@@ -2215,9 +2215,6 @@ extension MainWindowController: WorktreeStatusDelegate {
         tabCoordinator.handleWorktreeStatusUpdate(status)
     }
 
-    func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
-        tabCoordinator.handlePaneStatusChange(worktreePath: worktreePath, paneIndex: paneIndex, oldStatus: oldStatus, newStatus: newStatus, lastMessage: lastMessage)
-    }
 }
 
 // MARK: - Island Overlay

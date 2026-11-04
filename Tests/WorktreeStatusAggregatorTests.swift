@@ -11,9 +11,6 @@ final class WorktreeStatusAggregatorTests: XCTestCase {
             lastUpdatedStatus = status
         }
 
-        func paneStatusDidChange(worktreePath: String, paneIndex: Int, oldStatus: AgentStatus, newStatus: AgentStatus, lastMessage: String) {
-            paneChanges.append((worktreePath, paneIndex, oldStatus, newStatus, lastMessage))
-        }
     }
 
     func testSinglePaneUpdate() {
@@ -58,22 +55,6 @@ final class WorktreeStatusAggregatorTests: XCTestCase {
         XCTAssertEqual(ws.mostRecentPaneIndex, 2)
     }
 
-    func testStatusChangeFiresPaneCallback() {
-        let aggregator = WorktreeStatusAggregator()
-        let mockDelegate = MockDelegate()
-        aggregator.delegate = mockDelegate
-
-        aggregator.registerTerminal("t1", worktreePath: "/repo/main", leafIndex: 0)
-        aggregator.agentDidUpdate(terminalID: "t1", status: .running, lastMessage: "")
-
-        mockDelegate.paneChanges.removeAll()
-        aggregator.agentDidUpdate(terminalID: "t1", status: .waiting, lastMessage: "need input")
-
-        XCTAssertEqual(mockDelegate.paneChanges.count, 1)
-        XCTAssertEqual(mockDelegate.paneChanges[0].paneIndex, 1)
-        XCTAssertEqual(mockDelegate.paneChanges[0].oldStatus, .running)
-        XCTAssertEqual(mockDelegate.paneChanges[0].newStatus, .waiting)
-    }
 
     func testNoChangeDoesNotFireCallbacks() {
         let aggregator = WorktreeStatusAggregator()

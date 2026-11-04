@@ -6,47 +6,10 @@ final class PaneTransferTests: XCTestCase {
 
     // MARK: - PendingTransferTracker
 
-    func testRecordAndConsumeByPath() {
-        let tracker = PendingTransferTracker()
-        tracker.record(worktreePath: "/repo/.claude/worktrees/feature-x", paneId: "seahelm-repo-main")
 
-        let result = tracker.consume(newWorktreePath: "/repo/.claude/worktrees/feature-x")
-        XCTAssertEqual(result?.worktreePath, "/repo/.claude/worktrees/feature-x")
-        XCTAssertEqual(result?.paneId, "seahelm-repo-main")
-    }
 
-    func testConsumeRemovesEntry() {
-        let tracker = PendingTransferTracker()
-        tracker.record(worktreePath: "/repo/wt", paneId: "p1")
-        _ = tracker.consume(newWorktreePath: "/repo/wt")
-        XCTAssertNil(tracker.consume(newWorktreePath: "/repo/wt"))
-    }
 
-    /// The old tracker matched on directory NAME, so a new worktree in repo B
-    /// could consume a transfer recorded by a pane in repo A and the transfer
-    /// then destroyed A's tree. Matching on the full path removes the ambiguity
-    /// rather than defending against it.
-    func testSameNameInAnotherRepoDoesNotMatch() {
-        let tracker = PendingTransferTracker()
-        tracker.record(worktreePath: "/repo-a-worktrees/collide", paneId: "p1")
-        XCTAssertNil(tracker.consume(newWorktreePath: "/repo-b-worktrees/collide"))
-        XCTAssertNotNil(tracker.consume(newWorktreePath: "/repo-a-worktrees/collide"))
-    }
 
-    func testReRecordingSamePathDoesNotStack() {
-        let tracker = PendingTransferTracker()
-        tracker.record(worktreePath: "/repo/wt", paneId: "p1")
-        tracker.record(worktreePath: "/repo/wt", paneId: "p2")
-        XCTAssertEqual(tracker.consume(newWorktreePath: "/repo/wt")?.paneId, "p2")
-        XCTAssertNil(tracker.consume(newWorktreePath: "/repo/wt"))
-    }
-
-    func testStaleEntriesExpire() {
-        let tracker = PendingTransferTracker()
-        tracker.record(worktreePath: "/repo/wt", paneId: "p1")
-        tracker.expireAll()
-        XCTAssertNil(tracker.consume(newWorktreePath: "/repo/wt"))
-    }
 
     // MARK: - StationManager.moveLeaf
 
