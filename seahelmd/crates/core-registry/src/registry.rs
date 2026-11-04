@@ -277,6 +277,22 @@ impl Registry {
         self.panes.insert(r.pane, info);
     }
 
+    /// Give a pane a new client alias, keeping everything else: a client
+    /// that restarted names the same session with a new id.
+    pub fn set_alias(&mut self, pane: &str, alias: Option<String>) {
+        let Some(info) = self.panes.get_mut(pane) else { return };
+        if info.alias == alias {
+            return;
+        }
+        if let Some(old) = info.alias.take() {
+            self.aliases.remove(&old);
+        }
+        if let Some(a) = &alias {
+            self.aliases.insert(a.clone(), pane.to_string());
+        }
+        info.alias = alias;
+    }
+
     /// Forget a pane and every timer it had, and announce `pane.closed`.
     pub fn unregister(&mut self, pane: &str) {
         let closed = self.panes.remove(pane);

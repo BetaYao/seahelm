@@ -125,6 +125,11 @@ pub fn outcome_event(o: &Outcome) -> Value {
     );
     d.insert("last_message".into(), o.info.last_message.clone().into());
     d.insert("info".into(), pane_detail(&o.info));
+    // The event itself (kind and source, serde's shape), so a client can
+    // hand its consumers the same event the core decided on.
+    if let Ok(ev) = serde_json::to_value(&o.event) {
+        d.insert("event".into(), ev);
+    }
     // Only a completion carries the agent's real final prose; gating on the
     // flag stops unrelated events re-sending stale prose left on the snapshot.
     if o.is_completion_signal {

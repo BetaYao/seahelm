@@ -223,7 +223,13 @@ class StatusPublisher {
         lock.unlock()
     }
 
+    /// The app's own scan is off: seahelm-core decides status.
+    static let scanRetired = true
+
     private func schedulePoll() {
+        // seahelm-core reads every pane's screen and decides its status
+        // (CoreStatusFeed); the app no longer scans.
+        guard !Self.scanRetired else { return }
         lock.lock()
         guard pollingActive else {
             lock.unlock()

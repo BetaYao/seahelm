@@ -903,9 +903,20 @@ class TabCoordinator {
                     let controlDataSource = SeahelmControlDataSource(hookSink: handleEvent)
                     // seahelm-core watches what the app shows and runs the command
                     // language; see CoreLink.
-                    CoreLink.shared.panes = { [weak controlDataSource] in controlDataSource?.snapshotPanes().map(\.dict) ?? [] }
+                    CoreLink.shared.panes = { [weak self, weak controlDataSource] in
+                        var rows = controlDataSource?.snapshotPanes().map(\.dict) ?? []
+                        // First Mate is out of the fleet's list but its status is
+                        // the core's to decide like any pane's.
+                        if let id = self?.autopilot.stationId {
+                            rows.append(["pane_id": id, "pane_session_key": FirstMatePane.sessionName,
+                                         "worktree_path": FirstMatePane.directory, "branch": "", "project": ""])
+                        }
+                        return rows
+                    }
                     CoreLink.shared.worktrees = { [weak self] in self?.allWorktrees.map(\.info.path) ?? [] }
                     CoreLink.shared.start()
+                    // What every pane is doing comes from the core.
+                    CoreStatusFeed.shared.start()
                     self.mailPaneRouter = MailPaneRouter(sessions: self.commandSessions, accountEmail: self.config.gmailMail?.accountEmail)
                     self.mailPaneRouter?.route = self.commandRoute
                     if let account = self.config.gmailMail?.accountEmail {

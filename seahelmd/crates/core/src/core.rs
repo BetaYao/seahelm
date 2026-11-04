@@ -1047,6 +1047,9 @@ impl State {
             seen.insert(key.clone());
             let branch = str_param(p, "branch").unwrap_or_default();
             let project = str_param(p, "project").unwrap_or_default();
+            if self.registry.pane(&key).is_some() {
+                self.registry.set_alias(&key, str_param(p, "pane_id"));
+            }
             match self.registry.pane(&key).map(|i| i.worktree_path.clone()) {
                 Some(old) if old == worktree => {}
                 Some(_) => {

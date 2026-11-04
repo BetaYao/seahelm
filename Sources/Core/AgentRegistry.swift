@@ -390,6 +390,43 @@ class AgentRegistry {
         }
     }
 
+    /// One outcome seahelm-core decided (docs/app-reads-core.md): the pane's
+    /// fields as the core has them, and the event it decided on. No
+    /// arbitration here; the core has done it. Consumers get the same
+    /// `IngestOutcome` they always did. Any thread.
+    func applyDecided(terminalID: String, info: [String: Any], event: NormalizedEvent?,
+                      statusChanged: Bool, isCompletion: Bool) {
+        lock.lock()
+        globalSeq &+= 1
+        let seq = globalSeq
+        guard let current = agents[terminalID] else { lock.unlock(); return }
+        var next = current
+        CoreDecode.apply(info, to: &next)
+        // Where the core gives no status (a replay of a pane it has not
+        // decided yet), keep what is there rather than blanking it.
+        if info["status"] == nil { next.status = current.status }
+        let oldStatus = current.status
+        let newStatus = next.status
+        agents[terminalID] = next
+        var hold: Double = 0
+        if oldStatus != newStatus {
+            let now = Date()
+            hold = now.timeIntervalSince(statusEnteredAt[terminalID] ?? now)
+            statusEnteredAt[terminalID] = now
+        }
+        let ev = event ?? NormalizedEvent(terminalID: terminalID, source: .scan,
+                                          kind: .screenObserved(status: newStatus, message: next.lastMessage,
+                                                                activity: next.activityEvents, commandLine: next.commandLine,
+                                                                agentType: next.agentType, roundDuration: next.roundDuration,
+                                                                tasks: next.tasks, backgroundBusy: next.backgroundBusy))
+        appendToRingBufferLog(ev)
+        lock.unlock()
+        if event == nil, oldStatus == newStatus, Self.displayedStateUnchanged(current, next) { return }
+        notifyObservers(IngestOutcome(info: next, statusChanged: statusChanged || oldStatus != newStatus,
+                                      oldStatus: oldStatus, newStatus: newStatus, holdSeconds: hold,
+                                      isCompletionSignal: isCompletion, event: ev, seq: seq))
+    }
+
     func ingest(_ event: NormalizedEvent) {
         lock.lock()
         globalSeq &+= 1
@@ -1034,7 +1071,10 @@ class AgentRegistry {
         if let path = event.sessionPath {
             forwardTranscriptProse(terminalID: tid, path: path)
         }
-        ingest(event2)
+        // Status and the outcome consumers see come from seahelm-core, which
+        // gets the same hook from the bridge (CoreStatusFeed). Routing,
+        // session refs and transcript prose above stay here for now.
+        _ = event2
         if let hooks = channel(for: tid) as? HooksChannel {
             hooks.handleWebhookEvent(event)
         }
