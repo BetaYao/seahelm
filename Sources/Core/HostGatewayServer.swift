@@ -187,7 +187,7 @@ final class HostGatewayServer {
         }
     }
 
-    /// AgentRegistry → EventHub → every authenticated session.
+    /// Fleet → EventHub → every authenticated session.
     ///
     /// EventHub is already the fan-out seam the control socket and MQTT use, so
     /// the gateway subscribes rather than growing a second path out of the
@@ -206,7 +206,7 @@ final class HostGatewayServer {
         }
     }
 
-    /// MessageStreamHub → every authenticated session as `pane.message` notifies.
+    /// The core's message stream → every authenticated session as `pane.message` notifies.
     private var firstMateToken: NSObjectProtocol?
 
     /// First Mate's state, posted by the app on every change.
@@ -224,7 +224,7 @@ final class HostGatewayServer {
 
     private func subscribeToMessageStream() {
         guard messageToken == nil else { return }
-        messageToken = MessageStreamHub.shared.subscribe { [weak self] event in
+        messageToken = CoreMessages.shared.subscribe { [weak self] event in
             guard let self else { return }
             self.queue.async {
                 for state in self.connections.values {
@@ -246,7 +246,7 @@ final class HostGatewayServer {
             pingTimer = nil
             if let eventToken { EventHub.shared.unsubscribe(eventToken) }
             eventToken = nil
-            if let messageToken { MessageStreamHub.shared.unsubscribe(messageToken) }
+            if let messageToken { CoreMessages.shared.unsubscribe(messageToken) }
             messageToken = nil
             for connection in proxied.values {
                 connection.cancel()

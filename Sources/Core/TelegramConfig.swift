@@ -20,7 +20,7 @@ struct TelegramConfig: Codable, Equatable {
     /// commands. Empty means the channel connects but obeys nobody.
     var allowedUsers: [String]
 
-    /// Chat where `AgentRegistry.broadcast` (agent-finished notifications) is
+    /// Chat where `Fleet.broadcast` (agent-finished notifications) is
     /// sent. Falls back to the first numeric allowed user — a private chat's id
     /// *is* the user's id — so the common single-user setup needs no extra
     /// field. A username cannot serve here: the API only addresses chats by id.

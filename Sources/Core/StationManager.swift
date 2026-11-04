@@ -228,7 +228,7 @@ class StationManager {
         return name
     }
 
-    // MARK: - Primary station accessor (for AgentRegistry / backward compat)
+    // MARK: - Primary station accessor (for Fleet / backward compat)
 
     /// Returns the primary (first) station for the given worktree path, if any.
     func primaryStation(forPath path: String) -> Station? {

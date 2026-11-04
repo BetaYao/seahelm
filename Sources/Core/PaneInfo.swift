@@ -24,7 +24,7 @@ struct PaneInfo {
     var roundDuration: TimeInterval    // seconds in current running round
     let startedAt: Date?               // for computing totalDuration live
     weak var station: Station? // weak ref, MainWindowController owns
-    var channel: AgentChannel?         // communication channel (strong ref, AgentRegistry owns)
+    var channel: AgentChannel?         // communication channel (strong ref, Fleet owns)
     var taskProgress: TaskProgress     // current task progress
     var tasks: [TaskItem] = []          // webhook-tracked task items
     var activityEvents: [ActivityEvent] = []

@@ -42,7 +42,7 @@ class TerminalCoordinator {
             // Backfill agent resume refs so a session recreated on attach (e.g.
             // after reboot) relaunches the agent instead of a bare shell.
             for leaf in restored.allLeaves {
-                if let ref = config.agentSessions[leaf.paneSessionKey] {
+                if let ref = AgentSessionRef.forPane(leaf.paneSessionKey) {
                     StationRegistry.shared.station(forId: leaf.stationId)?.agentSessionRef = ref
                 }
             }
@@ -72,15 +72,15 @@ class TerminalCoordinator {
 
     // MARK: - Split Pane Operations
 
-    /// Enrol a freshly split pane in AgentRegistry. StationRegistry alone is not enough:
-    /// `AgentRegistry.handleWebhookEvent` resolves a hook's SEAHELM_PANE_ID to a station
+    /// Enrol a freshly split pane in Fleet. StationRegistry alone is not enough:
+    /// `Fleet.handleWebhookEvent` resolves a hook's SEAHELM_PANE_ID to a station
     /// and then requires that station to be a known agent, so a pane missing here
     /// silently falls back to the worktree's *first* pane — every hook, and every
     /// suggestion chip tapped for this pane, lands in a sibling.
     /// Branch/project come from a sibling in the same worktree, which shares both.
     private func registerSplitStation(_ station: Station, worktreePath: String, paneSessionKey: String) {
-        let sibling = AgentRegistry.shared.pane(forWorktree: worktreePath)
-        AgentRegistry.shared.register(
+        let sibling = Fleet.shared.pane(forWorktree: worktreePath)
+        Fleet.shared.register(
             station: station,
             worktreePath: worktreePath,
             branch: sibling?.branch ?? "",
@@ -205,7 +205,7 @@ class TerminalCoordinator {
     /// it and the pane keeps painting at the old width until the user focuses
     /// it and hits Enter. They take the resize immediately.
     private static func defersPtyResize(_ stationId: String) -> Bool {
-        !(AgentRegistry.shared.pane(for: stationId)?.agentType.isAIAgent ?? false)
+        !(Fleet.shared.pane(for: stationId)?.agentType.isAIAgent ?? false)
     }
 
     /// Create the new leaf and relayout without mid-create SIGWINCH storms on
@@ -296,7 +296,7 @@ class TerminalCoordinator {
     private static func nodeToLayout(_ node: SplitNode) -> LayoutNode {
         switch node {
         case let .leaf(_, stationId, paneSessionKey):
-            let agent = AgentRegistry.shared.pane(for: stationId)?.agentType
+            let agent = Fleet.shared.pane(for: stationId)?.agentType
             let named = (agent != nil && agent != .unknown) ? agent!.rawValue : nil
             return .pane(label: paneSessionKey, command: agent?.launchCommand, agent: named, cwd: nil)
         case let .split(_, axis, ratio, first, second):
@@ -408,8 +408,8 @@ class TerminalCoordinator {
         let worktreePath = tree.worktreePath
 
         SessionManager.killSession(leaf.paneSessionKey, backend: runtimeBackend)
-        config.agentSessions.removeValue(forKey: leaf.paneSessionKey)
-        AgentRegistry.shared.unregister(terminalID: leaf.stationId)
+        AgentSessionRef.forget(leaf.paneSessionKey)
+        Fleet.shared.unregister(terminalID: leaf.stationId)
         delegate?.terminalCoordinator(self, didClosePane: leaf.stationId)
 
         config.splitLayouts.removeValue(forKey: worktreePath)
@@ -428,7 +428,7 @@ class TerminalCoordinator {
 
         // Kill seahelmd session
         SessionManager.killSession(closed.paneSessionKey, backend: runtimeBackend)
-        config.agentSessions.removeValue(forKey: closed.paneSessionKey)
+        AgentSessionRef.forget(closed.paneSessionKey)
 
         // Remove station
         if let station = StationRegistry.shared.station(forId: closed.stationId) {
@@ -436,7 +436,7 @@ class TerminalCoordinator {
             station.destroy()
         }
         StationRegistry.shared.unregister(closed.stationId)
-        AgentRegistry.shared.unregister(terminalID: closed.stationId)
+        Fleet.shared.unregister(terminalID: closed.stationId)
         delegate?.terminalCoordinator(self, didClosePane: closed.stationId)
         container.surfaceViews.removeValue(forKey: closed.stationId)
 
@@ -653,7 +653,7 @@ class TerminalCoordinator {
         // agent already exited (its last TUI frame still matches a running
         // rule), so the warning offers a way through: Delete Anyway skips only
         // this guard — the dirty-worktree assessment still applies.
-        if !forcePastRunningGuard, AgentRegistry.shared.hasRunningPane(inWorktree: info.path) {
+        if !forcePastRunningGuard, Fleet.shared.hasRunningPane(inWorktree: info.path) {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "\u{201C}\(info.displayName)\u{201D} has an agent running"
@@ -768,7 +768,7 @@ class TerminalCoordinator {
     func deleteWorktreeUnattended(_ info: WorktreeInfo,
                                   completion: @escaping (Result<String, WorktreeUnattendedDeleteError>) -> Void) {
         guard !info.isMainWorktree else { return completion(.failure(.refused("the main checkout is not deleted"))) }
-        guard !AgentRegistry.shared.hasRunningPane(inWorktree: info.path) else {
+        guard !Fleet.shared.hasRunningPane(inWorktree: info.path) else {
             return completion(.failure(.refused("an agent is still running in it")))
         }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -831,7 +831,7 @@ class TerminalCoordinator {
         // Tear sessions down only after git deletion succeeded.
         if let tree = stationManager.tree(forPath: info.path) {
             for leaf in tree.allLeaves {
-                config.agentSessions.removeValue(forKey: leaf.paneSessionKey)
+                AgentSessionRef.forget(leaf.paneSessionKey)
                 if runtimeBackend != "local" {
                     SessionManager.killSession(leaf.paneSessionKey, backend: runtimeBackend)
                 }

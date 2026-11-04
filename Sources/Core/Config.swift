@@ -26,7 +26,6 @@ struct Config: Codable {
     /// from agent hook events; used to relaunch the agent (e.g. `claude
     /// --resume <id>`) when a backend session is recreated instead of falling
     /// back to a plain shell.
-    var agentSessions: [String: AgentSessionRef]
     /// Pairing identity for Host Gateway (`root_secret` / `mac_id`). Broker
     /// fields are legacy and ignored — MQTT publisher was removed.
     /// Pairing identity. The JSON key stays `mqtt` — see `PairingIdentity`.
@@ -107,7 +106,6 @@ struct Config: Codable {
         case selectedWorktreePath = "selected_worktree_path"
         case activeWorktreePaths = "active_worktree_paths"
         case focusedPaneIds = "focused_pane_ids"
-        case agentSessions = "agent_sessions"
         case pairing = "mqtt"
         case telegram
         case gmailMail = "gmail_mail"
@@ -153,7 +151,6 @@ struct Config: Codable {
         selectedWorktreePath = nil
         activeWorktreePaths = [:]
         focusedPaneIds = [:]
-        agentSessions = [:]
         pairing = nil
         telegram = nil
         gmailMail = nil
@@ -202,7 +199,6 @@ struct Config: Codable {
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
-        agentSessions = try container.decodeIfPresent([String: AgentSessionRef].self, forKey: .agentSessions) ?? [:]
         pairing = try container.decodeIfPresent(PairingIdentity.self, forKey: .pairing)
         telegram = try container.decodeIfPresent(TelegramConfig.self, forKey: .telegram)
         gmailMail = try container.decodeIfPresent(GmailMailConfig.self, forKey: .gmailMail)

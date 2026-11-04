@@ -35,6 +35,23 @@ class WorktreeStatusAggregator {
         lastActivityAt[worktreePath]
     }
 
+    /// Every worktree's panes as the layout has them now: new panes are
+    /// registered (in leaf order), panes that went are dropped.
+    func sync(trees: [String: SplitTree]) {
+        var now: [String: String] = [:]
+        for (path, tree) in trees {
+            for (index, leaf) in tree.allLeaves.enumerated() {
+                now[leaf.stationId] = path
+                registerTerminal(leaf.stationId, worktreePath: path, leafIndex: index)
+            }
+        }
+        for (id, path) in synced where now[id] != path {
+            unregisterTerminal(id, worktreePath: path)
+        }
+        synced = now
+    }
+    private var synced: [String: String] = [:]
+
     func registerTerminal(_ terminalID: String, worktreePath: String, leafIndex: Int) {
         terminalToWorktree[terminalID] = worktreePath
         var ids = worktreeTerminals[worktreePath] ?? []

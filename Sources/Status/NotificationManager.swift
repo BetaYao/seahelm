@@ -5,7 +5,7 @@ extension Notification.Name {
     static let navigateToWorktree = Notification.Name("seahelm.navigateToWorktree")
     static let repoViewDidChangeFocusedPane = Notification.Name("seahelm.repoViewDidChangeFocusedPane")
     /// Posted by `GhosttyNSView.becomeFirstResponder` with the `Station` as
-    /// object — the synchronous click→title path, independent of AgentRegistry polling.
+    /// object — the synchronous click→title path, independent of Fleet polling.
     static let paneDidAcquireFocus = Notification.Name("seahelm.paneDidAcquireFocus")
 }
 
@@ -437,10 +437,10 @@ class NotificationManager: NSObject {
     /// a transport, a relay, or push certificates — the IM app already has all
     /// three.
     ///
-    /// Hung off `deliver` rather than off AgentRegistry's ingest so the chat message
+    /// Hung off `deliver` rather than off Fleet's ingest so the chat message
     /// inherits this type's gating: the running → done edge, the per-key
     /// cooldown, and the stability delay that swallows an idle flicker mid-turn.
-    /// The AgentRegistry broadcast this replaced had none of those, and never fired on
+    /// The Fleet broadcast this replaced had none of those, and never fired on
     /// completion at all.
     ///
     /// Fires on every edge that earns a banner, whether or not the banner is

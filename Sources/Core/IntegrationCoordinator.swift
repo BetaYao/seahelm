@@ -71,7 +71,7 @@ final class IntegrationCoordinator {
     }
 
     /// An agent status outcome. Only the edge out of `.running` schedules work.
-    func handle(_ outcome: IngestOutcome) {
+    func handle(_ outcome: PaneChange) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard outcome.statusChanged,
               outcome.oldStatus == .running,

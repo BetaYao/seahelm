@@ -161,7 +161,7 @@ final class AutopilotCoordinator {
         station.backend = backend
         self.station = station
         StationRegistry.shared.register(station)
-        AgentRegistry.shared.register(station: station, worktreePath: FirstMatePane.directory, branch: "",
+        Fleet.shared.register(station: station, worktreePath: FirstMatePane.directory, branch: "",
                                       project: FirstMatePane.project, startedAt: Date(),
                                       paneSessionKey: FirstMatePane.sessionName, backend: backend)
         self.backend = backend
@@ -273,7 +273,7 @@ final class AutopilotCoordinator {
         state.pendingApprovals = 0
         activeRules = []
         if let station {
-            AgentRegistry.shared.unregister(terminalID: station.id)
+            Fleet.shared.unregister(terminalID: station.id)
             StationRegistry.shared.unregister(station.id)
         }
         station = nil
@@ -339,8 +339,8 @@ final class AutopilotCoordinator {
 
     // MARK: - Delivery
 
-    /// First Mate's outcomes, from `AgentRegistry.onOutcome`.
-    func firstMateOutcome(_ outcome: IngestOutcome) {
+    /// First Mate's outcomes, from `Fleet.onChange`.
+    func firstMateOutcome(_ outcome: PaneChange) {
         if outcome.newStatus == .running { awaitingTurn = false }
         // A finished turn closes the events it was about, and answers whoever asked.
         if outcome.newStatus == .idle, outcome.oldStatus == .running, !awaitingTurn {
@@ -359,7 +359,7 @@ final class AutopilotCoordinator {
     /// Hand the queue to First Mate if it is at rest and nothing holds it back.
     func deliverIfReady(now: Date = Date()) {
         guard enabled, !paused, !awaitingTurn, !queue.isEmpty, let id = station?.id,
-              AgentRegistry.shared.pane(for: id)?.status == .idle else { return }
+              Fleet.shared.pane(for: id)?.status == .idle else { return }
         let ready = queue.filter { d in
             let config = config(forRepo: d.event.repoPath).config
             return config?.settings.quietHours?.contains(now) != true
@@ -619,7 +619,7 @@ final class AutopilotCoordinator {
         guard enabled || (remote && remoteRunning), let id = station?.id else { state.activity = .off; return }
         state.watching = repoPaths().count
         if paused { state.activity = .paused; return }
-        let pane = AgentRegistry.shared.pane(for: id)
+        let pane = Fleet.shared.pane(for: id)
         state.doing = pane?.status == .running ? (pane?.lastMessage ?? "") : ""
         switch pane?.status {
         case .running?: state.activity = .thinking
@@ -680,7 +680,7 @@ final class AutopilotCoordinator {
         station.backend = backend
         self.station = station
         StationRegistry.shared.register(station)
-        AgentRegistry.shared.register(station: station, worktreePath: FirstMatePane.directory, branch: "",
+        Fleet.shared.register(station: station, worktreePath: FirstMatePane.directory, branch: "",
                                       project: FirstMatePane.project, startedAt: Date(),
                                       paneSessionKey: FirstMatePane.sessionName, backend: backend)
         auditOffset = (try? FileManager.default.attributesOfItem(atPath: FirstMatePane.auditPath))?[.size] as? UInt64 ?? 0
@@ -696,7 +696,7 @@ final class AutopilotCoordinator {
         remoteCards = []
         state.pendingApprovals = 0
         if let station {
-            AgentRegistry.shared.unregister(terminalID: station.id)
+            Fleet.shared.unregister(terminalID: station.id)
             StationRegistry.shared.unregister(station.id)
         }
         station = nil
@@ -783,7 +783,7 @@ final class AutopilotCoordinator {
             guard case .success(let r) = CoreSocketClient.call("message.snapshot", ["pane_id": FirstMatePane.sessionName]) else { return [] }
             return (r["messages"] as? [[String: Any]] ?? []).compactMap(MessageEvent.init(dict:))
         }
-        return MessageStreamHub.shared.snapshot(paneId: FirstMatePane.sessionName)
+        return CoreMessages.shared.snapshot(paneId: FirstMatePane.sessionName)
     }
 
     private static func stripping(_ prefix: String, from text: String) -> String {

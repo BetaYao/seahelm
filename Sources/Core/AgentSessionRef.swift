@@ -207,3 +207,32 @@ struct AgentSessionRef: Codable, Equatable {
 
     var supportsFork: Bool { Self.forkArgv(agent: agent, kind: kind, value: sessionId) != nil }
 }
+
+extension AgentSessionRef {
+    /// A reference as seahelm-core sends it (`agent.sessions`, `agent.session`).
+    init?(dict: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let ref = try? JSONDecoder().decode(AgentSessionRef.self, from: data) else { return nil }
+        self = ref
+    }
+
+    /// A pane's resume reference. seahelm-core keeps them (from the agents'
+    /// hooks); the app only asks. Main thread; asks the core directly when
+    /// the client has not heard from it yet.
+    static func forPane(_ paneSessionKey: String) -> AgentSessionRef? {
+        if let ref = CoreClient.shared.sessions[paneSessionKey] { return AgentSessionRef(dict: ref) }
+        guard case .success(let r) = CoreSocketClient.call("agent.sessions", timeout: 2),
+              let ref = (r["agent_sessions"] as? [String: [String: Any]])?[paneSessionKey] else { return nil }
+        return AgentSessionRef(dict: ref)
+    }
+}
+
+extension AgentSessionRef {
+    /// A pane is gone for good: the core forgets its reference, so a later
+    /// pane on the same session name starts fresh.
+    static func forget(_ paneSessionKey: String) {
+        DispatchQueue.global(qos: .utility).async {
+            _ = CoreSocketClient.call("agent.forget", ["pane_session_key": paneSessionKey])
+        }
+    }
+}

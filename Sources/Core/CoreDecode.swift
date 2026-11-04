@@ -1,10 +1,8 @@
 import Foundation
 
-/// seahelm-core's pane events, read back into the app's own types
-/// (docs/app-reads-core.md). The core sends each decided outcome with the
-/// whole pane (`info`, `events::pane_detail`) and the event it decided on
-/// (`event`, core-types' serde shape: `source` tagged by `type`, `kind` by
-/// `kind`). Pure.
+/// seahelm-core's panes and cards read into the app's types
+/// (docs/app-reads-core.md): a pane's `info` (`events::pane_detail`), and
+/// cards. Pure.
 enum CoreDecode {
     // MARK: the pane
 
@@ -32,52 +30,6 @@ enum CoreDecode {
         if has("program_state") { p.programState = programState(info["program_state"] as? String) }
         if let v = info["background_busy"] as? Bool { p.backgroundBusy = v }
         if let v = info["unseen"] as? Bool { p.unseenCompletion = v }
-    }
-
-    // MARK: the event
-
-    static func source(_ v: Any?) -> EventSource {
-        let d = v as? [String: Any] ?? [:]
-        switch d["type"] as? String {
-        case "hook": return .hook(d["name"] as? String ?? "")
-        case "osc7501": return .osc7501
-        default: return .scan
-        }
-    }
-
-    static func kind(_ v: Any?) -> NormalizedEventKind? {
-        guard let d = v as? [String: Any], let kind = d["kind"] as? String else { return nil }
-        let text = d["text"] as? String ?? ""
-        switch kind {
-        case "session_started": return .sessionStarted(label: d["label"] as? String ?? "")
-        case "user_prompt": return .userPrompt(text)
-        case "tool_use":
-            guard let a = activity(d["activity"]) else { return nil }
-            return .toolUse(a)
-        case "awaiting_input": return .awaitingInput(text)
-        case "agent_stopped": return .agentStopped(success: d["success"] as? Bool ?? true)
-        case "notification": return .notification(level: d["level"] as? String ?? "", text: text)
-        case "task_update": return .taskUpdate((d["tasks"] as? [[String: Any]] ?? []).compactMap(task))
-        case "suggest": return .suggest(options: d["options"] as? [String] ?? [])
-        case "question":
-            return .question(prompt: d["prompt"] as? String ?? "",
-                             options: d["options"] as? [String] ?? [],
-                             followups: (d["followups"] as? [[String: Any]] ?? []).map(questionSpec),
-                             flags: flags(d["flags"]))
-        case "screen_observed":
-            return .screenObserved(status: status(d["status"]) ?? .unknown,
-                                   message: d["message"] as? String ?? "",
-                                   activity: (d["activity"] as? [[String: Any]] ?? []).compactMap(activity),
-                                   commandLine: d["command_line"] as? String,
-                                   agentType: agentType(d["agent_type"]) ?? .unknown,
-                                   roundDuration: d["round_duration"] as? Double ?? 0,
-                                   tasks: (d["tasks"] as? [[String: Any]] ?? []).compactMap(task),
-                                   backgroundBusy: d["background_busy"] as? Bool ?? false)
-        case "program_status":
-            return .programStatus(programRecord(d["record"]))
-        default:
-            return nil
-        }
     }
 
     // MARK: pieces
@@ -129,17 +81,4 @@ enum CoreDecode {
         }
     }
 
-    static func programRecord(_ v: Any?) -> ProgramStatusRecord? {
-        guard let d = v as? [String: Any], let state = programState(d["state"] as? String) else { return nil }
-        let kind: ProgramStatusReport.Kind? = switch d["kind"] as? String {
-        case "permission": .permission
-        case "question": .question
-        case "auth": .auth
-        default: nil
-        }
-        let app = d["app"] as? String ?? ""
-        let report = ProgramStatusReport(state: state, kind: kind, progress: d["progress"] as? Int,
-                                         app: app, title: d["title"] as? String ?? "", msg: d["msg"] as? String ?? "")
-        return ProgramStatusRecord(report: report, app: app, stamp: 0)
-    }
 }

@@ -157,7 +157,7 @@ enum InitialAgentTaskDelivery {
     static func liveLookup() -> PaneLookup {
         var runningAgent: AgentType?
         return { worktreePath in
-            guard let pane = AgentRegistry.shared.panes(forWorktree: worktreePath).first,
+            guard let pane = Fleet.shared.panes(forWorktree: worktreePath).first,
                   let station = StationRegistry.shared.station(forId: pane.id) ?? pane.station,
                   let sessionKey = station.paneSessionKey, !sessionKey.isEmpty else { return nil }
             if runningAgent == nil {

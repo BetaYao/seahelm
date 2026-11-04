@@ -3,7 +3,7 @@ import Foundation
 /// The chat channels (Telegram, mail, …): inbound messages and button taps
 /// routed to the command language, outbound pushes, edits, drafts and
 /// buttons. Nothing here knows what an agent is doing; that is seahelm-core's
-/// (docs/app-reads-core.md). Pulled out of `AgentRegistry`, where it shared a
+/// (docs/app-reads-core.md). Pulled out of `Fleet`, where it shared a
 /// lock with the agent model; it moves to seahelm-gateway in time.
 final class ChannelHub {
     static let shared = ChannelHub()

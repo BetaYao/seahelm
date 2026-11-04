@@ -1,11 +1,10 @@
 import Foundation
 
-/// Bridges the control API to seahelm's live state: AgentRegistry for pane inventory
+/// Bridges the control API to seahelm's live state: Fleet for pane inventory
 /// and StationRegistry for terminal reads.
 final class SeahelmControlDataSource: ControlDataSource {
 
     /// The shared inbound-event sink (same closure the HTTP webhook used).
-    private let hookSink: (WebhookEvent) -> Void
 
     /// Set by the owner (TabCoordinator) to perform a split on the main thread.
     /// (targetStationId, axis, focus) → new station id, or nil if unsplittable.
@@ -54,14 +53,7 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// A remote client showed a pane (main thread — it redraws the fleet).
     var paneSeenHandler: ((String) -> Bool)?
 
-    init(hookSink: @escaping (WebhookEvent) -> Void = { _ in }) {
-        self.hookSink = hookSink
-    }
-
-    func ingestHook(json: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: json),
-              let event = try? WebhookEvent.parse(from: data) else { return }
-        hookSink(event)
+    init() {
     }
 
     func snapshotPanes() -> [PaneSnapshot] {
@@ -74,7 +66,7 @@ final class SeahelmControlDataSource: ControlDataSource {
         // the same two snapshots.
         let memoryBySessionKey = includingMemory ? sessionMemoryBySessionKey() : [:]
 
-        return AgentRegistry.shared.allPanes()
+        return Fleet.shared.allPanes()
             .filter { !FirstMatePane.isFirstMate(worktreePath: $0.worktreePath) }
             .map { s in
             let station = StationRegistry.shared.station(forId: s.id)
@@ -185,7 +177,7 @@ final class SeahelmControlDataSource: ControlDataSource {
 
     func paneStatus(paneId: String) -> String? {
         guard let sid = station(for: paneId)?.id else { return nil }
-        return AgentRegistry.shared.pane(for: sid)?.status.rawValue
+        return Fleet.shared.pane(for: sid)?.status.rawValue
     }
 
     func paneOptions(paneId: String) -> [[String: Any]]? {
@@ -321,86 +313,20 @@ final class SeahelmControlDataSource: ControlDataSource {
     }
 
     func messageSnapshot(paneId: String?) -> [[String: Any]] {
-        MessageStreamHub.shared.snapshot(paneId: paneId).map(\.dict)
+        CoreMessages.shared.snapshot(paneId: paneId).map(\.dict)
     }
 
     func messageHistory(paneId: String, beforeSeq: UInt64, limit: Int) -> [String: Any] {
-        let page = MessageStreamHub.shared.history(paneId: paneId, beforeSeq: beforeSeq, limit: limit)
+        let page = CoreMessages.shared.history(paneId: paneId, beforeSeq: beforeSeq, limit: limit)
         return ["messages": page.events.map(\.dict), "has_more": page.hasMore]
     }
 
+    /// Why the pane has the status it has: seahelm-core decides, so it is
+    /// the core's `pane.explain`. Blocking (a socket call).
     func explainPane(paneId: String) -> [String: Any]? {
-        guard let station = station(for: paneId) else { return nil }
-        let pane = AgentRegistry.shared.pane(for: station.id)
-        let agentType = pane?.agentType ?? .unknown
-        let manifest = ManifestStore.shared.manifest(for: agentType.manifestId)
-
-        let content = station.readViewportText() ?? ""
-        let osc = (title: station.oscTitle, progress: station.oscProgress)
-        let input = DetectionInput(screen: content.lowercased(), oscTitle: osc.title, oscProgress: osc.progress)
-
-        // Live screen detection (what the scan layer sees right now).
-        let scan = StatusDetector().detectDetailed(
-            processStatus: station.processStatus, shellInfo: nil, content: content,
-            manifest: manifest, osc: osc)
-        let hookStatus = pane?.hookStatus ?? .unknown
-        let hookIdleFresh = AgentRegistry.shared.hookIdleIsFresh(terminalID: station.id)
-        let programStatus = station.programStatus
-        let decided = AgentRegistry.arbitrateDetailed(scan: scan.state, hook: hookStatus,
-                                                      agentType: agentType, hookIdleFresh: hookIdleFresh,
-                                                      program: programStatus.liveRoot?.agentStatus ?? .unknown)
-
-        var result: [String: Any] = [
-            "pane_id": station.id,
-            "pane_session_key": station.paneSessionKey ?? "",
-            "agent": agentType.rawValue,
-            "manifest": manifest?.manifest.id ?? "",
-            "manifest_version": manifest?.manifest.version ?? "",
-            "authority": decided.authority,
-            "status": decided.status.rawValue,
-            "decided_by": decided.decidedBy,
-            "scan_status": scan.state.rawValue,
-            // True when no rule matched and `scan_status` is just the manifest's
-            // default — the screen is saying nothing, not saying "idle".
-            "scan_defaulted": scan.isDefaulted,
-            // Background work (a shell / monitor this session started). A separate
-            // axis from status: the agent can be idle at a prompt while it is true.
-            "background_busy": scan.backgroundBusy,
-            "hook_status": hookStatus.rawValue,
-            // True while a Stop is still inside its trailing-edge window, where a
-            // hook `.idle` outranks a screen that has not gone quiet yet.
-            "hook_idle_fresh": hookIdleFresh,
-            "process_status": "\(station.processStatus)",
-            "osc_title": osc.title,
-            "osc_progress": osc.progress,
-            // OSC 7501 records, root first. `program_status_live` is false once the
-            // program has handed the terminal back to the shell: its done/error
-            // records are kept but no longer decide the status.
-            "program_status_live": programStatus.liveRoot != nil,
-            "program_status": programStatus.records
-                .sorted { ($0.key.isEmpty ? "" : "/" + $0.key) < ($1.key.isEmpty ? "" : "/" + $1.key) }
-                .map { id, r -> [String: Any] in
-                    var d: [String: Any] = ["id": id, "state": "\(r.state)", "app": r.app]
-                    if let kind = r.report.kind { d["kind"] = "\(kind)" }
-                    if let progress = r.report.progress { d["progress"] = progress }
-                    if !r.report.title.isEmpty { d["title"] = r.report.title }
-                    if !r.report.msg.isEmpty { d["msg"] = r.report.msg }
-                    return d
-                },
-        ]
-        if let match = manifest?.matchDetail(input) {
-            result["matched_rule"] = [
-                "id": match.rule.id,
-                "state": match.rule.state,
-                "priority": match.rule.priority,
-                "region": match.rule.region,
-                "evidence": String(match.regionText.suffix(160)),
-            ]
-        } else {
-            result["matched_rule"] = NSNull()
-            result["default_status"] = manifest?.defaultStatus.rawValue ?? ""
-        }
-        return result
+        let key = StationRegistry.shared.station(forId: paneId)?.paneSessionKey ?? paneId
+        guard case .success(let r) = CoreSocketClient.call("pane.explain", ["pane_id": key]) else { return nil }
+        return r
     }
 
     func zoomPane(paneId: String?, mode: String) -> [String: Any]? {
@@ -535,7 +461,7 @@ final class SeahelmControlDataSource: ControlDataSource {
     static func presenceActor(_ station: Station) -> String {
         let key = PaneHandleRegistry.key(sessionKey: station.paneSessionKey ?? "", paneId: station.id)
         let handle = "#\(PaneHandleRegistry.shared.handle(for: key))"
-        guard let agent = AgentRegistry.shared.pane(for: station.id)?.agentType, agent.isAIAgent else {
+        guard let agent = Fleet.shared.pane(for: station.id)?.agentType, agent.isAIAgent else {
             return "Pane \(handle)"
         }
         return "\(agent.displayName) \(handle)"

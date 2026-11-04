@@ -222,7 +222,7 @@ class DashboardViewController: NSViewController {
     private func currentPaneTitle(forWorktree path: String) -> String? {
         guard let tree = stationManager?.tree(forPath: path),
               let stationId = PaneTitleResolver.focusedStationId(in: tree),
-              let pane = AgentRegistry.shared.panes(forWorktree: path)
+              let pane = Fleet.shared.panes(forWorktree: path)
                 .first(where: { $0.id == stationId })
         else { return nil }
         return PaneTitleResolver.title(for: pane)
@@ -1710,7 +1710,7 @@ extension DashboardViewController {
     }
 
     private func terminalTabTitle(leaf: SplitNode.LeafInfo, worktree: String) -> String {
-        if let pane = AgentRegistry.shared.panes(forWorktree: worktree)
+        if let pane = Fleet.shared.panes(forWorktree: worktree)
             .first(where: { $0.id == leaf.stationId }) {
             return PaneTitleResolver.title(for: pane)
         }

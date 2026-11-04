@@ -600,7 +600,7 @@ final class HostGatewaySession {
         // A client that kept its timeline across the drop says how far it got,
         // and gets only what came after. `replay` tells it which one it got:
         // "full" means drop what it holds, as a client from before this does.
-        let delta = ok ? Self.sinceSeq(params).flatMap { MessageStreamHub.shared.replay(after: $0) } : nil
+        let delta = ok ? Self.sinceSeq(params).flatMap { CoreMessages.shared.replay(after: $0) } : nil
         if ok {
             result["replay"] = delta == nil ? "full" : "delta"
             let reset = delta?.truncated.filter { inScope($0) } ?? []
@@ -640,7 +640,7 @@ final class HostGatewaySession {
             }
             // Replay MessageStream rings so text-mode clients paint without an
             // extra round trip (and without needing VT).
-            for ev in delta?.events ?? MessageStreamHub.shared.snapshot(paneId: nil)
+            for ev in delta?.events ?? CoreMessages.shared.snapshot(paneId: nil)
             where inScope(ev.paneSessionKey, ev.paneId) {
                 out.append(HostGatewayFrame.encode(
                     .notify(method: "pane.message", params: ev.dict)))

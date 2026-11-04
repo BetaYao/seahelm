@@ -108,7 +108,6 @@ protocol ControlDataSource: AnyObject {
     /// Feed an inbound hook/suggest payload (same shape as the HTTP webhook body)
     /// into the shared event sink. Hook delivery is fire-and-forget; Stop hooks
     /// are observation-only and never return a continuation/block decision.
-    func ingestHook(json: [String: Any])
 
     // MARK: Phase 2 — write channel + wait (default no-ops so read-only
     // conformers/fakes keep compiling).
@@ -365,13 +364,6 @@ final class ControlRouter {
                 return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
             }
             return .ok(["text": text])
-
-        case "hook":
-            // Raw webhook-shaped payload (parity with the HTTP webhook body).
-            // Hook delivery is deliberately fire-and-forget: a Stop hook reports
-            // the final response but cannot block the agent into another turn.
-            dataSource?.ingestHook(json: params)
-            return .ok([:])
 
         case "pane.send_text", "pane.run":
             guard let paneId = params["pane_id"] as? String, !paneId.isEmpty else {
@@ -667,26 +659,6 @@ final class ControlRouter {
 
         case "pane.wait_agent_status", "wait.agent_status":
             return waitAgentStatus(params: params)
-
-        case "suggest":
-            guard let options = params["options"] as? [String], !options.isEmpty else {
-                return .error(code: ControlError.invalidParams, message: "options required")
-            }
-            var payload: [String: Any] = [
-                "source": "seahelm-suggest",
-                "event": "suggest",
-                "cwd": params["cwd"] as? String ?? "",
-                "session_id": params["pane_id"] as? String ?? "cli",
-                "data": ["options": options],
-            ]
-            if let paneId = params["pane_id"] as? String {
-                payload["pane_id"] = paneId
-                // Also expose under the bridge's canonical key so WebhookEvent.paneId
-                // is populated — the Stop→suggest turn correlation keys off paneId.
-                payload["seahelm_pane_id"] = paneId
-            }
-            _ = dataSource?.ingestHook(json: payload)
-            return .ok(["accepted": true])
 
         default:
             return .error(code: ControlError.methodNotFound, message: "unknown method: \(method)")

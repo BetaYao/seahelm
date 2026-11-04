@@ -3,7 +3,7 @@ import Foundation
 /// Input to a pane's terminal and reading it back: typed commands (with
 /// pasted images), key presses, recent output. The app holds the sessions,
 /// so this is the app's; it decides nothing about what the agent is doing
-/// (docs/app-reads-core.md). Pulled out of `AgentRegistry`.
+/// (docs/app-reads-core.md). Pulled out of `Fleet`.
 final class PaneInput {
     static let shared = PaneInput()
 
@@ -42,7 +42,7 @@ final class PaneInput {
         // is what silently swallowed every message sent to a backgrounded pane
         // from Telegram, mail, and the control socket alike.
         if let station, station.canDeliverInput {
-            let agent = agentType ?? AgentRegistry.shared.pane(for: terminalID)?.agentType
+            let agent = agentType ?? Fleet.shared.pane(for: terminalID)?.agentType
             let (images, prose) = TelegramInboundMedia.peelCachedMedia(from: command)
             // Claude / Codex / Cursor / OpenCode attach clipboard PNGs on ctrl+v.
             // Images land in the composer; Enter only when the caller opts in

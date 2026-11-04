@@ -419,6 +419,19 @@ impl Core {
                 let st = self.lock();
                 Ok(json!({"agent_sessions": st.session_refs}))
             }
+            // A pane closed for good: its session name may be reused, and must
+            // not resume the agent it used to hold.
+            "agent.forget" => {
+                let Some(key) = str_param(&p, "pane_session_key") else {
+                    return Reply::Value(Err(RpcError::invalid_params("pane_session_key required")));
+                };
+                let mut st = self.lock();
+                let forgot = st.session_refs.remove(&key).is_some();
+                if forgot {
+                    st.save_session_refs();
+                }
+                Ok(json!({"forgot": forgot}))
+            }
             "pane.wait_agent_status" | "wait.agent_status" => self.wait_status(&p),
             "usage.summary" => Ok(crate::usage::summary(now)),
             "cards.list" => Ok(json!({"cards": self.lock().cards.to_json()})),
@@ -511,6 +524,19 @@ impl Core {
                 let pane = str_param(&p, "pane_id").or_else(|| str_param(&p, "pane_session_key"));
                 let rows: Vec<Value> = st.messages.snapshot(pane.as_deref()).iter().map(|m| m.to_json()).collect();
                 Ok(json!({"messages": rows, "seq": st.messages.seq()}))
+            }
+            // What happened since `after_seq`, for a client that was away; null
+            // when the gap is not known (ahead of the hub: start over).
+            "message.replay" => {
+                let Some(after) = p.get("after_seq").and_then(Value::as_u64) else {
+                    return Reply::Value(Err(RpcError::invalid_params("after_seq required")));
+                };
+                let st = self.lock();
+                Ok(match st.messages.replay(after) {
+                    None => json!({"replay": null, "seq": st.messages.seq()}),
+                    Some(r) => json!({"replay": {"messages": r.messages.iter().map(|m| m.to_json()).collect::<Vec<_>>(),
+                                                  "truncated": r.truncated}, "seq": st.messages.seq()}),
+                })
             }
             "message.history" => {
                 let Some(pane) = str_param(&p, "pane_session_key").or_else(|| str_param(&p, "pane_id")) else {
@@ -681,7 +707,7 @@ impl Core {
     }
 
     pub fn spawn_event_log(self: &Arc<Self>, path: PathBuf) {
-        const LOGGED: [&str; 6] = ["pane.status_changed", "pane.notice", "pane.closed", "pane.rehomed", "pane.unseen_changed", "pane.location"];
+        const LOGGED: [&str; 8] = ["pane.status_changed", "pane.notice", "pane.closed", "pane.rehomed", "pane.unseen_changed", "pane.location", "agent.session", "worktree.discovered"];
         const ROLL_AT: u64 = 20 << 20;
         let core = Arc::clone(self);
         let _ = std::thread::Builder::new().name("seahelm-core-event-log".into()).spawn(move || {
@@ -1310,10 +1336,18 @@ impl State {
                 };
                 if let (Some(key), Ok(v)) = (key, serde_json::to_value(&r.session_ref)) {
                     if self.session_refs.get(&key) != Some(&v) {
+                        // Pushed, so the client that recreates the pane's session
+                        // resumes the agent without asking.
+                        self.registry.publish(json!({"type": "agent.session", "pane_session_key": key, "ref": v}));
                         self.session_refs.insert(key, v);
                         self.save_session_refs();
                     }
                 }
+            }
+            if let Some((path, pane)) = &out.new_worktree {
+                // An agent is working in a worktree nobody tracks yet: the
+                // client that owns the fleet's layout picks it up.
+                self.registry.publish(json!({"type": "worktree.discovered", "worktree_path": path, "pane_session_key": pane}));
             }
             let kind = hooks::decode::decode(&ev, now);
             let last_assistant_message = ev

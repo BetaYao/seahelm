@@ -270,7 +270,7 @@ class MainWindowController: NSWindowController {
         let tc = TabCoordinator(config: config)
         tc.delegate = self
         tc.terminalCoordinator = terminalCoordinator
-        tc.statusPublisher = statusPublisher
+        _ = channelWiring
         tc.statusAggregator = statusAggregator
         tc.runtimeBackend = runtimeBackend
         tc.panelCoordinator = panelCoordinator
@@ -297,11 +297,8 @@ class MainWindowController: NSWindowController {
 
     // Status detection
     private let statusAggregator = WorktreeStatusAggregator()
-    private lazy var statusPublisher: StatusPublisher = {
-        let pub = StatusPublisher(agentConfig: config.agentDetect)
-        pub.aggregator = statusAggregator
-        NotificationManager.shared.stabilityDelay = config.notifications.stabilityDelay
-        NotificationManager.shared.cooldown = config.notifications.cooldown
+    /// Notices and chat routes, wired once, before the tab coordinator.
+    private lazy var channelWiring: Void = {
         // The island popping open with this pane's suggestion card already told
         // the user, better than a banner can — it carries the buttons. Only
         // while it is actually expanded: a collapsed pill has said nothing.
@@ -328,7 +325,7 @@ class MainWindowController: NSWindowController {
             }
         }
         // Not `tabCoordinator.commandRoute` here: that coordinator's own
-        // initializer reads `statusPublisher`, and two lazy vars that reach
+        // initializer reads `channelWiring`, and two lazy vars that reach
         // for each other recurse until the stack goes. Mail is wired in
         // `startGmailMailChannel`, after both exist.
         ChannelHub.shared.commandRoute = { [weak self] text, surface, reply in
@@ -351,7 +348,6 @@ class MainWindowController: NSWindowController {
         statusAggregator.onActivity = { [weak self] path, date in
             self?.recordWorktreeActivity(path, date)
         }
-        return pub
     }()
 
     private static let activityISO8601 = ISO8601DateFormatter()
@@ -373,8 +369,7 @@ class MainWindowController: NSWindowController {
         // This fires on nearly every status change across every worktree, so a
         // raw `config.save()` here — Config is a value type, and `config` is a
         // snapshot from launch — reliably clobbered fields owned elsewhere
-        // (agentSessions chief among them: a resume ref recorded via
-        // TerminalCoordinator moments earlier never survived to disk). Route
+        // (split layouts chief among them). Route
         // through the shared sync instead of saving this stale copy directly.
         saveConfig()
     }
@@ -425,7 +420,7 @@ class MainWindowController: NSWindowController {
         // only pass that catches it.
         reconcileChatBindings()
         // Here, not beside the other routes: those are wired from inside
-        // `statusPublisher`'s initializer, which `tabCoordinator` reads.
+        // `channelWiring`, which `tabCoordinator` reads.
         tabCoordinator.chatProgress.fleetChats = { [weak self] in
             [self?.config.telegram?.resolvedDefaultChatId].compactMap { $0 }
         }
@@ -478,7 +473,6 @@ class MainWindowController: NSWindowController {
         config.worktreeStartedAt = tabCoordinator.config.worktreeStartedAt
         config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
         config.splitLayouts = terminalCoordinator.config.splitLayouts
-        config.agentSessions = terminalCoordinator.config.agentSessions
         // Chrome layout is owned here — push into TabCoordinator so its saves
         // don't clobber sidebar_collapsed / sidebar_active_pane with defaults.
         tabCoordinator.config.sidebarWidth = config.sidebarWidth
@@ -1132,7 +1126,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                     mode: mode,
                     force: force,
                     lastPublished: lastPublished,
-                    isBusy: { AgentRegistry.shared.hasRunningPane(inWorktree: $0) }
+                    isBusy: { Fleet.shared.hasRunningPane(inWorktree: $0) }
                 ))
             } catch {
                 outcome = .failure(error)
@@ -1552,7 +1546,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         for entry in tabCoordinator.allWorktrees {
             let path = entry.info.path
             let isSelected = path == selectedPath
-            let agent = AgentRegistry.shared.pane(forWorktree: path)
+            let agent = Fleet.shared.pane(forWorktree: path)
             let lastActivity = statusAggregator.lastActivity(for: path) ?? agent?.startedAt
             let isIdle = lastActivity.map { now.timeIntervalSince($0) > Self.tabIdleCollapseInterval } ?? false
             if isIdle && !isSelected && !entry.info.isMainWorktree {
@@ -1570,7 +1564,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// Click→title fast path: the clicked pane's live OSC title goes straight to
     /// the chrome header, synchronously with the focus click. The resolver path
     /// below still runs afterwards (via the focus delegate) and repaints with the
-    /// full fallback chain, but it reads AgentRegistry snapshots that trail the 2s
+    /// full fallback chain, but it reads Fleet snapshots that trail the 2s
     /// poll — without this the title visibly lagged rapid pane switching.
     @objc private func handlePaneDidAcquireFocus(_ note: Notification) {
         guard let station = note.object as? Station else { return }
@@ -1642,13 +1636,13 @@ dashboard.stationManager = terminalCoordinator.stationManager
             return
         }
         let path = agent.worktreePath
-        let info = AgentRegistry.shared.pane(forWorktree: path)
+        let info = Fleet.shared.pane(forWorktree: path)
         let repo = (info?.project).flatMap { $0.isEmpty ? nil : $0 }
             ?? tabCoordinator.repoName(forWorktree: path)
 
         let paneTitle: String
         let focusedPane: PaneInfo?
-        let worktreePanes = AgentRegistry.shared.panes(forWorktree: path)
+        let worktreePanes = Fleet.shared.panes(forWorktree: path)
         if let info, !worktreePanes.isEmpty {
             // Current (focused) pane, or the most-recently-active pane otherwise.
             let tree = terminalCoordinator.stationManager.tree(forPath: path)
@@ -1889,7 +1883,6 @@ extension MainWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         closeAuxiliaryWindows()
         usageSummaryStore.stop()
-        statusPublisher.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
         tabCoordinator.teardownRemoteBackends()
@@ -1929,7 +1922,6 @@ extension MainWindowController: NSWindowDelegate {
         gmailMailPoller?.stop()
         gmailMailPoller = nil
         usageSummaryStore.stop()
-        statusPublisher.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
         // Flush a debounced First Mate preview so the saved selection matches
@@ -2142,7 +2134,6 @@ extension MainWindowController: SplitContainerDelegate {
         // Paint from cached state immediately, then force a poll so a pane whose
         // title changed since the last cycle refreshes on click rather than in ~2s.
         updateChromeTitle()
-        statusPublisher.refreshNow()
     }
 
     func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis) {
@@ -2413,7 +2404,7 @@ extension MainWindowController {
         // it is a "what's happening now" surface, not the full fleet list.
         let activityCutoff = Date().addingTimeInterval(-24 * 60 * 60)
         var byWorktree: [String: IslandAgentRow] = [:]
-        for pane in AgentRegistry.shared.allPanes() where !FirstMatePane.isFirstMate(worktreePath: pane.worktreePath) {
+        for pane in Fleet.shared.allPanes() where !FirstMatePane.isFirstMate(worktreePath: pane.worktreePath) {
             let lastActivity = statusAggregator.lastActivity(for: pane.worktreePath) ?? pane.startedAt
             guard let lastActivity, lastActivity >= activityCutoff else { continue }
             // Same resolver as the dashboard cards, but via the shared TTL
@@ -2816,7 +2807,7 @@ extension MainWindowController: SettingsDelegate {
         channel.onStateChange = { [weak self] state in
             if case .error(let msg) = state { self?.presentTelegramError(msg) }
         }
-        // Deliberately not registered with AgentRegistry: this bridge exists to
+        // Deliberately not registered with Fleet: this bridge exists to
         // receive one `/start`, and a registered channel could carry orders
         // from a bot nobody has been allowed on yet.
         telegramPairingChannel = channel
@@ -2895,7 +2886,7 @@ extension MainWindowController: TabCoordinatorDelegate {
 
 extension MainWindowController: TerminalCoordinatorDelegate {
     func terminalCoordinatorDidUpdateSurfaces(_ coordinator: TerminalCoordinator) {
-        statusPublisher.updateSurfaces(coordinator.stationManager.all)
+        statusAggregator.sync(trees: coordinator.stationManager.all)
     }
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didDeleteWorktree info: WorktreeInfo) {
@@ -3066,7 +3057,7 @@ extension MainWindowController: CommandHost {
     /// handle minted on sight.
     func fleetIndex() -> FleetIndex {
         let registry = PaneHandleRegistry.shared
-        let panes = AgentRegistry.shared.allPanes()
+        let panes = Fleet.shared.allPanes()
             .filter { !FirstMatePane.isFirstMate(worktreePath: $0.worktreePath) }
             .map { pane -> PaneRef in
             let sessionKey = pane.station?.paneSessionKey ?? ""
@@ -3099,7 +3090,7 @@ extension MainWindowController: CommandHost {
     /// The desktop talks to the selected worktree's pane.
     var desktopBoundPaneKey: String? {
         guard let path = dashboardVC?.lastCommittedWorktreePath,
-              let pane = AgentRegistry.shared.pane(forWorktree: path) else { return nil }
+              let pane = Fleet.shared.pane(forWorktree: path) else { return nil }
         return PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "", paneId: pane.id)
     }
 
@@ -3115,7 +3106,7 @@ extension MainWindowController: CommandHost {
     }
 
     func sendText(paneId: String, text: String) -> Bool {
-        guard AgentRegistry.shared.pane(for: paneId) != nil else { return false }
+        guard Fleet.shared.pane(for: paneId) != nil else { return false }
         PaneInput.shared.sendCommand(to: paneId, command: text)
         return true
     }
@@ -3125,12 +3116,12 @@ extension MainWindowController: CommandHost {
     }
 
     func messages(paneSessionKey: String) -> [MessageEvent] {
-        MessageStreamHub.shared.snapshot(paneId: paneSessionKey)
+        CoreMessages.shared.snapshot(paneId: paneSessionKey)
     }
 
     /// Recent tool activity for one pane, as plain lines.
     func activity(paneId: String) -> [String] {
-        guard let pane = AgentRegistry.shared.pane(for: paneId) else { return [] }
+        guard let pane = Fleet.shared.pane(for: paneId) else { return [] }
         return pane.activityEvents.map {
             "\($0.isError ? "✕ " : "")\($0.tool)\($0.detail.isEmpty ? "" : " — \($0.detail)")"
         }
@@ -3145,7 +3136,7 @@ extension MainWindowController: CommandHost {
     /// of main-thread state read first.
     func assessReturn(worktreePath path: String, completion: @escaping (WorktreeReturnFacts) -> Void) {
         let info = tabCoordinator.allWorktrees.first { $0.info.path == path }?.info
-        let running = AgentRegistry.shared.hasRunningPane(inWorktree: path)
+        let running = Fleet.shared.hasRunningPane(inWorktree: path)
         let task = WorktreeTaskStore.shared.task(forWorktree: path)
         let recordedBase = WorktreeBaseBranchStore.shared.baseBranch(forWorktree: path)
         let isIntegration = IntegrationWorktreeStore.shared.isIntegrationWorktree(path)
@@ -3244,7 +3235,7 @@ extension MainWindowController: CommandHost {
                     lastPublished: lastPublished,
                     // A busy worktree comes in at HEAD rather than as a
                     // half-written file that reads as a conflict it is not.
-                    isBusy: { AgentRegistry.shared.hasRunningPane(inWorktree: $0) }
+                    isBusy: { Fleet.shared.hasRunningPane(inWorktree: $0) }
                 ))
             } catch {
                 outcome = .failure(error)
@@ -3312,7 +3303,7 @@ extension MainWindowController: CommandHost {
     /// desktop already showed it. Chats bound to the pane are never dropped.
     private func notifyTelegramSessions(terminalID: String, fleetSilenced: Bool = false,
                                         text render: (_ handle: Int?) -> String) {
-        let pane = terminalID.isEmpty ? nil : AgentRegistry.shared.pane(for: terminalID)
+        let pane = terminalID.isEmpty ? nil : Fleet.shared.pane(for: terminalID)
         let paneKey: String?
         if let pane {
             paneKey = PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "",
@@ -3438,7 +3429,7 @@ extension MainWindowController {
         let stale = StaleChatBindings.stale(
             in: sessions,
             worktreeExists: { !missing.contains($0) },
-            paneIsLive: { AgentRegistry.shared.pane(for: $0) != nil })
+            paneIsLive: { Fleet.shared.pane(for: $0) != nil })
         var retired = 0
         for session in stale {
             // Counted on the close, not on the candidate: the count is what the
@@ -3548,7 +3539,7 @@ extension MainWindowController {
     }
 
     private func sendCardToChat(_ order: PendingOrder) {
-        let pane = AgentRegistry.shared.pane(for: order.action.terminalID)
+        let pane = Fleet.shared.pane(for: order.action.terminalID)
         let paneKey = pane.map {
             PaneHandleRegistry.key(sessionKey: $0.station?.paneSessionKey ?? "", paneId: $0.id)
         }
