@@ -18,7 +18,6 @@ pub fn danger() -> Rgba { rgb(pick(0xe84635, 0xdc2626)) }
 pub fn attention() -> Rgba { rgb(pick(0xe0a458, 0xd08706)) }
 pub fn diff_add() -> Rgba { rgb(pick(0x5fb87a, 0x1f9d63)) }
 pub fn diff_del() -> Rgba { rgb(pick(0xe07a6a, 0xdc2626)) }
-pub fn merged() -> Rgba { rgb(pick(0xa371f7, 0x8250df)) }
 /// Toolbar glyph tint (`#888888`).
 pub fn chrome_icon() -> Rgba { rgb(pick(0x888888, 0x888888)) }
 // The AppKit fills are translucent over vibrancy; these are what they come
@@ -31,9 +30,6 @@ pub fn hairline() -> Rgba { rgb(pick(0x333e41, 0xdde2e8)) }
 pub fn separator() -> Rgba { rgb(pick(0x3d4244, 0xd3d8de)) }
 pub fn row_selected() -> Rgba { rgb(pick(0x3d4244, 0xdadee4)) }
 pub fn row_hover() -> Rgba { rgb(pick(0x333839, 0xe3e6ea)) }
-pub fn dock_hover() -> Rgba { rgb(pick(0x353a3c, 0xe1e4e8)) }
-/// Line colour at 22% (the dock's rules).
-pub fn dock_rule() -> Rgba { rgb(pick(0x405256, 0xd5dbe2)) }
 /// The sidebar: `.underWindowBackground` vibrancy as it reads in the app.
 pub fn sidebar_tint() -> Rgba { rgb(pick(0x282d2f, 0xeceef1)) }
 /// Unfocused split panes are washed with white 8.5% (black 5.5% in light).

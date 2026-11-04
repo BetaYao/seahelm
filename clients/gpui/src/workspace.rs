@@ -13,7 +13,7 @@ use gpui::{
 
 use crate::assets::icon;
 use crate::core_client::{self, WorktreeState};
-use crate::fleet::{self, Dot, GitStats, Grouping, Item, Snapshot};
+use crate::fleet::{self, Dot, GitStats, Group, Grouping, Item, Snapshot};
 use crate::platform;
 use crate::session;
 use crate::split::{Axis, Direction, LeafId, Rect, SplitTree};
@@ -90,11 +90,10 @@ pub struct Workspace {
     sidebar_visible: bool,
     dragging_divider: bool,
     divider_hover: bool,
-    dock_hover: bool,
     focus: FocusHandle,
     memory: Option<u64>,
     /// seahelm-core's view of the worktrees it has panes in; where it has
-    /// one, it decides the row's dot over the app's.
+    /// one, it decides the row's dot.
     core: HashMap<String, WorktreeState>,
 }
 
@@ -115,7 +114,6 @@ impl Workspace {
             sidebar_visible: true,
             dragging_divider: false,
             divider_hover: false,
-            dock_hover: false,
             focus: cx.focus_handle(),
             memory: None,
             core: HashMap::new(),
@@ -138,8 +136,7 @@ impl Workspace {
     /// The fleet, every two seconds, read off the main thread.
     fn poll_fleet(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| loop {
-            let mode = this.read_with(cx, |w, _| w.grouping).unwrap_or_default();
-            let snap = cx.background_executor().spawn(async move { fleet::read(mode) }).await;
+            let snap = cx.background_executor().spawn(async { fleet::read() }).await;
             let alive = this
                 .update(cx, |w, cx| {
                     w.fleet = snap;
@@ -464,33 +461,29 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The group button: repository → status → activity. The app does the
-    /// grouping; a fleet read from git has only repositories.
+    /// The group button: repository → status → activity.
     fn cycle_grouping(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if fleet::is_local(&self.fleet) {
-            return;
-        }
         self.grouping = self.grouping.next();
-        let mode = self.grouping;
-        cx.spawn(async move |this, cx| {
-            let snap = cx.background_executor().spawn(async move { fleet::read(mode) }).await;
-            let _ = this.update(cx, |w, cx| {
-                if w.grouping == mode {
-                    w.fleet = snap;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+        cx.notify();
     }
 
-    /// The folder button: pick a directory and add it as a project. Only
-    /// when the fleet is this client's own (no app running): the app keeps
-    /// its own list.
-    fn add_project(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if !fleet::is_local(&self.fleet) {
-            return;
+    /// The fleet as the column shows it: seahelm-core's verdict laid over
+    /// every worktree it watches, then grouped.
+    fn display_groups(&self, now: f64) -> Vec<Group> {
+        let mut groups = self.fleet.groups.clone();
+        for item in groups.iter_mut().flat_map(|g| g.items.iter_mut()) {
+            if let Some(c) = self.core.get(&item.worktree_path) {
+                item.status = c.status.clone();
+                item.unseen = c.unseen;
+                item.running_since = c.running_since;
+                item.last_activity_at = c.last_activity_at;
+            }
         }
+        fleet::regroup(&groups, self.grouping, now)
+    }
+
+    /// The folder button: pick a directory and add it as a project.
+    fn add_project(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -500,12 +493,11 @@ impl Workspace {
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = picked.await else { return };
             let Some(path) = paths.first().map(|p| p.to_string_lossy().into_owned()) else { return };
-            if let Err(e) = fleet::add_local_project(&path) {
+            if let Err(e) = fleet::add_project(&path) {
                 eprintln!("seahelm-gpui: add project: {e}");
                 return;
             }
-            let mode = this.read_with(cx, |w, _| w.grouping).unwrap_or_default();
-            let snap = cx.background_executor().spawn(async move { fleet::read(mode) }).await;
+            let snap = cx.background_executor().spawn(async { fleet::read() }).await;
             let _ = this.update(cx, |w, cx| {
                 w.fleet = snap;
                 cx.notify();
@@ -681,7 +673,6 @@ impl Workspace {
             .child(self.fleet_header(cx))
             .child(div().mt(px(11.)).h(px(1.)).w_full().bg(tokens::hairline()))
             .child(self.fleet_list(cx))
-            .child(self.dock(cx))
     }
 
     /// 40pt: the traffic lights' 70×14 slot on the left, the icon cluster on
@@ -707,7 +698,8 @@ impl Workspace {
 
     fn fleet_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let n = self.fleet.worktree_count();
-        let subtitle = if self.fleet.running > 0 { format!("{n} · {} running", self.fleet.running) } else { format!("{n}") };
+        let running = self.core.values().filter(|c| c.status == "Running").count();
+        let subtitle = if running > 0 { format!("{n} · {running} running") } else { format!("{n}") };
         div()
             .mt(px(13.))
             .px(px(15.))
@@ -722,14 +714,14 @@ impl Workspace {
             .child(
                 div()
                     .id("add-project")
-                    .when(fleet::is_local(&self.fleet), |d| d.cursor_pointer())
+                    .cursor_pointer()
                     .on_click(cx.listener(Self::add_project))
                     .child(glyph("folder-plus", 13., tokens::ink_dim())),
             )
             .child(
                 div()
                     .id("grouping")
-                    .when(!fleet::is_local(&self.fleet), |d| d.cursor_pointer())
+                    .cursor_pointer()
                     .on_click(cx.listener(Self::cycle_grouping))
                     .child(glyph("group", 13., if self.grouping == Grouping::Repository { tokens::ink_dim() } else { tokens::accent() })),
             )
@@ -751,7 +743,7 @@ impl Workspace {
             list = list.child(div().text_size(px(11.)).line_height(px(15.)).text_color(tokens::ink_faint()).child(err.clone()));
         }
         let now = fleet::now();
-        for (gi, group) in self.fleet.groups.iter().enumerate() {
+        for (gi, group) in self.display_groups(now).iter().enumerate() {
             list = list.child(group_header(&group.title, gi == 0, group.items.len() >= 3));
             let mut rows = div().flex().flex_col().gap(px(4.));
             for item in &group.items {
@@ -763,18 +755,8 @@ impl Workspace {
     }
 
     fn row(&self, item: &Item, now: f64, cx: &mut Context<Self>) -> impl IntoElement {
-        // Where the core watches this worktree, its verdict is the row's.
-        let mut item = item.clone();
-        if let Some(c) = self.core.get(&item.worktree_path) {
-            item.status = c.status.clone();
-            item.unseen = c.unseen;
-            item.running_since = c.running_since.or(item.running_since);
-            item.last_activity_at = c.last_activity_at.or(item.last_activity_at);
-        }
-        let item = &item;
         let selected = self.selected.as_deref() == Some(item.id.as_str());
-        let ours = self.panes.get(&item.id).map_or(0, |p| p.views.len());
-        let panes = self.fleet.panes.get(&item.worktree_path).copied().unwrap_or(0).max(ours);
+        let panes = self.panes.get(&item.id).map_or(0, |p| p.views.len());
         let stats = self.git.get(&item.worktree_path);
         let id = item.id.clone();
 
@@ -802,9 +784,6 @@ impl Workspace {
                 g = g.child(div().text_color(tokens::ink_faint()).child(format!("  {sync}")));
             }
             line2 = line2.child(g);
-        }
-        if let Some(pr) = &item.pr {
-            line2 = line2.child(pr_badge(pr));
         }
         line2 = line2.child(div().flex_1()).child(
             div()
@@ -847,63 +826,6 @@ impl Workspace {
                     )
                     .child(line2),
             )
-    }
-
-    /// `─ ⎈ First Mate · state ──── ›` at the foot of the column.
-    fn dock(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let hover = self.dock_hover;
-        // The app's First Mate, as its dock says it (FirstMateDockView).
-        let (word, word_colour, wants_you) = match &self.fleet.first_mate {
-            Some(fm) if fm.enabled || !fm.activity.is_empty() => {
-                let colour = match fm.tone.as_str() {
-                    "watching" => tokens::accent(),
-                    "working" => tokens::running(),
-                    "wants_you" => tokens::attention(),
-                    _ => tokens::ink_faint(),
-                };
-                (fm.activity.clone(), colour, fm.tone == "wants_you")
-            }
-            _ => ("off".to_string(), tokens::ink_faint(), false),
-        };
-        let rule_colour = if wants_you { tokens::attention() } else { tokens::dock_rule() };
-        let rule = move || div().h(px(1.)).bg(rule_colour);
-        div()
-            .id("first-mate-dock")
-            .flex_none()
-            .mt(px(10.))
-            .mb(px(12.))
-            .mr(px(12.))
-            .ml(px(6.))
-            .px(px(6.))
-            .py(px(6.))
-            .rounded(px(8.))
-            .when(hover, |d| d.bg(tokens::dock_hover()))
-            .on_hover(cx.listener(|w, h: &bool, _, cx| {
-                w.dock_hover = *h;
-                cx.notify();
-            }))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.))
-            .child(rule().w(px(14.)))
-            .child(glyph("ship-wheel", 11., tokens::ink_dim()))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .text_size(px(11.)).line_height(px(15.))
-                    .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(if hover { tokens::ink() } else { tokens::ink_dim() })
-                            .child("First Mate"),
-                    )
-                    .child(div().text_color(tokens::ink_faint()).child(" · "))
-                    .child(div().font_weight(FontWeight::MEDIUM).text_color(word_colour).child(word)),
-            )
-            .child(rule().flex_1())
-            .child(glyph("chevron-right", 10., if hover { tokens::ink() } else { tokens::ink_faint() }))
     }
 
     fn terminal_column(
@@ -1107,24 +1029,3 @@ fn status_dot(dot: Dot, id: &str) -> gpui::AnyElement {
     }
 }
 
-fn pr_badge(pr: &fleet::Pr) -> impl IntoElement {
-    let mut d = div().flex().flex_row().text_size(px(10.)).line_height(px(13.)).child(div().text_color(tokens::ink_dim()).child(format!("#{}", pr.number)));
-    match pr.state.to_ascii_uppercase().as_str() {
-        "MERGED" => d = d.child(div().text_color(tokens::merged()).child(" merged")),
-        "CLOSED" => d = d.child(div().text_color(tokens::ink_faint()).child(" closed")),
-        _ => {
-            match pr.checks.as_deref().map(str::to_ascii_uppercase).as_deref() {
-                Some("SUCCESS") => d = d.child(div().text_color(tokens::diff_add()).child(" ✓")),
-                Some("FAILURE") | Some("ERROR") => d = d.child(div().text_color(tokens::diff_del()).child(" ✕")),
-                Some(_) => d = d.child(div().text_color(tokens::attention()).child(" ●")),
-                None => {}
-            }
-            match pr.review.as_deref().map(str::to_ascii_uppercase).as_deref() {
-                Some("APPROVED") => d = d.child(div().text_color(tokens::ink_dim()).child(" approved")),
-                Some("CHANGES_REQUESTED") => d = d.child(div().text_color(tokens::ink_dim()).child(" changes")),
-                _ => {}
-            }
-        }
-    }
-    d
-}

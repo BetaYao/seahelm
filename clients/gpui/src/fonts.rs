@@ -1,41 +1,38 @@
-//! The terminal font: the one the macOS app's panes use, read from the same
-//! Ghostty config (`~/.config/seahelm/ghostty.conf`), else Menlo 13 (JetBrains Mono
-//! off macOS).
+//! The terminal font: this client's own setting
+//! (`~/.config/seahelm/gpui.json`: `{"font_family": …, "font_size": …}`),
+//! else the bundled JetBrains Mono at 13.
 
-fn config_value(key: &str) -> Option<String> {
-    let text = std::fs::read_to_string(crate::platform::config_dir().join("ghostty.conf")).ok()?;
-    parse(&text, key)
+use serde::Deserialize;
+
+#[derive(Default, Deserialize)]
+struct Settings {
+    font_family: Option<String>,
+    font_size: Option<f32>,
 }
 
-/// The last `key = value` in a Ghostty config; Ghostty lets later lines win.
-fn parse(text: &str, key: &str) -> Option<String> {
-    text.lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.starts_with('#') {
-                return None;
-            }
-            let (k, v) = line.split_once('=')?;
-            (k.trim() == key).then(|| v.trim().trim_matches('"').to_string())
-        })
-        .filter(|v| !v.is_empty())
-        .last()
+fn settings() -> Settings {
+    std::fs::read_to_string(crate::platform::config_dir().join("gpui.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
 }
 
 pub fn terminal_family() -> String {
-    config_value("font-family").unwrap_or_else(|| crate::platform::default_terminal_font().into())
+    settings().font_family.filter(|f| !f.trim().is_empty()).unwrap_or_else(|| crate::tokens::MONO.into())
 }
 
 pub fn terminal_size() -> f32 {
-    config_value("font-size").and_then(|v| v.parse().ok()).unwrap_or(13.0)
+    settings().font_size.filter(|s| (6.0..=72.0).contains(s)).unwrap_or(13.0)
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn later_lines_win_and_comments_do_not_count() {
-        let conf = "font-family = A\n# font-family = B\nfont-family = \"C D\"\n";
-        assert_eq!(super::parse(conf, "font-family").as_deref(), Some("C D"));
-        assert_eq!(super::parse(conf, "font-size"), None);
+    fn settings_parse_and_default() {
+        let s: super::Settings = serde_json::from_str(r#"{"font_family": "Sarasa Term SC", "font_size": 14}"#).unwrap();
+        assert_eq!(s.font_family.as_deref(), Some("Sarasa Term SC"));
+        assert_eq!(s.font_size, Some(14.0));
+        let empty: super::Settings = serde_json::from_str("{}").unwrap();
+        assert!(empty.font_family.is_none());
     }
 }

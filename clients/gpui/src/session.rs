@@ -45,19 +45,9 @@ pub struct Session {
     pending: Arc<AtomicBool>,
 }
 
-/// Where the seahelmd binary is: `$SEAHELMD_BIN`, the one built beside this
-/// client, then `seahelmd` on PATH.
+/// Where the seahelmd binary is (`platform::tool`).
 pub fn daemon_binary() -> PathBuf {
-    if let Some(bin) = std::env::var_os("SEAHELMD_BIN") {
-        return PathBuf::from(bin);
-    }
-    let built = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../seahelmd/target/release")
-        .join(format!("seahelmd{}", std::env::consts::EXE_SUFFIX));
-    if built.exists() {
-        return built;
-    }
-    PathBuf::from("seahelmd")
+    crate::platform::tool("seahelmd", "SEAHELMD_BIN")
 }
 
 /// Make sure the session exists: on `cmd` when given (held until we attach,
