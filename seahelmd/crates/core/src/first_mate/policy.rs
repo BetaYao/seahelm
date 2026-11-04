@@ -24,7 +24,7 @@ pub fn classify(method: &str) -> Class {
         // A card, not an action: nothing runs until the user picks.
         "autopilot.propose" | "core.ping" | "ping" | "pane.list" | "session.snapshot" | "pane.read" | "pane.explain"
         | "agent.explain" | "worktree.list" | "fleet.status" | "pr.list" | "pane.wait_agent_status" | "wait.agent_status"
-        | "usage.summary" | "cards.list" | "autopilot.state" => Class::Open,
+        | "usage.summary" | "cards.list" | "autopilot.state" | "message.snapshot" | "message.history" => Class::Open,
         "pane.run" | "pane.send_text" | "pane.send_keys" => Class::Gated(Action::MessagePane),
         "worktree.create" => Class::Gated(Action::StartAgent),
         "worktree.delete" => Class::Gated(Action::DeleteWorktree),

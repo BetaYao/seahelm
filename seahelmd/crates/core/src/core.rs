@@ -42,6 +42,9 @@ pub struct Core {
     prs: PrStore,
     /// First Mate's thread (`first_mate::spawn`), once started.
     first_mate: std::sync::OnceLock<crate::first_mate::Handle>,
+    /// Where each transcript was read to; its own lock, so reading one never
+    /// holds `state`.
+    transcripts: Mutex<seahelm_core_messages::Tail>,
 }
 
 struct State {
@@ -80,6 +83,8 @@ struct State {
     cards: Cards,
     /// Where First Mate's pane outcomes and answered cards go.
     first_mate: Option<crate::first_mate::Handle>,
+    /// Every pane's message timeline (`message.*`).
+    messages: seahelm_core_messages::Hub,
 }
 
 /// A completion decision put off for `PROSE_RETRY_INTERVAL`.
@@ -135,10 +140,12 @@ impl Core {
                 retries: Vec::new(),
                 cards: Cards::new(),
                 first_mate: None,
+                messages: seahelm_core_messages::Hub::new(Some(seahelm_core_messages::hub::Store::open(&message_dir(), 2000)), 80),
             }),
             changed: Condvar::new(),
             prs: PrStore::new(Box::new(pr::Live)),
             first_mate: std::sync::OnceLock::new(),
+            transcripts: Mutex::new(seahelm_core_messages::Tail::default()),
         }))
     }
 
@@ -263,10 +270,31 @@ impl Core {
         let result: RpcResult = match method {
             "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION")})),
             "hook" | "suggest" => {
+                // The prose the agent wrote since its last hook, read from its
+                // transcript without the lock, and put on the timeline before
+                // this hook's own rows: above the tool call it introduces.
+                let wanted = self.lock().transcript_request(&p);
+                let prose = wanted.map(|(pane, alias, path, since)| {
+                    let entries = self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).new_prose(&path, since);
+                    (pane, alias, entries)
+                });
                 let mut st = self.lock();
                 let before = st.registry.seq();
+                let before_messages = st.messages.seq();
+                if let Some((pane, alias, entries)) = prose {
+                    if st.registry.pane(&pane).is_some() {
+                        let rows = entries
+                            .into_iter()
+                            .map(|e| {
+                                let kind = if e.thinking { seahelm_core_messages::Kind::Thinking } else { seahelm_core_messages::Kind::Assistant };
+                                seahelm_core_messages::Message::new(&alias, &pane, kind, e.timestamp.unwrap_or(now)).with_text(e.text)
+                            })
+                            .collect();
+                        st.messages.append(rows);
+                    }
+                }
                 st.hook(p, now);
-                let moved = st.registry.seq() != before;
+                let moved = st.registry.seq() != before || st.messages.seq() != before_messages;
                 drop(st);
                 if moved {
                     self.changed.notify_all();
@@ -442,6 +470,24 @@ impl Core {
                 })
             }
             "events.subscribe" => return self.subscribe(p),
+            "message.snapshot" => {
+                let st = self.lock();
+                let pane = str_param(&p, "pane_id").or_else(|| str_param(&p, "pane_session_key"));
+                let rows: Vec<Value> = st.messages.snapshot(pane.as_deref()).iter().map(|m| m.to_json()).collect();
+                Ok(json!({"messages": rows, "seq": st.messages.seq()}))
+            }
+            "message.history" => {
+                let Some(pane) = str_param(&p, "pane_session_key").or_else(|| str_param(&p, "pane_id")) else {
+                    return Reply::Value(Err(RpcError::invalid_params("pane_session_key or pane_id required")));
+                };
+                let Some(before) = p.get("before_seq").and_then(Value::as_u64) else {
+                    return Reply::Value(Err(RpcError::invalid_params("before_seq required")));
+                };
+                let limit = p.get("limit").and_then(Value::as_u64).unwrap_or(50).clamp(1, 200) as usize;
+                let (rows, more) = self.lock().messages.history(&pane, before, limit);
+                Ok(json!({"messages": rows.iter().map(|m| m.to_json()).collect::<Vec<_>>(), "has_more": more}))
+            }
+            "message.subscribe" => return self.subscribe_messages(p),
             other => Err(RpcError::not_found(other)),
         };
         Reply::Value(result)
@@ -804,6 +850,79 @@ impl Core {
     }
 }
 
+impl Core {
+    /// `message.subscribe {pane_id?, after_seq?}`: what came after
+    /// `after_seq` (or `{"reset": true}` and nothing, when the client's
+    /// numbering is ahead of the core's, and the names of rings that may
+    /// have lost part of the gap), then each new row as it is appended.
+    /// Separate from `events.subscribe`: a busy pane's tool rows must not
+    /// push status events out of that ring.
+    fn subscribe_messages(self: Arc<Self>, p: Value) -> Reply {
+        let pane = str_param(&p, "pane_id").or_else(|| str_param(&p, "pane_session_key"));
+        let after = p.get("after_seq").and_then(Value::as_u64);
+        let core = self;
+        Reply::Stream(Box::new(move |w: &mut dyn Write| {
+            let matches = |m: &seahelm_core_messages::Message| pane.as_deref().is_none_or(|p| m.pane_session_key == p || m.pane_id == p);
+            let (first, backlog, mut last) = {
+                let st = core.lock();
+                let now_seq = st.messages.seq();
+                match after.map(|a| st.messages.replay(a)) {
+                    None => (json!({"subscribed": true, "seq": now_seq}), Vec::new(), now_seq),
+                    Some(None) => (json!({"subscribed": true, "seq": now_seq, "reset": true}), Vec::new(), now_seq),
+                    Some(Some(r)) => (
+                        json!({"subscribed": true, "seq": now_seq, "truncated": r.truncated}),
+                        r.messages.into_iter().filter(|m| matches(m)).collect::<Vec<_>>(),
+                        now_seq,
+                    ),
+                }
+            };
+            if rpc::write_line(w, &json!({"jsonrpc": "2.0", "id": null, "result": first})).is_err() {
+                return;
+            }
+            let send = |w: &mut dyn Write, m: &seahelm_core_messages::Message| {
+                rpc::write_line(w, &json!({"jsonrpc": "2.0", "method": "message", "params": m.to_json()})).is_ok()
+            };
+            for m in &backlog {
+                if !send(w, m) {
+                    return;
+                }
+            }
+            loop {
+                let batch = {
+                    let mut st = core.lock();
+                    if st.messages.seq() <= last {
+                        st = core.changed.wait_timeout(st, Duration::from_secs(15)).unwrap_or_else(|e| e.into_inner()).0;
+                    }
+                    let batch = st.messages.events_after(last);
+                    last = st.messages.seq().max(last);
+                    batch
+                };
+                if batch.is_empty() {
+                    if rpc::write_line(w, &json!({"jsonrpc": "2.0", "method": "ping"})).is_err() {
+                        return;
+                    }
+                    continue;
+                }
+                for m in batch.iter().filter(|m| matches(m)) {
+                    if !send(w, m) {
+                        return;
+                    }
+                }
+            }
+        }))
+    }
+}
+
+/// The core's message timelines: beside a socket given by the environment (a
+/// scratch core), else `~/.config/seahelm/core-message-stream/` (the app keeps
+/// its own in `message-stream/` while both run).
+fn message_dir() -> PathBuf {
+    match std::env::var_os("SEAHELM_CORE_SOCKET") {
+        Some(sock) => PathBuf::from(format!("{}.messages", sock.to_string_lossy())),
+        None => rpc::config_dir().join("core-message-stream"),
+    }
+}
+
 impl Dispatch for Core {
     fn call(self: Arc<Self>, method: &str, params: Value) -> Reply {
         self.call_inner(method, params)
@@ -829,6 +948,8 @@ impl State {
             self.aggregator.unregister_pane(pane, &wt);
         }
         self.registry.unregister(pane);
+        // Gone for good: its timeline goes too.
+        self.messages.clear(pane);
         if self.cards.drop_pane(pane, now()) {
             self.publish_cards();
         }
@@ -920,6 +1041,9 @@ impl State {
     /// not on screen in a frontmost client, and announce it (`pane.notice`)
     /// if the notification policy lets it through.
     fn settle(&mut self, o: &Outcome, now: Timestamp) {
+        let pane_id = o.info.alias.clone().unwrap_or_else(|| o.info.id.clone());
+        let config = self.manifests.message_config(o.info.agent_type);
+        self.messages.ingest(o, &pane_id, &config, now);
         // Cards first: a pane whose question is on a card is not announced
         // as waiting on top of it.
         if self.cards.observe(o, now) {
@@ -1007,6 +1131,18 @@ impl State {
         for notice in self.policy.due(now) {
             self.publish_notice(notice);
         }
+    }
+
+    /// For a hook that names a transcript: the pane it is about, what clients
+    /// call it, the transcript, and how far back a first read may go (to
+    /// where the pane's timeline already reaches, else five minutes).
+    fn transcript_request(&self, payload: &Value) -> Option<(String, String, String, Timestamp)> {
+        let ev = hooks::event::parse(payload)?;
+        let path = ev.session_path.clone()?;
+        let pane = self.registry.resolve(ev.pane_id.as_deref(), &ev.cwd)?;
+        let alias = self.registry.pane(&pane).and_then(|p| p.alias.clone()).unwrap_or_else(|| pane.clone());
+        let since = self.messages.last_ts(&pane).unwrap_or(now() - 300.0);
+        Some((pane, alias, path, since))
     }
 
     /// `cards.changed`: the whole list, so a renderer never has to merge.

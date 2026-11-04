@@ -70,7 +70,7 @@ pub struct PaneInfo {
 pub const ACTIVITY_LOG_SIZE: usize = 20;
 
 impl PaneInfo {
-    pub(crate) fn new(
+    pub fn new(
         id: String,
         alias: Option<String>,
         worktree_path: String,
