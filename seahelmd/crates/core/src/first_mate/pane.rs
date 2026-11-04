@@ -58,10 +58,12 @@ impl Agent {
     }
 }
 
-/// Version and agent: switching agent replaces the session as surely as a
-/// new version does.
+/// Version, agent and owner: switching agent replaces the session as surely
+/// as a new version does, and so does switching between the app and the
+/// core — the app's session has no `seahelm` shim on its PATH, so its First
+/// Mate would talk to an app that no longer runs it.
 pub fn stamp(agent: Agent) -> String {
-    format!("{VERSION}:{}", agent.raw())
+    format!("{VERSION}:{}:core", agent.raw())
 }
 
 pub fn session_is_current(dir: &Path, agent: Agent) -> bool {

@@ -57,6 +57,11 @@ struct Config: Codable {
     var autopilotAutonomy: [String: String]
     /// Which agent First Mate runs as (`AgentType` raw value; see `FirstMatePane.agents`).
     var autopilotAgent: String
+    /// Who runs First Mate: `"core"` hands it to seahelm-core (which then
+    /// owns its session, rules and cards; this app only shows it), anything
+    /// else keeps it here. See docs/first-mate-core.md.
+    var autopilotOwner: String?
+    var autopilotRunsInCore: Bool { autopilotOwner == "core" }
     var sidebarWidth: CGFloat
     /// Whether the chrome left column is collapsed. Survives relaunch with
     /// `sidebarActivePane` so First Mate / files / changes layout is restored.
@@ -114,6 +119,7 @@ struct Config: Codable {
         case autopilotPaused = "autopilot_paused"
         case autopilotAutonomy = "autopilot_autonomy"
         case autopilotAgent = "autopilot_agent"
+        case autopilotOwner = "autopilot_owner"
         case sidebarWidth = "sidebar_width"
         case sidebarCollapsed = "sidebar_collapsed"
         case sidebarActivePane = "sidebar_active_pane"
@@ -159,6 +165,7 @@ struct Config: Codable {
         autopilotPaused = false
         autopilotAutonomy = [:]
         autopilotAgent = AgentType.claudeCode.rawValue
+        autopilotOwner = nil
         sidebarWidth = 300
         sidebarCollapsed = false
         sidebarActivePane = ChromeLeftPane.firstMate.rawValue
@@ -207,6 +214,7 @@ struct Config: Codable {
         autopilotPaused = try container.decodeIfPresent(Bool.self, forKey: .autopilotPaused) ?? false
         autopilotAutonomy = try container.decodeIfPresent([String: String].self, forKey: .autopilotAutonomy) ?? [:]
         autopilotAgent = try container.decodeIfPresent(String.self, forKey: .autopilotAgent) ?? AgentType.claudeCode.rawValue
+        autopilotOwner = try container.decodeIfPresent(String.self, forKey: .autopilotOwner)
         sidebarWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 300
         sidebarCollapsed = try container.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed) ?? false
         let pane = try container.decodeIfPresent(String.self, forKey: .sidebarActivePane)

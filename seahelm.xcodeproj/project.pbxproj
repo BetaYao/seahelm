@@ -222,6 +222,7 @@
 		67534BADE19F84A44C2CE74E /* UsageReadoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574B7FE2D9B877BB71343689 /* UsageReadoutTests.swift */; };
 		68AC25AFDA14448CAE9FA7A2 /* IntegrationRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F1B159E50F3F6CDA6466BE /* IntegrationRunner.swift */; };
 		68D65BDE5D099778712E3917 /* PaneFork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6998FB62AF2E5F47766D9447 /* PaneFork.swift */; };
+		68EE7F997049E86535F47612 /* CoreSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61FC2706C44152879AA81099 /* CoreSocketClient.swift */; };
 		69C021D47F0CD0650E986C43 /* HookEventMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D16BAD4EF9F3FCEC302FCE /* HookEventMergeTests.swift */; };
 		6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */; };
 		6A917794A3A0BEF0217579FA /* TelegramInitData.swift in Sources */ = {isa = PBXBuildFile; fileRef = F31C2470C1A80AF0E0B825BA /* TelegramInitData.swift */; };
@@ -367,6 +368,7 @@
 		A02B7AE16DE638F82673C1ED /* EditTabStripViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4897B4E1D168C012F56E8C79 /* EditTabStripViewTests.swift */; };
 		A03021337425A92FF6DFBE1B /* OpenCodePluginInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */; };
 		A0A5267095AB8E2FBAAB8C03 /* ghostty.conf in Resources */ = {isa = PBXBuildFile; fileRef = E4BEF7BAC8EF2918D2F601F7 /* ghostty.conf */; };
+		A27A11F80B6854A6CE6306E5 /* FirstMateCoreOwnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FECF087A867949C595A76ECA /* FirstMateCoreOwnerTests.swift */; };
 		A2A33CDFDE9F70751E8F5DF0 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E7934A548F91E1E9FB161C /* SmokeTests.swift */; };
 		A30993302260CC1F5B1F7179 /* TelegramRuleCoalescerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A3B9CBE08762DDD19AA2C5 /* TelegramRuleCoalescerTests.swift */; };
 		A36D6F5375FBE77728D7A1FD /* ShareLinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46A2C8EAE50007B4CDE40FA /* ShareLinkStore.swift */; };
@@ -808,6 +810,7 @@
 		60EEEE2451A4C40006552810 /* WorktreeTaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTaskStore.swift; sourceTree = "<group>"; };
 		6192629F1DE8EF1143009BEE /* PaneTitleResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTitleResolver.swift; sourceTree = "<group>"; };
 		619D80FEC996D2F42E2E8A3B /* SeahelmdLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmdLocator.swift; sourceTree = "<group>"; };
+		61FC2706C44152879AA81099 /* CoreSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSocketClient.swift; sourceTree = "<group>"; };
 		6207F1F7B2A126A6C5D69E91 /* FileTreeOutlineControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeOutlineControllerTests.swift; sourceTree = "<group>"; };
 		6378708EA7D9DC4EA6D7D108 /* NotificationHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryTests.swift; sourceTree = "<group>"; };
 		63C8FE4C75F1A4EF074C03C2 /* PaneStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneStatusTests.swift; sourceTree = "<group>"; };
@@ -1167,6 +1170,7 @@
 		FDD9C939C052C1049758CFFB /* AutopilotEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopilotEvents.swift; sourceTree = "<group>"; };
 		FE32E46B1123B9F111F2E557 /* SelectedFilePathResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedFilePathResolutionTests.swift; sourceTree = "<group>"; };
 		FEC6CEDF0BAE28FF326D89F9 /* SidebarHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarHeaderView.swift; sourceTree = "<group>"; };
+		FECF087A867949C595A76ECA /* FirstMateCoreOwnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoreOwnerTests.swift; sourceTree = "<group>"; };
 		FF44014C31BB9F7833218FB4 /* AgentRegistryTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryTransitionTests.swift; sourceTree = "<group>"; };
 		FF5F2FDB1192CD6A1E031DD1 /* TerminalLinkOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLinkOpener.swift; sourceTree = "<group>"; };
 		FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayAuth.swift; sourceTree = "<group>"; };
@@ -1240,6 +1244,7 @@
 				4F0C5FB141D86ECC0B6D8E66 /* Config.swift */,
 				42D823B95AEE78F60FE2DFB1 /* ControlProtocol.swift */,
 				59692DA15A0ECE1060836FB0 /* ControlSocketServer.swift */,
+				61FC2706C44152879AA81099 /* CoreSocketClient.swift */,
 				CF9BB55E15DFE4F88076BFBE /* CurlClient.swift */,
 				B02AE5789115FC73A4CF4BF2 /* CursorHooksSetup.swift */,
 				2E2AD81803E67D6EC8F90EA5 /* CursorSessionTitleLookup.swift */,
@@ -1699,6 +1704,7 @@
 				1B08FEEAC5D86CEE353749EA /* FirstMateConfigTests.swift */,
 				12FFAF61BC60167FFCC8DB9E /* FirstMateCoordinatorOutcomeTests.swift */,
 				E060A70CCB13E3B97F8BB18E /* FirstMateCoordinatorTests.swift */,
+				FECF087A867949C595A76ECA /* FirstMateCoreOwnerTests.swift */,
 				4089897C96C2E4E3E151DDD2 /* FirstMateEvaluateOutcomeTests.swift */,
 				3CE5DE803C7E3CAB87BBE48C /* FirstMateScheduleTests.swift */,
 				5C26F710397653CFC65887E7 /* FirstMateSettingsTests.swift */,
@@ -2327,6 +2333,7 @@
 				7A4F6892F9AE56EF60508D89 /* FirstMateConfigTests.swift in Sources */,
 				B130550C82567EFD2850B8E9 /* FirstMateCoordinatorOutcomeTests.swift in Sources */,
 				52CD930C527CB7F3B358EB6D /* FirstMateCoordinatorTests.swift in Sources */,
+				A27A11F80B6854A6CE6306E5 /* FirstMateCoreOwnerTests.swift in Sources */,
 				8F0624099E494AEDE963E0CC /* FirstMateEvaluateOutcomeTests.swift in Sources */,
 				BED60521610EAA570B6CCB67 /* FirstMateScheduleTests.swift in Sources */,
 				6D3B43E246F9F3A6ADF6E9B8 /* FirstMateSettingsTests.swift in Sources */,
@@ -2579,6 +2586,7 @@
 				D9E27613FC5F0C4932A8237F /* Config.swift in Sources */,
 				5565D8E023C238A5639D04C4 /* ControlProtocol.swift in Sources */,
 				9B514345DDCEC1506E944A51 /* ControlSocketServer.swift in Sources */,
+				68EE7F997049E86535F47612 /* CoreSocketClient.swift in Sources */,
 				7ACF6662D8BF575309E8EE64 /* CronSchedule.swift in Sources */,
 				CD7B83DE0BC3FB6951DF81C9 /* CurlClient.swift in Sources */,
 				7B6A3629629830D3183496E8 /* CursorHooksSetup.swift in Sources */,

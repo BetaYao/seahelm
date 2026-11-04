@@ -1,6 +1,6 @@
 # Cards and First Mate in seahelm-core
 
-Status: phases 1 (cards in the core, GPUI card strip) and 2 (First Mate in the core) done; 3–4 planned. Decided 2026-11-04: seahelm-core owns First Mate, and every
+Status: phases 1 (cards in the core, GPUI card strip), 2 (First Mate in the core) and 3 (the app follows the core's First Mate) done; 4 planned. Decided 2026-11-04: seahelm-core owns First Mate, and every
 "something waits on you" item is one card model, served by the core. The
 macOS island, Telegram, seahelm-web and the GPUI client are renderers.
 
@@ -138,6 +138,29 @@ not running) keeps its own First Mate, as today.
 - `autopilot.state`, `autopilot.propose`, `autopilot.answer {card, option}`
   and `autopilot.say {text}` on the core socket.
 - First Mate's pane gets no notices; its own questions still become cards.
+
+## As built (phase 3)
+
+- Settings ▸ First Mate ▸ "Run in seahelm-core" writes `autopilot_owner:
+  "core"`. With it, `AutopilotCoordinator` stops its own First Mate and
+  follows the core's: every 2 s it reads `autopilot.state` over
+  `core.sock` (`CoreSocketClient`) and mirrors First Mate's approval and
+  proposal cards into `PendingOrdersQueue` by their ids, so the island,
+  the dock, Telegram cards and seahelm-web show them unchanged; answering
+  or dismissing one goes to `autopilot.answer`. Chat to First Mate goes to
+  `autopilot.say`; its answers still return to the chat that asked (the app
+  watches First Mate's pane as before). The Telegram line for each action
+  comes from reading the core's `audit.jsonl` where the app left off.
+- First Mate's view attaches to the core's session and never creates or
+  replaces it.
+- Handover: the core stamps its session `<version>:<agent>:core`, the app
+  `<version>:<agent>`, so whichever takes First Mate over replaces the
+  other's session (the app's has no `seahelm` shim on its PATH). First
+  Mate's conversation restarts; its rules, ledger, audit and standing
+  orders carry over.
+- Scope: only First Mate's cards come from the core so far. Agent questions
+  and suggestions stay the app's own until the app takes its statuses from
+  the core (a separate plan); integration reports likewise.
 
 ## Phases (one PR each)
 
