@@ -33,6 +33,10 @@ use crate::first_mate::{self, policy as fm_policy};
 use crate::pr::{self, PrStore};
 use crate::rpc::{self, Dispatch, Reply, RpcError, RpcResult};
 
+/// When this service started: `core.ping` reports it, so a comparison
+/// knows which history the core watched live rather than read back.
+pub static STARTED_AT: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+
 pub struct Core {
     state: Mutex<State>,
     /// Signalled whenever the registry's sequence moves.
@@ -274,7 +278,7 @@ impl Core {
 
     fn dispatch(self: Arc<Self>, method: &str, p: Value, now: Timestamp) -> Reply {
         let result: RpcResult = match method {
-            "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION")})),
+            "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "started_at": STARTED_AT.get().copied()})),
             "hook" | "suggest" => {
                 // The prose the agent wrote since its last hook, read from its
                 // transcript without the lock, and put on the timeline before

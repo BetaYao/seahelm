@@ -29,6 +29,9 @@ use terminal_view::TerminalView;
 use workspace::Workspace;
 
 fn main() {
+    // Before any thread or child: the sessions we start must not report as
+    // the pane this client was launched from.
+    seahelmd::inherited::scrub();
     let mut args = std::env::args().skip(1);
     let mut name: Option<String> = None;
     let mut cmd = Vec::new();

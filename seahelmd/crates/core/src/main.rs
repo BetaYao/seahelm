@@ -78,6 +78,11 @@ fn run() -> Result<()> {
 }
 
 fn serve() -> Result<()> {
+    // Only here: `hook` and `cli` need the pane identity they were run with,
+    // but the service starts sessions (First Mate, `/new`) that must not
+    // inherit the identity of whatever pane launched it.
+    seahelmd::inherited::scrub();
+    let _ = core::STARTED_AT.set(seahelm_core_types::now());
     // An ignored signal survives exec, so a core started by a client that
     // ignores SIGTERM (a GUI toolkit may) could not be stopped by it.
     // A blocked mask survives exec too (the GPUI client's threads block
