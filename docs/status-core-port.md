@@ -265,6 +265,8 @@ right.
 | M5 | The GPUI client starts the core, registers the panes it opens, reports what it shows, and takes each worktree's dot from the core where the core has one. The installers and the Rust `seahelm-hook` are ported (`seahelm-core-hooks::install`, `src/bin/seahelm-hook.rs`); nothing installs them yet, since the app still installs its own shim. |
 | M6 | Hooks reach the core with no app in between. The app's `seahelm-hook` (v7) sends each payload to `core.sock` as well as `seahelm.sock`, and the app no longer forwards (`CoreHookForwarder` is gone, so nothing arrives twice). Without the app, `seahelm-core install-hooks` wires Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`, `[features].hooks`) to `seahelm-core hook <source>`, a bridge with the shim's contract (the `wire` splice, no stdout, exit 0, 2 s watchdog) that talks to the core's socket or, on Windows, its named pipe. It leaves an event alone when it already runs `seahelm-hook`, migrates its own entry when the exe moves, and never touches anyone else's. |
 
+| M7 | The core logs what it decides (`~/.config/seahelm/core-events.jsonl`: status changes, notices, closes, moves, unseen completions, each with its wall-clock time; a scratch core on `$SEAHELM_CORE_SOCKET` logs beside its socket). The GPUI client follows `events.subscribe`: status changes refresh its rows at once, `pane.notice` becomes a banner (osascript / notify-send / a WinRT toast), and it reports its window's activation with `client.visible`. Windows: the core and the bridge use named pipes (`\\.\pipe\seahelm-core-<user>`), built and tested in Windows CI. `scripts/ab/` records a stretch of the app and the GPUI client used side by side and reports on it. |
+
 Found while porting, beyond the table above:
 
 - The process probe assumed the session root is a shell. A session can run
@@ -276,10 +278,6 @@ Found while porting, beyond the table above:
 
 Still open:
 
-- **Windows.** The core listens on a Unix socket. On Windows it needs the
-  same named-pipe server that seahelmd's own Windows port needs (see the port
-  assessment: keep's `pipe.rs`). The hook binary's Windows client side is
-  written but untested.
 - **The app as a client of the core.** The app still decides status itself
   (the core gets hooks from the bridge, not from the app). Moving its consumers over (rows, island,
   notifications, Telegram, First Mate) is a separate plan, to be written once
