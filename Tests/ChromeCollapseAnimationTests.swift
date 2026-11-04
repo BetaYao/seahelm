@@ -72,32 +72,39 @@ final class ChromeCollapseAnimationTests: XCTestCase {
         XCTAssertEqual(sidebar.frame.width, 0, accuracy: 0.5)
     }
 
-    func testAnimatedCollapseIsInFlightPartWayThrough() {
-        apply(collapsed: false, animated: false)
-        XCTAssertEqual(sidebar.frame.width, expandedWidth, accuracy: 0.5)
-
-        apply(collapsed: true, animated: true)
-
-        // Sample repeatedly rather than once at the midpoint. A single
-        // `spin(duration / 2)` only holds if the run loop wakes near that
-        // instant; under load it overshoots the whole 0.24s animation, the
-        // sidebar reads 0, and the test fails claiming it "snapped shut" when
-        // it had merely finished. Polling asks the real question — did the
-        // width ever pass through an intermediate value — instead of betting
-        // on one wake-up landing in the window.
+    /// Whether the sidebar's width passes strictly between `from` and `to`,
+    /// sampled as often as the run loop allows from `start`. Nil when no
+    /// sample landed inside the animation at all (a starved run loop under a
+    /// loaded test host): that says nothing about the slide, so the caller
+    /// skips rather than fails — which is what made these tests flaky.
+    private func passesThroughIntermediate(from: CGFloat, to: CGFloat, since start: Date) -> Bool? {
         let duration = ChromeLayoutMetrics.collapseAnimationDuration
-        var sawIntermediate = false
-        let deadline = Date().addingTimeInterval(duration)
-        while Date() < deadline {
+        let lo = min(from, to), hi = max(from, to)
+        var sampledInFlight = false
+        while Date().timeIntervalSince(start) < duration {
             let w = sidebar.frame.width
-            if w > 0, w < expandedWidth {
-                sawIntermediate = true
-                break
-            }
+            if w > lo + 0.5, w < hi - 0.5 { return true }
+            sampledInFlight = true
             spin(duration / 20)
         }
+        return sampledInFlight ? false : nil
+    }
 
-        XCTAssertTrue(sawIntermediate, "sidebar snapped shut instead of animating")
+    private func assertSlides(from: CGFloat, to: CGFloat, since start: Date, _ message: String) throws {
+        // Deterministic half: right after the call nothing has jumped to the end.
+        XCTAssertEqual(sidebar.frame.width, from, accuracy: 0.5, "\(message): jumped straight to the end")
+        guard let passed = passesThroughIntermediate(from: from, to: to, since: start) else {
+            throw XCTSkip("run loop starved: no sample landed inside the \(ChromeLayoutMetrics.collapseAnimationDuration)s slide")
+        }
+        XCTAssertTrue(passed, message)
+    }
+
+    func testAnimatedCollapseIsInFlightPartWayThrough() throws {
+        apply(collapsed: false, animated: false)
+        XCTAssertEqual(sidebar.frame.width, expandedWidth, accuracy: 0.5)
+        let start = Date()
+        apply(collapsed: true, animated: true)
+        try assertSlides(from: expandedWidth, to: 0, since: start, "sidebar snapped shut instead of animating")
     }
 
     func testAnimatedCollapseSettlesClosed() {
@@ -109,16 +116,12 @@ final class ChromeCollapseAnimationTests: XCTestCase {
         XCTAssertTrue(sidebar.isHidden)
     }
 
-    func testAnimatedExpandIsInFlightPartWayThrough() {
+    func testAnimatedExpandIsInFlightPartWayThrough() throws {
         apply(collapsed: true, animated: false)
         XCTAssertEqual(sidebar.frame.width, 0, accuracy: 0.5)
-
+        let start = Date()
         apply(collapsed: false, animated: true)
-        spin(ChromeLayoutMetrics.collapseAnimationDuration / 2)
-
-        let mid = sidebar.frame.width
-        XCTAssertGreaterThan(mid, 0, "sidebar had not started moving")
-        XCTAssertLessThan(mid, expandedWidth,"sidebar snapped open instead of animating")
+        try assertSlides(from: 0, to: expandedWidth, since: start, "sidebar snapped open instead of animating")
     }
 
     /// `MainWindowController.applyChromeState` does not stop at `applyState`: it
@@ -127,17 +130,13 @@ final class ChromeCollapseAnimationTests: XCTestCase {
     /// layout is the thing to watch — if it resolves the width constraint to its
     /// final value, the slide is over before the first frame is drawn and ⌘B
     /// looks instant no matter what the animation block asked for.
-    func testForcedLayoutRightAfterApplyDoesNotSnapTheSlide() {
+    func testForcedLayoutRightAfterApplyDoesNotSnapTheSlide() throws {
         apply(collapsed: false, animated: false)
-
+        let start = Date()
         apply(collapsed: true, animated: true)
         // Stand-in for positionStandardWindowButtons()'s host.layoutSubtreeIfNeeded().
         find(in: chrome.view, id: "chrome.terminalHeader")?.layoutSubtreeIfNeeded()
-
-        spin(ChromeLayoutMetrics.collapseAnimationDuration / 2)
-        let mid = sidebar.frame.width
-        XCTAssertGreaterThan(mid, 0, "a forced layout right after apply snapped the sidebar shut")
-        XCTAssertLessThan(mid, expandedWidth, "sidebar had not started moving")
+        try assertSlides(from: expandedWidth, to: 0, since: start, "a forced layout right after apply snapped the sidebar shut")
     }
 
     func testAnimatedExpandSettlesOpen() {

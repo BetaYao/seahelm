@@ -17,7 +17,7 @@ fn run_hook(sock: &Path, args: &[&str], payload: &str) -> Output {
     let mut child = Command::new(HOOK)
         .args(args)
         .env_clear()
-        .env("SEAHELM_SOCKET_PATH", sock)
+        .env("SEAHELM_CORE_SOCKET", sock)
         .env("SEAHELM_PANE_ID", "seahelm-repo-main")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -28,9 +28,13 @@ fn run_hook(sock: &Path, args: &[&str], payload: &str) -> Output {
     child.wait_with_output().unwrap()
 }
 
-/// Accept `n` connections, answer each like the control socket does, and
-/// return the request lines.
+/// Accept `n` connections, answer each like the core does, and return the
+/// request lines.
 fn serve(listener: UnixListener, n: usize) -> std::thread::JoinHandle<Vec<Value>> {
+    serve_with(listener, n, "{\"jsonrpc\":\"2.0\",\"id\":\"h\",\"result\":{}}\n")
+}
+
+fn serve_with(listener: UnixListener, n: usize, answer: &'static str) -> std::thread::JoinHandle<Vec<Value>> {
     std::thread::spawn(move || {
         (0..n)
             .map(|_| {
@@ -38,7 +42,7 @@ fn serve(listener: UnixListener, n: usize) -> std::thread::JoinHandle<Vec<Value>
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
-                (&stream).write_all(b"{\"jsonrpc\":\"2.0\",\"id\":\"h\",\"result\":{}}\n").unwrap();
+                (&stream).write_all(answer.as_bytes()).unwrap();
                 serde_json::from_str(&line).unwrap()
             })
             .collect()
@@ -69,6 +73,19 @@ fn test_script_stamps_source_on_the_wire() {
     assert_eq!(first["params"]["hook_event_name"], "Stop");
     assert!(captured[1]["params"].get("seahelm_source").is_none(), "untagged call must not emit an empty source");
     assert_eq!(captured[1]["params"]["seahelm_pane_id"], "seahelm-repo-main");
+}
+
+/// The core's `stdout` is the one thing the bridge prints: a SessionStart's
+/// added context.
+#[test]
+fn test_prints_what_the_core_hands_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let sock = dir.path().join("s.sock");
+    let server = serve_with(UnixListener::bind(&sock).unwrap(), 1, "{\"jsonrpc\":\"2.0\",\"id\":\"h\",\"result\":{\"stdout\":\"{\\\"x\\\":1}\"}}\n");
+    let out = run_hook(&sock, &["claude-code"], r#"{"hook_event_name":"SessionStart","session_id":"s","cwd":"/wt"}"#);
+    server.join().unwrap();
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout), r#"{"x":1}"#);
 }
 
 /// Nobody listening is not the agent's problem: exit 0, silently, at once.

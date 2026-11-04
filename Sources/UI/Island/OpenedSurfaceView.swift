@@ -22,8 +22,8 @@ struct OpenedSurfaceView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 header
-                if let warning = model.controlChannelWarning {
-                    controlChannelBanner(warning)
+                if let warning = model.warning {
+                    warningBanner(warning.message)
                 }
                 switch model.page {
                 case .suggestions:
@@ -42,7 +42,7 @@ struct OpenedSurfaceView: View {
         .frame(width: model.openedWidth)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.page)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.controlChannelWarning)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.warning)
         .onAppear { consumePrefill(); consumeFocusRequest() }
         .onChange(of: model.pendingCommandPrefill) { consumePrefill() }
         .onChange(of: model.pendingCommandFocus) { consumeFocusRequest() }
@@ -51,7 +51,7 @@ struct OpenedSurfaceView: View {
     /// The control channel is the island's supply line. With it down, the rows
     /// below are the last thing seahelm heard rather than the current state —
     /// say so, instead of letting a stale-but-plausible list stand.
-    private func controlChannelBanner(_ text: String) -> some View {
+    private func warningBanner(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 11, weight: .semibold))

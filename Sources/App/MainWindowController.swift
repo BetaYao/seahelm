@@ -870,10 +870,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 WorktreeAgentTypeStore.shared.set(agentType, forWorktree: info.path)
                 WorktreeTaskStore.shared.set(task, forWorktree: info.path)
                 if reuseEnv, let currentPath { WorktreeCreator.copyEnvironmentFiles(from: currentPath, to: info.path) }
-                // Bare launch only — never put the task (or Claude's long
-                // --append-system-prompt) on the seahelmd-typed command line. That
-                // truncates mid-quote and leaves bash stuck; Claude never starts.
-                // Suggest guidance is already in CLAUDE.md via WorktreeCreator.
+                // Bare launch only — never put the task on the seahelmd-typed
+                // command line. That truncates mid-quote and leaves bash stuck;
+                // Claude never starts. Suggest guidance comes from seahelm-core
+                // as the SessionStart hook's added context.
                 // The repo's `.seahelm/setup.sh`, if it has one, runs first in
                 // the same pane and gates the agent on its success.
                 let setup = WorktreeSetupHook.setupCommand(worktreePath: info.path, repoPath: repoPath)
@@ -2157,24 +2157,6 @@ extension MainWindowController {
         applyChromeState(animated: true)
     }
 
-    /// Non-nil only for the states the app cannot resolve by itself —
-    /// `ControlSocketServer` silently reclaims a vanished or stale socket path
-    /// on its own, and telling the user to restart for something already being
-    /// fixed would train them to ignore this.
-    fileprivate func controlChannelWarning() -> String? {
-        guard let server = tabCoordinator.terminalCoordinator?.controlSocketServer else {
-            return nil  // never started (e.g. the screenshot instance stands down)
-        }
-        switch server.state {
-        case .listening:
-            return nil
-        case .standby:
-            return "Another Seahelm instance owns the control channel. Agent hooks and the seahelm CLI are inactive in this window — quit the other instance to take it back."
-        case .stopped:
-            return "The control channel could not start. Agent hooks and the seahelm CLI are unavailable — restarting Seahelm usually clears it."
-        }
-    }
-
     /// The island's left bar is the worktree's label; a pick should not wait
     /// for the 10s fallback timer to show there.
     @objc private func handleWorktreeLabelDidChange(_ note: Notification?) {
@@ -2266,13 +2248,13 @@ extension MainWindowController {
         let orders = IslandModel.newestSuggestions(from: tabCoordinator.cards.cards)
         if model.orders != orders { model.orders = orders }
 
-        // A dead control channel is invisible everywhere else: the hooks fail
-        // their `[ -S ]` guard and drop events without a word, so the island
-        // just goes quiet — indistinguishable from a fleet with nothing to say.
-        let channelWarning = controlChannelWarning()
-        if model.controlChannelWarning != channelWarning {
-            model.controlChannelWarning = channelWarning
-        }
+        // A core that does not answer is invisible everywhere else: every pane
+        // just stops changing, indistinguishable from a fleet with nothing to
+        // say.
+        let warning = IslandWarning.current(
+            coreUnreachableSince: CoreLink.shared.unreachableSince,
+            controlChannel: tabCoordinator.terminalCoordinator?.controlSocketServer?.state)
+        if model.warning != warning { model.warning = warning }
 
         // A new suggestion is actionable — expand so the card is visible
         // without hovering. Nothing else opens the island: status changes are

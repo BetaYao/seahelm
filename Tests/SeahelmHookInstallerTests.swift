@@ -2,23 +2,6 @@ import XCTest
 @testable import seahelm
 
 final class SeahelmHookInstallerTests: XCTestCase {
-    func testScriptShape() {
-        let s = SeahelmHookInstaller.scriptContents()
-        XCTAssertTrue(s.hasPrefix("#!/bin/sh"))
-        XCTAssertTrue(s.contains("seahelm-hook v8"))
-        XCTAssertTrue(s.contains("nc -U \"$core\""))     // seahelm-core's socket (Apple-nc compatible)
-        XCTAssertTrue(s.contains("SEAHELM_CORE_SOCKET"))
-        XCTAssertFalse(s.contains("SEAHELM_SOCKET_PATH"))  // the app hears no hooks
-        XCTAssertFalse(s.contains("block_b64"))          // Stop is observation-only
-        XCTAssertFalse(s.contains("base64 -d"))
-        XCTAssertFalse(s.contains("curl"))
-        XCTAssertTrue(s.contains("\"method\":\"hook\""))
-        XCTAssertTrue(s.contains("seahelm_pane_id"))     // pane id injected
-        XCTAssertTrue(s.contains("SEAHELM_PANE_ID"))
-        XCTAssertTrue(s.contains("seahelm_source"))      // caller identity injected
-        XCTAssertTrue(s.contains("src=\"${1:-}\""))
-    }
-
     /// Records every JSON-RPC line written to a Unix socket: a stand-in for
     /// seahelm-core.
     final class LineCapture {
@@ -74,36 +57,33 @@ final class SeahelmHookInstallerTests: XCTestCase {
         deinit { close(fd); unlink(path) }
     }
 
-    /// End to end: the shipped script reaches seahelm-core alone, stamped with
-    /// the source it was invoked with (and none when invoked without one) and
-    /// with the pane it runs in.
-    func testScriptReachesTheCoreStampedWithSourceAndPane() throws {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("seahelm-hook-\(UUID().uuidString.prefix(8))")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let scriptURL = dir.appendingPathComponent("seahelm-hook")
-        try SeahelmHookInstaller.scriptContents().write(to: scriptURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+    /// End to end: the bundled bridge reaches seahelm-core, stamped with the
+    /// source it was invoked with (and none when invoked without one) and with
+    /// the pane it runs in.
+    func testBundledHookReachesTheCoreStampedWithSourceAndPane() throws {
+        let hook = try XCTUnwrap(SeahelmHookInstaller.bundled, "the app bundles Resources/bin/seahelm-hook")
         let core = try LineCapture()
 
-        func runHook(args: [String], env: [String: String]) throws -> Int32 {
+        func runHook(args: [String], env: [String: String]) throws -> (Int32, Data) {
             let p = Process()
-            p.executableURL = scriptURL
+            p.executableURL = hook
             p.arguments = args
-            p.environment = env.merging(["SEAHELM_CORE_SOCKET": core.path, "PATH": "/usr/bin:/bin"]) { a, _ in a }
-            let input = Pipe()
+            p.environment = env.merging(["SEAHELM_CORE_SOCKET": core.path]) { a, _ in a }
+            let input = Pipe(), output = Pipe()
             p.standardInput = input
-            p.standardOutput = Pipe()
+            p.standardOutput = output
             try p.run()
             input.fileHandleForWriting.write(Data(#"{"hook_event_name":"Stop","session_id":"s","cwd":"/wt"}"#.utf8))
             try? input.fileHandleForWriting.close()
             p.waitUntilExit()
-            return p.terminationStatus
+            return (p.terminationStatus, output.fileHandleForReading.readDataToEndOfFile())
         }
 
-        XCTAssertEqual(try runHook(args: ["claude-code"], env: ["SEAHELM_PANE_ID": "seahelm-repo-main"]), 0)
-        XCTAssertEqual(try runHook(args: [], env: ["SEAHELMD_SESSION": "seahelm-repo-wt"]), 0)
+        let tagged = try runHook(args: ["claude-code"], env: ["SEAHELM_PANE_ID": "seahelm-repo-main"])
+        let untagged = try runHook(args: [], env: ["SEAHELMD_SESSION": "seahelm-repo-wt"])
+        XCTAssertEqual(tagged.0, 0)
+        XCTAssertEqual(untagged.0, 0)
+        XCTAssertTrue(tagged.1.isEmpty && untagged.1.isEmpty, "Stop prints nothing")
         let got = core.waitFor(2)
         XCTAssertEqual(got.count, 2, "both hook invocations should reach the core")
         XCTAssertEqual(got.first?["seahelm_source"] as? String, "claude-code")
@@ -112,29 +92,21 @@ final class SeahelmHookInstallerTests: XCTestCase {
         XCTAssertEqual(got.last?["seahelm_pane_id"] as? String, "seahelm-repo-wt")
     }
 
-    func testScriptIsValidSh() throws {
-        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("seahelm-hook-syn-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        try SeahelmHookInstaller.scriptContents().write(to: tmp, atomically: true, encoding: .utf8)
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-n", tmp.path]   // syntax check only
-        let err = Pipe(); p.standardError = err
-        try p.run(); p.waitUntilExit()
-        let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        XCTAssertEqual(p.terminationStatus, 0, "sh syntax error:\n\(msg)")
-    }
-
-    func testInstallWritesExecutable() throws {
+    func testInstallCopiesTheBundledBinary() throws {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("seahelm-hook-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
-        XCTAssertTrue(SeahelmHookInstaller.ensureInstalled(binDirectory: tmp))
-        let path = tmp.appendingPathComponent("seahelm-hook").path
+        let source = tmp.appendingPathComponent("src-hook")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: source)
+        let bin = tmp.appendingPathComponent("bin")
+        XCTAssertTrue(SeahelmHookInstaller.ensureInstalled(binDirectory: bin, from: source))
+        let path = bin.appendingPathComponent("seahelm-hook").path
         let attrs = try FileManager.default.attributesOfItem(atPath: path)
         XCTAssertEqual(((attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o111, 0o111)
-        XCTAssertFalse(SeahelmHookInstaller.ensureInstalled(binDirectory: tmp)) // idempotent
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), try Data(contentsOf: source))
+        XCTAssertFalse(SeahelmHookInstaller.ensureInstalled(binDirectory: bin, from: source)) // idempotent
+        XCTAssertFalse(SeahelmHookInstaller.ensureInstalled(binDirectory: bin, from: nil))
     }
 }
 

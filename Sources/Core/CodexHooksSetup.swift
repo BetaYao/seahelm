@@ -2,8 +2,9 @@ import Foundation
 
 /// Ensures Codex CLI is configured to forward hook events into seahelm.
 /// Codex hooks are command-based; we install a command hook that pipes the
-/// stdin JSON to the seahelm-hook bridge. The bridge only reports events;
-/// Stop is never used as a reverse trigger to block Codex.
+/// stdin JSON to the seahelm-hook bridge. The bridge reports events; its
+/// stdout is the core's answer, which is only ever a SessionStart's added
+/// context (the suggestion guidance). Stop is never used to block Codex.
 enum CodexHooksSetup {
 
     private static let requiredEvents = [
@@ -18,7 +19,7 @@ enum CodexHooksSetup {
     /// side never has to infer Claude vs Codex from payload keys — an inference
     /// the two tools' converging schemas have made unreliable.
     private static func hookCommand() -> String {
-        "/bin/sh -lc '\(SeahelmHookInstaller.scriptPath()) codex >/dev/null 2>&1 || true'"
+        "/bin/sh -c '\(SeahelmHookInstaller.scriptPath()) codex 2>/dev/null || true'"
     }
 
     /// What reconciling one file did. Separating these two matters because

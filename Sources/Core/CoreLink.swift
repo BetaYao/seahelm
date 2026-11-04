@@ -6,7 +6,10 @@ import Foundation
 /// language (`command.run`), pane handles, and sessions it starts.
 ///
 /// - **Running**: `seahelm-core ensure` at launch, the binary shipped in
-///   Contents/Resources/bin beside seahelmd.
+///   Contents/Resources/bin beside seahelmd, and again whenever the core has
+///   stopped answering for a while (at most every `ensureInterval`): `ensure`
+///   starts one only if nothing answers, so it never replaces a live core.
+///   While it is silent the island says so (`IslandWarning.core`).
 /// - **The fleet**: every 2 s, the panes as `pane.list` answers them
 ///   (`pane.sync`) and every worktree (`worktrees.set`), so the core watches
 ///   exactly what the app shows.
@@ -24,6 +27,11 @@ final class CoreLink {
 
     /// Whether the core answered the last sync. Main thread.
     private(set) var reachable = false
+    /// Since when the core has not answered (from `start` until the first
+    /// sync it answers); nil while it does. Main thread.
+    private(set) var unreachableSince: Date?
+    private var lastEnsure: Date?
+    static let ensureInterval: TimeInterval = 15
     /// Worktree path → a live session the core has there that no app pane
     /// uses. Main thread.
     private var adoptable: [String: String] = [:]
@@ -40,15 +48,30 @@ final class CoreLink {
 
     func start() {
         guard timer == nil else { return }
+        unreachableSince = Date()
+        ensure()
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.sync() }
+    }
+
+    /// Start the core if nothing answers on its socket (`seahelm-core ensure`).
+    private func ensure() {
+        lastEnsure = Date()
         DispatchQueue.global(qos: .utility).async {
             guard let binary = Self.binary else {
-                NSLog("[CoreLink] no seahelm-core binary; commands run in the app")
+                NSLog("[CoreLink] no seahelm-core binary")
                 return
             }
             let result = ProcessRunner.capture(executable: URL(fileURLWithPath: binary), arguments: ["ensure"], timeout: 10)
             if !result.succeeded { NSLog("[CoreLink] seahelm-core ensure failed") }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.sync() }
+    }
+
+    /// Whether a silent core is worth an `ensure` now: silent for a few syncs,
+    /// and not tried within `ensureInterval`.
+    static func shouldEnsure(unreachableSince: Date?, lastEnsure: Date?, now: Date) -> Bool {
+        guard let since = unreachableSince, now.timeIntervalSince(since) >= 4 else { return false }
+        guard let last = lastEnsure else { return true }
+        return now.timeIntervalSince(last) >= ensureInterval
     }
 
     /// The core's session for a worktree the app is about to give its first
@@ -71,9 +94,14 @@ final class CoreLink {
                 self.syncing = false
                 guard case .success = synced, case .success(let list) = listed else {
                     self.reachable = false
+                    if self.unreachableSince == nil { self.unreachableSince = Date() }
+                    if Self.shouldEnsure(unreachableSince: self.unreachableSince, lastEnsure: self.lastEnsure, now: Date()) {
+                        self.ensure()
+                    }
                     return
                 }
                 self.reachable = true
+                self.unreachableSince = nil
                 let rows = list["panes"] as? [[String: Any]] ?? []
                 let (handles, adoptable) = Self.read(rows, appSessions: Set(panes.compactMap { $0["pane_session_key"] as? String }))
                 PaneHandleRegistry.shared.adopt(handles)

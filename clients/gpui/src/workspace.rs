@@ -618,7 +618,7 @@ impl Workspace {
                 let (title, body) = match &self.first_mate {
                     None => ("seahelm-core is not answering", "Cards and First Mate come back when it does."),
                     Some(f) if f.enabled => ("First Mate is starting", "Its session is being launched; the terminal appears here when it is up."),
-                    Some(_) => ("First Mate is off", "Turn it on in the macOS app (Settings ▸ First Mate), or set autopilot_enabled and autopilot_owner: \"core\" in config.json."),
+                    Some(_) => ("First Mate is off", "Turn it on in the macOS app (Settings ▸ First Mate), or set autopilot_enabled in config.json."),
                 };
                 div()
                     .flex_1()

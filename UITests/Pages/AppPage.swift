@@ -4,13 +4,15 @@ import XCTest
 /// Provides access to all sub-page objects.
 class AppPage {
     let app: XCUIApplication
+    /// The isolated home this launch runs in (`ScratchHome`).
+    private(set) var scratch: ScratchHome?
 
     init() {
         app = XCUIApplication()
     }
 
     @discardableResult
-    func launch(testConfigPath: String? = nil) -> Self {
+    func launch(testConfigPath: String? = nil, environment: [String: String] = [:]) -> Self {
         app.launchArguments += [
             "-SeahelmUITesting",
             "-ApplePersistenceIgnoreState", "YES",
@@ -19,12 +21,22 @@ class AppPage {
         if let path = testConfigPath {
             app.launchArguments += ["-UITestConfig", path]
         }
+        do {
+            let scratch = try ScratchHome()
+            self.scratch = scratch
+            app.launchEnvironment.merge(scratch.environment) { _, new in new }
+            app.launchEnvironment.merge(environment) { _, new in new }
+        } catch {
+            fatalError("UI tests never run on the live setup, and the scratch home failed: \(error)")
+        }
         app.launch()
         return self
     }
 
     func terminate() {
         app.terminate()
+        scratch?.tearDown()
+        scratch = nil
     }
 
     lazy var chrome = ChromeHeaderPage(app)

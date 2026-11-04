@@ -230,7 +230,7 @@
 
     <figure>
       <div class="fig-frame">
-        <svg viewBox="0 0 940 300" role="img" aria-label="Before and after: an agent that creates a worktree and cd's into it drags its own pane along, and the unused placeholder pane in the destination is destroyed">
+        <svg viewBox="0 0 940 300" role="img" aria-label="Before and after: an agent that creates a worktree and works in it is forked there with its conversation, and the original pane stays where it was with its turn stopped">
           <text x="10" y="30" class="svg-hd">BEFORE</text>
           <text x="520" y="30" class="svg-hd">AFTER</text>
 
@@ -250,22 +250,25 @@
 
           <!-- transition -->
           <line x1="432" y1="160" x2="504" y2="160" class="svg-accent" marker-end="url(#ah-a)"/>
-          <text x="468" y="146" class="svg-lbl" text-anchor="middle">hook cwd</text>
-          <text x="468" y="182" class="svg-lbl" text-anchor="middle">moveLeaf</text>
+          <text x="468" y="146" class="svg-lbl" text-anchor="middle">git worktree add</text>
+          <text x="468" y="182" class="svg-lbl" text-anchor="middle">fork</text>
 
           <!-- AFTER -->
           <rect x="520" y="44" width="410" height="232" rx="8" class="svg-box-plain"/>
           <rect x="536" y="68" width="378" height="90" rx="6" class="svg-box"/>
           <text x="550" y="92" class="svg-t2">main</text>
-          <rect x="552" y="104" width="162" height="42" rx="5" class="svg-box"/>
-          <text x="566" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+          <rect x="552" y="104" width="172" height="42" rx="5" class="svg-box"/>
+          <text x="566" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  claude</text>
+          <rect x="736" y="104" width="162" height="42" rx="5" class="svg-box"/>
+          <text x="750" y="131" class="svg-t"><tspan fill="var(--idle)">&#9675;</tspan>  codex</text>
+          <text x="914" y="88" class="svg-lbl" text-anchor="end">original pane kept &middot; turn stopped</text>
 
           <rect x="536" y="174" width="378" height="90" rx="6" class="svg-box"/>
           <text x="550" y="198" class="svg-t2">feat/x</text>
           <rect x="552" y="210" width="172" height="42" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
-          <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  claude</text>
-          <text x="914" y="231" class="svg-note" text-anchor="end">Station + seahelmd session kept</text>
-          <text x="914" y="250" class="svg-lbl" text-anchor="end">placeholder destroyed</text>
+          <text x="566" y="237" class="svg-t"><tspan fill="var(--run)">&#9680;</tspan>  claude &middot; fork</text>
+          <text x="900" y="231" class="svg-note" text-anchor="end">--fork-session</text>
+          <text x="914" y="250" class="svg-lbl" text-anchor="end">placeholder retired</text>
 
           <defs>
             <marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -275,11 +278,12 @@
         </svg>
       </div>
       <figcaption>
-        The pane follows its agent. Claude Code makes a worktree and works in it; every hook payload carries
-        <code>cwd</code>, so Seahelm matches the <em>longest</em> worktree prefix and moves that one pane &mdash;
-        keeping its Ghostty surface and its seahelmd session &mdash; instead of standing up a stranger beside it.
-        Two gates keep it honest: the destination must belong to the same repo, and after any move auto-follow
-        holds for ten minutes, because an agent's <code>cwd</code> bounces while it works.
+        The work follows its agent. When Claude Code makes a worktree and goes to work in it, seahelm-core sees
+        it in the tool calls (the <code>git worktree add</code>, then the <code>cd</code> and the edits under that path) and the app
+        <em>forks</em> the conversation there: <code>claude --resume --fork-session</code> in a pane of its own, filed under the new
+        worktree, taking the placeholder's place. The original pane stays where it was, its turn stopped and its
+        session intact. A <code>cd</code> into a worktree someone else made is only a visit: the pane's title shows where the
+        agent is, and the header's branch button forks it there if you want.
       </figcaption>
     </figure>
 

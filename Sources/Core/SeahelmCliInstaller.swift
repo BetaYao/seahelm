@@ -27,27 +27,6 @@ enum SeahelmCliInstaller {
     /// already there. True when it wrote.
     @discardableResult
     static func ensureInstalled(binDirectory: URL, from source: URL?) -> Bool {
-        guard let source, let desired = try? Data(contentsOf: source) else {
-            NSLog("[SeahelmCliInstaller] no bundled seahelm CLI")
-            return false
-        }
-        let target = binDirectory.appendingPathComponent("seahelm")
-        if let existing = try? Data(contentsOf: target), existing == desired { return false }
-        do {
-            try FileManager.default.createDirectory(at: binDirectory, withIntermediateDirectories: true)
-            // Write beside it and rename: a CLI mid-run keeps its inode.
-            let staged = binDirectory.appendingPathComponent(".seahelm.new")
-            try desired.write(to: staged, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staged.path)
-            if FileManager.default.fileExists(atPath: target.path) {
-                _ = try FileManager.default.replaceItemAt(target, withItemAt: staged)
-            } else {
-                try FileManager.default.moveItem(at: staged, to: target)
-            }
-            return true
-        } catch {
-            NSLog("[SeahelmCliInstaller] Failed to install: \(error)")
-            return false
-        }
+        BundledBinary.install(source, as: "seahelm", in: binDirectory)
     }
 }

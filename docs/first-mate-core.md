@@ -114,11 +114,11 @@ not running) keeps its own First Mate, as today.
   by message (gate / propose / state / say wait for an answer; pane outcomes
   and answered cards do not), ticking every 20 s for config, session, PRs,
   schedules and delivery.
-- Ownership: the core runs First Mate only with `autopilot_enabled: true`
-  **and** `autopilot_owner: "core"` in `config.json`, and only while it holds
-  `first-mate/owner.lock` (`File::try_lock`). Without `autopilot_owner` the
-  app keeps First Mate as before, so this phase changes nothing until the
-  key is set. Turning it off stops First Mate within a tick and drops its
+- Ownership: the core runs First Mate whenever `config.json` has
+  `autopilot_enabled: true`, and only while it holds
+  `first-mate/owner.lock` (`File::try_lock`). (Phases 2–3 also needed
+  `autopilot_owner: "core"`; the hard cut of 2026-11-04 removed the key, the
+  app's own First Mate and the Settings switch that wrote it.) Turning it off stops First Mate within a tick and drops its
   open cards; the session is left, as the app leaves it.
 - The CLI: First Mate's directory gets `bin/seahelm` (`seahelm.cmd` on
   Windows), a shim onto `seahelm-core cli`, put first on its PATH inside the
@@ -141,8 +141,9 @@ not running) keeps its own First Mate, as today.
 
 ## As built (phase 3)
 
-- Settings ▸ First Mate ▸ "Run in seahelm-core" writes `autopilot_owner:
-  "core"`. With it, `AutopilotCoordinator` stops its own First Mate and
+- (Superseded by the hard cut: there is no `autopilot_owner` any more, and
+  what follows describes the transition.) Settings ▸ First Mate ▸ "Run in
+  seahelm-core" wrote `autopilot_owner: "core"`. With it, `AutopilotCoordinator` stops its own First Mate and
   follows the core's: every 2 s it reads `autopilot.state` over
   `core.sock` (`CoreSocketClient`) and mirrors First Mate's approval and
   proposal cards into `PendingOrdersQueue` by their ids, so the island,
