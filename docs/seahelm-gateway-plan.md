@@ -107,7 +107,7 @@ Same framing as before. Text frames carry JSON:
 
 Binary VT frames and binary key frames are unchanged:
 
-- VT frame: `u8 ver=1, u8 flags (bit0 deflate = zlib), u8 kind (1 data, 2 snapshot),
+- VT frame: `u8 ver=1, u8 flags (bit0 = raw deflate, RFC 1951, no zlib header), u8 kind (1 data, 2 snapshot),
   u8 keylen, key, [u16 BE cols, u16 BE rows if snapshot], payload`. Payloads of 512 bytes or
   more are deflated when the client negotiated it and the result is smaller.
 - Key frame: `u8 ver=1, u8 kind=1, u8 keylen, key, utf8`.

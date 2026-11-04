@@ -69,8 +69,13 @@ pub fn decode_keys(frame: &[u8]) -> Option<(String, Vec<u8>)> {
     Some((key, rest[len..].to_vec()))
 }
 
+/// Raw deflate (RFC 1951), no zlib header: what the page inflates with
+/// `DecompressionStream('deflate-raw')` (seahelm-web's vt-frame.js), and what
+/// the macOS app sent before the gateway — Apple's `COMPRESSION_ZLIB` is raw
+/// deflate despite its name. A zlib-wrapped frame fails to inflate there, and
+/// the page drops it: every frame of 512 bytes or more, snapshots included.
 fn deflate(input: &[u8]) -> Option<Vec<u8>> {
-    let mut z = flate2::write::ZlibEncoder::new(Vec::with_capacity(input.len() / 2), flate2::Compression::fast());
+    let mut z = flate2::write::DeflateEncoder::new(Vec::with_capacity(input.len() / 2), flate2::Compression::fast());
     z.write_all(input).ok()?;
     z.finish().ok()
 }
@@ -91,8 +96,11 @@ mod tests {
         let e = VtEvent { kind: KIND_DATA, pane: "k".into(), payload: vec![b'a'; 4000], cols: 0, rows: 0 };
         let f = encode_vt(&e, true).unwrap();
         assert_eq!(f[1], 1);
+        // Raw deflate, as `DecompressionStream('deflate-raw')` takes it: a
+        // zlib stream would not inflate this way.
         let mut out = Vec::new();
-        flate2::read::ZlibDecoder::new(&f[5..]).read_to_end(&mut out).unwrap();
+        flate2::read::DeflateDecoder::new(&f[5..]).read_to_end(&mut out).unwrap();
+        assert!(flate2::read::ZlibDecoder::new(&f[5..]).read_to_end(&mut Vec::new()).is_err());
         assert_eq!(out, e.payload);
         assert_eq!(encode_vt(&e, false).unwrap()[1], 0);
     }
