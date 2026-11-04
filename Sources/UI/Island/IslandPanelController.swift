@@ -53,9 +53,7 @@ final class IslandPanelController {
         hosting.controller = self
         panel.contentView = hosting
         panel.onEscape = { [weak self] in
-            guard let self, self.model.isOpened else { return false }
-            self.model.close()
-            return true
+            self?.model.escape() ?? false
         }
 
         self.panel = panel
@@ -94,14 +92,28 @@ final class IslandPanelController {
         updateVisibility()
     }
 
-    /// Open the island with the command field focused (Cmd+N entry point).
+    /// Open on First Mate's conversation with the field prefilled (Cmd+N's "/new ").
     func openCommandBar(prefill: String) {
         presentCommandBar { model.pendingCommandPrefill = prefill }
     }
 
-    /// Open the island and focus the command field without changing its text (Cmd+P).
+    /// Open on First Mate's conversation, the field focused (Cmd+P).
     func openCommandBarFocused() {
         presentCommandBar { model.pendingCommandFocus = true }
+    }
+
+    /// First Mate's conversation (⌘J, Settings ▸ Open First Mate).
+    func openFirstMate() {
+        presentCommandBar { model.pendingCommandFocus = true }
+    }
+
+    /// ⌘J again shuts what ⌘J opened.
+    func toggleFirstMate() {
+        if model.isOpened, model.page == .conversation {
+            closeCommandBar()
+        } else {
+            openFirstMate()
+        }
     }
 
     /// True while the island is expanded — i.e. Cmd+P would toggle it shut.
@@ -122,7 +134,7 @@ final class IslandPanelController {
         guard let panel else { return }
         if !panel.isVisible { panel.orderFrontRegardless() }
         prepare()
-        model.open(reason: .click)
+        model.open(reason: .click, page: .conversation)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKey()
     }

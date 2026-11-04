@@ -71,13 +71,9 @@ class MainWindowController: NSWindowController {
 
     private var dashboardVC: DashboardViewController?
     /// First Mate's view while it is the center overlay; nil otherwise.
-    private weak var firstMateView: FirstMateView?
     /// First Mate's history while its popover is open; nil otherwise.
     /// The approvals popover's content while it is open; nil otherwise.
-    private weak var firstMateApprovals: FirstMateApprovalsView?
-    private weak var firstMateApprovalsPopover: NSPopover?
     /// Re-reads First Mate's memory for the header while it is shown.
-    private var firstMateMemoryTimer: Timer?
     private var config = Config.load()
     private var pairingWindowController: PairingWindowController?
     private var settingsWindowController: SettingsWindowController?
@@ -109,6 +105,8 @@ class MainWindowController: NSWindowController {
 
     // Vibe-island notch overlay
     private let islandController = IslandPanelController()
+    private var islandMateTimer: Timer?
+    private var islandMateFetching = false
     private var islandRefreshTimer: Timer?
     private var islandSeenSuggestions = SuggestionSeenSet()
     /// Suggestion orders already surfaced through the First Mate sidebar. Tracked
@@ -904,20 +902,8 @@ dashboard.stationManager = terminalCoordinator.stationManager
         // File / changelog overlays reuse the chrome terminal title (no second header).
         dashboard.onCenterOverlayTitleChange = { [weak self] title in
             guard let self else { return }
-            let firstMate = title == FirstMateView.overlayTitle
-            self.windowChrome?.setFirstMateMode(firstMate)
             self.windowChrome?.setOverlayTitle(title)
-            self.firstMateMemoryTimer?.invalidate()
-            self.firstMateMemoryTimer = nil
-            if firstMate {
-                self.refreshFirstMateMemory()
-                self.firstMateMemoryTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-                    self?.refreshFirstMateMemory()
-                }
-            } else {
-                // The live pane's figure, not First Mate's, now that it is back.
-                self.updateTitleBar()
-            }
+            self.updateTitleBar()
         }
         // Edit-mode toggle availability + on-state drive the chrome header icon.
         dashboard.onEditModeStateChange = { [weak self] available, isOn in
@@ -2284,7 +2270,21 @@ extension MainWindowController {
         model.commandMenuProvider = { [weak self] trigger, query in
             self?.helmMenuItems(trigger: trigger, query: query) ?? []
         }
+        // First Mate lives in the island: its conversation, Stop, and a
+        // `/command` typed there running as one.
+        model.onSendToFirstMate = { [weak self] text in
+            guard let self else { return false }
+            if text.hasPrefix("/") { return self.submitBridgeCommand(text) }
+            return self.tabCoordinator.autopilot.sendUserMessage(text)
+        }
+        model.onInterruptFirstMate = { [weak self] in
+            self?.tabCoordinator.autopilot.interrupt()
+        }
         islandController.install()
+        // The conversation reads First Mate's timeline while it shows.
+        islandMateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.refreshIslandConversation()
+        }
 
         tabCoordinator.pendingOrders.addObserver { [weak self] in
             self?.refreshIsland()
@@ -2373,9 +2373,40 @@ extension MainWindowController {
         refreshIsland()
     }
 
+    /// First Mate's state on the island's conversation title.
+    func refreshIslandFirstMate() {
+        guard config.islandEnabled else { return }
+        let model = islandController.model
+        let autopilot = tabCoordinator.autopilot
+        let (word, _) = FirstMateStateText.describe(autopilot.state.activity)
+        let tone = FirstMateStateText.tone(autopilot.state)
+        if model.mateActivity != word { model.mateActivity = word }
+        if model.mateTone != tone { model.mateTone = tone }
+        if model.mateRunning != autopilot.isRunning { model.mateRunning = autopilot.isRunning }
+        let busy = autopilot.state.activity == .thinking
+        if model.mateBusy != busy { model.mateBusy = busy }
+    }
+
+    /// While the conversation is on screen: First Mate's timeline, read off main.
+    fileprivate func refreshIslandConversation() {
+        let model = islandController.model
+        guard config.islandEnabled, model.isOpened, model.page == .conversation, !islandMateFetching else { return }
+        islandMateFetching = true
+        let remote = tabCoordinator.autopilot.remote
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let messages = AutopilotCoordinator.timeline(remote: remote)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.islandMateFetching = false
+                if model.mateMessages != messages { model.mateMessages = messages }
+            }
+        }
+    }
+
     fileprivate func refreshIsland() {
         guard config.islandEnabled else { return }
         let model = islandController.model
+        refreshIslandFirstMate()
 
         // Aggregate per-worktree: the highest-urgency pane wins the row.
         // The island only shows worktrees with activity in the last 24 hours —
@@ -3790,20 +3821,6 @@ extension MainWindowController: PaneSharing {
 extension MainWindowController {
     fileprivate func setupFirstMate(_ dashboard: DashboardViewController) {
         let autopilot = tabCoordinator.autopilot
-        dashboard.firstMateDock.apply(autopilot.state)
-        dashboard.firstMateDock.onOpen = { [weak self] in self?.toggleFirstMate() }
-        // Picking a worktree is leaving First Mate: the row's terminal takes the
-        // right side back, the same row that was already selected included.
-        dashboard.onFleetRowClick = { [weak self] in
-            guard let self, self.firstMateView?.superview != nil else { return }
-            self.dashboardVC?.dismissCenterOverlay()
-        }
-        dashboard.firstMateDock.onTogglePause = { [weak self] in
-            guard let self else { return }
-            self.setAutopilot(enabled: self.config.autopilotEnabled, paused: !self.config.autopilotPaused)
-        }
-        dashboard.firstMateDock.onShowSettings = { [weak self] in self?.showSettingsPage("firstMate") }
-        dashboard.firstMateDock.onShowApprovals = { [weak self] anchor in self?.showFirstMateApprovals(from: anchor) }
         // First Mate's answer to a chat goes back to that chat.
         autopilot.onReply = { [weak self] targets, text in
             for key in targets where key.hasPrefix("telegram:") {
@@ -3824,16 +3841,12 @@ extension MainWindowController {
         tabCoordinator.firstMateCardAnswerer = { [weak self] order, option in
             self?.handleSuggestionTapped(order: order, optionText: option)
         }
-        autopilot.onStateChange = { [weak self] state in
+        autopilot.onStateChange = { [weak self] _ in
             guard let self else { return }
-            self.dashboardVC?.firstMateDock.apply(state)
             // Remote clients (seahelm-web) draw the same First Mate.
             NotificationCenter.default.post(name: .firstMateStateChanged, object: nil,
                                             userInfo: self.tabCoordinator.firstMateRemoteState())
-            if let approvals = self.firstMateApprovals {
-                let waiting = self.firstMateCards()
-                if waiting.isEmpty { self.firstMateApprovalsPopover?.close() } else { approvals.show(waiting) }
-            }
+            self.refreshIslandFirstMate()
         }
     }
 
@@ -3849,74 +3862,10 @@ extension MainWindowController {
         tabCoordinator.pendingOrders.resolve(id: order.id)
     }
 
-    /// The dock is a switch: First Mate over the terminal side, or back to the
-    /// worktree that was there.
+    /// ⌘J, ⌃⌃ and View ▸ First Mate: First Mate's conversation in the island,
+    /// or shut it when that is what is showing.
     @objc func toggleFirstMate() {
-        guard let dashboardVC else { return }
-        if firstMateView?.superview != nil {
-            dashboardVC.dismissCenterOverlay()
-            return
-        }
-        let view = FirstMateView()
-        view.selectAgent(AgentType(rawValue: config.autopilotAgent) ?? .claudeCode)
-        view.onTurnOn = { [weak self] agent in
-            guard let self else { return }
-            self.config.autopilotAgent = agent.rawValue
-            self.tabCoordinator.config.autopilotAgent = agent.rawValue
-            self.setAutopilot(enabled: true, paused: false)
-            self.tabCoordinator.autopilot.ensureSession { [weak self] in
-                self?.firstMateView?.embed(self?.tabCoordinator.autopilot.station)
-            }
-        }
-        // Chromeless: First Mate should read like a selected pane — no toolbar,
-        // terminal colours — and Esc must reach Claude, not close the overlay.
-        dashboardVC.showCenterOverlay(view, title: FirstMateView.overlayTitle, chromeless: true)
-        firstMateView = view
-        guard tabCoordinator.autopilot.station != nil else {
-            view.embed(nil)
-            return
-        }
-        // Attach only once the session is known to hold the agent: attaching to a
-        // missing session would make seahelmd start an empty shell under that name.
-        tabCoordinator.autopilot.ensureSession { [weak self, weak view] in
-            guard let self, let view, view.superview != nil else { return }
-            view.embed(self.tabCoordinator.autopilot.station)
-            view.focusTerminal(self.tabCoordinator.autopilot.station)
-        }
-    }
-
-    /// First Mate's session memory, for the header while it is shown. Probed off
-    /// main: `seahelmd list` and `ps` are forks.
-    fileprivate func refreshFirstMateMemory() {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let bytes = SeahelmdLocator.listOutput().flatMap {
-                ProcessProbe.sessionResidentBytes(paneSessionKey: FirstMatePane.sessionName, seahelmdListOutput: $0)
-            }
-            DispatchQueue.main.async { self?.windowChrome?.updateFirstMateMemory(bytes) }
-        }
-    }
-
-    /// The cards First Mate is waiting on, oldest first.
-    fileprivate func firstMateCards() -> [PendingOrder] {
-        tabCoordinator.pendingOrders.all().filter {
-            $0.action.kind == .autopilotApproval || $0.action.kind == .autopilotProposal
-        }
-    }
-
-    /// The dock's badge: answer First Mate's cards without leaving the fleet.
-    fileprivate func showFirstMateApprovals(from anchor: NSView) {
-        let view = FirstMateApprovalsView(frame: NSRect(x: 0, y: 0, width: 440, height: 10))
-        view.show(firstMateCards())
-        view.onAnswer = { [weak self] order, label in self?.handleSuggestionTapped(order: order, optionText: label) }
-        let controller = NSViewController()
-        controller.view = view
-        let popover = NSPopover()
-        popover.contentViewController = controller
-        popover.contentSize = NSSize(width: 440, height: min(420, max(80, view.fittingSize.height)))
-        popover.behavior = .transient
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
-        firstMateApprovals = view
-        firstMateApprovalsPopover = popover
+        islandController.toggleFirstMate()
     }
 
     fileprivate func pushFirstMateLine(_ text: String, chatId: String) {
@@ -3925,8 +3874,7 @@ extension MainWindowController {
     }
 
     func settingsOpenFirstMate(_ settings: SettingsViewController) {
-        window?.makeKeyAndOrderFront(nil)
-        if firstMateView?.superview == nil { toggleFirstMate() }
+        islandController.openFirstMate()
     }
 
     fileprivate func setAutopilot(enabled: Bool, paused: Bool) {

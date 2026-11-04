@@ -134,7 +134,6 @@ final class DashboardOverviewView: NSView {
     private let addProjectTile = AddProjectRowView()
 
     // Bottom shortcut cheat-strip (replaced the composer).
-    let firstMateDock = FirstMateDockView()
 
     private let groupingPreference: WorktreeGroupingPreference
     private let now: () -> Date
@@ -299,9 +298,6 @@ final class DashboardOverviewView: NSView {
         integrationBanner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(integrationBanner)
 
-        // --- Bottom shortcut strip ---
-        addSubview(firstMateDock)
-
         NSLayoutConstraint.activate([
             headerRow.topAnchor.constraint(equalTo: topAnchor, constant: 13),
             headerRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15),
@@ -319,11 +315,7 @@ final class DashboardOverviewView: NSView {
             scroll.topAnchor.constraint(equalTo: integrationBanner.bottomAnchor, constant: 4),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: firstMateDock.topAnchor),
-
-            firstMateDock.leadingAnchor.constraint(equalTo: leadingAnchor),
-            firstMateDock.trailingAnchor.constraint(equalTo: trailingAnchor),
-            firstMateDock.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
 
