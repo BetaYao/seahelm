@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seahelm · 目标架构</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f3f5f8; color: #202a3b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width: 1280px; margin: 48px auto; padding: 0 28px; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; }
+    .eyebrow { color: #57718e; font-size: 12px; font-weight: 700; letter-spacing: 3px; }
+    h1 { font-size: 32px; margin: 10px 0; letter-spacing: -1px; }
+    header p { margin: 0; color: #64748b; font-size: 15px; }
+    .badge { white-space: nowrap; border: 1px solid #cbd8e7; border-radius: 30px; padding: 9px 16px; font-size: 12px; color: #526881; }
+    .card { background: #fff; border: 1px solid #e0e6ee; border-radius: 24px; box-shadow: 0 16px 50px #24375608; overflow: hidden; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 20px 28px; border-bottom: 1px solid #edf0f5; font-size: 13px; }
+    .toolbar span { color: #64748b; margin-right: auto; }
+    label { cursor: pointer; display: flex; align-items: center; gap: 7px; }
+    input { accent-color: #4877ce; }
+    .diagram { overflow-x: auto; padding: 16px; }
+    svg { display: block; width: 100%; min-width: 820px; height: auto; }
+    svg text { font-family: inherit; }
+    .node { fill: #fff; stroke: #d8e1ec; stroke-width: 1.5; }
+    .title { font-size: 20px; font-weight: 650; fill: #26354b; }
+    .desc { font-size: 13px; fill: #718096; }
+    .layer { font-size: 11px; fill: #8695a9; letter-spacing: 2px; font-weight: 600; }
+    .control { fill: none; stroke: #5681cc; stroke-width: 2; marker-start: url(#blue); marker-end: url(#blue); }
+    .terminal { fill: none; stroke: #26a08e; stroke-width: 2; stroke-dasharray: 7 6; marker-start: url(#green); marker-end: url(#green); }
+    .line-label { font-size: 12px; fill: #5277b3; paint-order: stroke; stroke: white; stroke-width: 7px; stroke-linejoin: round; }
+    .terminal-label { fill: #238c7e; }
+    .report { fill: none; stroke: #d08706; stroke-width: 2; stroke-dasharray: 2 5; stroke-linecap: round; marker-end: url(#amber); }
+    .report-label { fill: #b07205; }
+    .reads { fill: none; stroke: #8a97ab; stroke-width: 1.6; marker-end: url(#grey); }
+    .small { font-size: 12px; fill: #7a899c; }
+    .tag { font-size: 11px; fill: #5277b3; }
+    .hidden { display: none; }
+    footer { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 32px; padding: 24px 28px; background: #fafbfd; border-top: 1px solid #edf0f5; }
+    footer h2 { font-size: 13px; margin: 0 0 8px; }
+    footer p { font-size: 13px; line-height: 1.8; color: #718096; margin: 0; }
+    .note { margin: 18px 4px; font-size: 12px; color: #7a899c; line-height: 1.8; }
+    .boundary { margin-top: 24px; padding: 24px 28px; }
+    .boundary h2 { font-size: 15px; margin: 0 0 6px; }
+    .boundary .lead { font-size: 13px; color: #64748b; margin: 0 0 16px; line-height: 1.8; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .split > div { border-radius: 14px; padding: 14px 16px; }
+    .split .core { background: #eef4ff; border: 1px solid #c9d8f0; }
+    .split .gw { background: #fafbfe; border: 1px dashed #c4d4ea; }
+    .split h3 { font-size: 13px; margin: 0 0 8px; color: #26354b; }
+    .split ul, .gray ol { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.85; color: #52647b; }
+    .rules { font-size: 12.5px; color: #52647b; line-height: 1.85; margin: 16px 0 0; padding-left: 18px; }
+    .gray { margin-top: 16px; }
+    .gray h3 { font-size: 13px; margin: 0 0 6px; }
+    @media (max-width: 640px) { .split { grid-template-columns: 1fr; } }
+    .status { margin: 10px 4px 0; border-collapse: collapse; font-size: 12px; color: #52647b; width: 100%; }
+    .status th, .status td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #e6ebf2; vertical-align: top; }
+    .status th { color: #7a899c; font-weight: 600; }
+    .done { color: #238c7e; } .part { color: #b07205; } .todo { color: #8695a9; }
+    @media (max-width: 640px) { main { margin: 24px auto; padding: 0 14px; } h1 { font-size: 26px; } header { align-items: start; } footer { grid-template-columns: 1fr; } .badge { padding: 7px 10px; } }
+    @media print { body { background: white; } main { margin: 0; max-width: none; } .toolbar { display: none; } .card { box-shadow: none; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div><div class="eyebrow">SEAHELM / ARCHITECTURE</div><h1>一个核心，多种交互入口</h1><p>共享业务能力，独立终端会话，让任务持续运行。</p></div>
+    <div class="badge">目标架构</div>
+  </header>
+  <section class="card" aria-label="Seahelm 目标架构图">
+    <div class="toolbar"><span>蓝、绿连接为双向通信，琥珀为单向上报 · 可切换查看</span><label><input id="control" type="checkbox" checked> <b style="color:#5681cc">业务控制 / 事件</b></label><label><input id="terminal" type="checkbox" checked> <b style="color:#238c7e">终端输入 / 输出</b></label><label><input id="report" type="checkbox" checked> <b style="color:#b07205">Agent 上报 / First Mate 回路</b></label></div>
+    <div class="diagram">
+      <svg viewBox="0 0 1160 800" role="img" aria-labelledby="diagram-title diagram-description">
+        <title id="diagram-title">Seahelm 多客户端目标架构</title>
+        <desc id="diagram-description">AppKit 和 GPUI 连接共享核心，并直连 seahelmd 传输终端数据。Web 与 Telegram 通过统一的 seahelm-gateway 服务接入核心，服务内部保留各渠道适配模块。核心控制 seahelmd，seahelmd 持有 PTY 和 Agent 进程。Agent 的 hooks 直接上报核心；First Mate 是核心启动的 agent 会话，它的命令行调用回到核心并经过权限闸门。核心另读 GitHub、对话记录与用量等外部数据。</desc>
+        <defs>
+          <marker id="blue" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#5681cc" stroke-width="1.7"/></marker>
+          <marker id="amber" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#d08706" stroke-width="1.7"/></marker>
+          <marker id="grey" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#8a97ab" stroke-width="1.7"/></marker>
+          <marker id="green" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#26a08e" stroke-width="1.7"/></marker>
+        </defs>
+        <text class="layer" x="40" y="34">01 / 交互入口</text>
+        <rect x="40" y="55" width="245" height="94" rx="16" class="node"/><text x="162" y="96" text-anchor="middle" class="title">macOS AppKit</text><text x="162" y="118" text-anchor="middle" class="desc">原生桌面客户端</text><text x="162" y="138" text-anchor="middle" class="tag">界面控制：分屏 · 聚焦 · 布局</text>
+        <rect x="318" y="55" width="245" height="94" rx="16" class="node"/><text x="440" y="96" text-anchor="middle" class="title">GPUI</text><text x="440" y="118" text-anchor="middle" class="desc">跨平台桌面客户端</text><text x="440" y="138" text-anchor="middle" class="tag">界面控制：分屏 · 聚焦 · 布局</text>
+        <rect x="874" y="55" width="245" height="94" rx="16" class="node"/><text x="996" y="96" text-anchor="middle" class="title">seahelm-web</text><text x="996" y="122" text-anchor="middle" class="desc">浏览器客户端</text>
+        <rect x="596" y="55" width="245" height="94" rx="16" class="node"/><text x="718" y="96" text-anchor="middle" class="title">Telegram</text><text x="718" y="122" text-anchor="middle" class="desc">消息交互渠道</text>
+        <rect x="590" y="181" width="520" height="116" rx="16" fill="#fafbfe" stroke="#c4d4ea" stroke-dasharray="5 4"/><text x="850" y="286" text-anchor="middle" class="small">鉴权 · 连接管理 · 通知路由 · 聊天绑定 · 渠道密钥</text><text x="850" y="201" text-anchor="middle" font-size="13" font-weight="650" fill="#46638d">seahelm-gateway</text>
+        <g data-layer="control">
+          <path d="M996 153 V205" class="control"/><path d="M718 153 V205" class="control"/>
+          <rect x="893" y="210" width="206" height="54" rx="12" fill="#f2f6fd" stroke="#d8e3f3"/><text x="996" y="233" text-anchor="middle" font-size="14" fill="#46638d">Web 接入</text><text x="996" y="252" text-anchor="middle" class="desc">鉴权 · WebSocket · VT 转发</text>
+          <rect x="615" y="210" width="206" height="54" rx="12" fill="#f2f6fd" stroke="#d8e3f3"/><text x="718" y="243" text-anchor="middle" font-size="14" fill="#46638d">Telegram 适配器</text>
+          <path d="M162 153 V290 Q162 310 182 310 H450 V350" class="control"/>
+          <path d="M440 153 V285 Q440 300 455 300 H530 V350" class="control"/>
+          <path d="M760 301 V350" class="control"/>
+          <text x="778" y="326" class="line-label">统一业务接口 · 通知投递</text>
+          <text x="228" y="299" class="line-label">业务命令 / 查询 / 事件订阅（含通知）</text>
+        </g>
+        <text class="layer" x="40" y="382">02 / 共享业务层</text>
+        <rect x="350" y="355" width="460" height="160" rx="18" fill="#eef4ff" stroke="#a9c2ec" stroke-width="1.5"/>
+        <text x="580" y="392" text-anchor="middle" class="title">seahelm-core</text><text x="580" y="418" text-anchor="middle" class="desc">Agent 状态 · 卡片 · 消息时间线 · First Mate · 通知决策</text>
+        <text x="580" y="440" text-anchor="middle" class="tag">业务控制接口：pane 读写 · worktree · 卡片 · 提议 · 等待 · 文本命令</text>
+        <line x1="380" y1="456" x2="780" y2="456" stroke="#c9d8f0"/>
+        <text x="580" y="476" text-anchor="middle" class="small">持有并落盘：卡片 · 消息时间线 · First Mate 账本与审计 · 会话引用</text>
+        <text x="580" y="497" text-anchor="middle" class="small">config.json：客户端设置页写、core 只读（共享文件约定）</text>
+        <g data-layer="control"><path d="M580 520 V556" class="control"/><text x="596" y="542" class="line-label">会话控制 / 快照 / 发送按键 / 建会话</text></g>
+        <rect x="905" y="352" width="215" height="88" rx="14" fill="#f7f8fa" stroke="#d3dae4" stroke-dasharray="4 4"/>
+        <text x="1012" y="378" text-anchor="middle" font-size="14" font-weight="650" fill="#52647b">外部数据源</text>
+        <text x="1012" y="400" text-anchor="middle" class="small">GitHub：PR / CI 状态</text>
+        <text x="1012" y="418" text-anchor="middle" class="small">Agent 对话记录 · 会话标题</text>
+        <text x="1012" y="436" text-anchor="middle" class="small">Claude / Codex 用量</text>
+        <path d="M901 396 H816" class="reads"/><text x="822" y="388" class="small">core 直接读取</text>
+        <g data-layer="terminal">
+          <path d="M85 153 V599 Q85 619 105 619 H345" class="terminal"/>
+          <path d="M340 153 H304 Q294 153 294 163 V550 Q294 575 319 575 H345" class="terminal"/>
+          <text x="102" y="506" class="line-label terminal-label">AppKit 终端流</text>
+          <text x="308" y="541" class="line-label terminal-label">GPUI 终端流</text>
+          <path d="M1103 237 H1135 V599 Q1135 619 1115 619 H815" class="terminal"/>
+          <text x="866" y="604" class="line-label terminal-label">Web 终端流经 Gateway 转发</text>
+        </g>
+        <text class="layer" x="40" y="570">03 / 会话运行层</text>
+        <rect x="350" y="561" width="460" height="93" rx="18" fill="#eef9f6" stroke="#a5d5c9" stroke-width="1.5"/><text x="580" y="600" text-anchor="middle" class="title">seahelmd</text><text x="580" y="628" text-anchor="middle" class="desc">持有 PTY · 维护终端状态 · 每个会话独立守护</text>
+        <path d="M495 660 V696" class="control"/><path d="M735 660 V696" class="control"/>
+        <rect x="350" y="701" width="290" height="54" rx="12" class="node"/><text x="495" y="734" text-anchor="middle" font-size="16" fill="#52647b">PTY / Shell / Agent 进程</text>
+        <rect x="660" y="701" width="150" height="54" rx="12" fill="#fff8ec" stroke="#ecc988" stroke-width="1.5"/><text x="735" y="724" text-anchor="middle" font-size="14" font-weight="650" fill="#8a5a05">First Mate</text><text x="735" y="743" text-anchor="middle" class="small">core 启动的 agent 会话</text>
+        <g data-layer="report">
+          <path d="M495 759 V780 H885 V412 H816" class="report"/>
+          <path d="M814 728 H850 V458 H816" class="report"/>
+          <text x="896" y="690" class="line-label report-label">Agent hooks：工具 · 提问 · 最终回复</text>
+          <text x="896" y="708" class="small">不经任何客户端，直接上报 core</text>
+          <text x="896" y="500" class="line-label report-label">First Mate：seahelm cli → 权限闸门</text>
+          <text x="896" y="518" class="small">auto 直接执行 · ask 生成审批卡 · deny 拒绝</text>
+        </g>
+      </svg>
+    </div>
+    <footer>
+      <div><h2>共享核心，统一行为</h2><p>业务规则与状态由 core 提供；客户端负责展示与交互。seahelm-gateway 统一外部接入、身份校验与连接管理，内部按 Web、Telegram 等渠道拆分模块。core 决定该不该通知（去重、冷却、卡片已在屏上就不再提醒），各端只负责投递：桌面横幅、Telegram 经 gateway。</p></div>
+      <div><h2>会话独立，任务持续</h2><p>seahelmd 保持终端与进程存活。桌面客户端可直连终端数据，远程浏览器通过 Gateway 转发。状态有两路来源：seahelmd 的屏幕快照与 OSC 7501，以及 agent 进程直接上报的 hooks，后者是工具、提问和回复的主要来源。</p></div>
+      <div><h2>两类控制接口</h2><p>业务动词（读写 pane、建删 worktree、卡片、提议、等待）由 core 提供，客户端全部关闭也可使用；界面动词（分屏、聚焦、缩放、布局）只有画界面的一方能做，留在客户端。agent 与 First Mate 的 seahelm 命令行按这一划分路由。</p></div>
+      <div><h2>First Mate 回路</h2><p>First Mate 由 core 在 seahelmd 中启动，它的命令行调用回到 core，先过权限闸门再执行：auto 直接执行，ask 变成审批卡由用户在任一入口回答，deny 拒绝。这是唯一一条会话反向控制核心的路径，权限边界在此。</p></div>
+    </footer>
+  </section>
+  <section class="card boundary" aria-label="core 与 gateway 的边界">
+    <h2>core 与 gateway 的边界</h2>
+    <p class="lead">core 管“事实是什么、能做什么”：对谁问都给同一个答案，只信任本机 socket（0600），不碰网络。gateway 管“谁在问、怎么跟他说话”：唯一面向网络的组件，负责身份、传输与渠道呈现；对 core 来说它只是又一个客户端，只用公开接口——core.sock 上的业务调用与事件订阅、message.subscribe、cards.changed，以及直连 seahelmd 的终端流。它不读 core 的文件，也不经过 App。</p>
+    <div class="split">
+      <div class="core"><h3>归 seahelm-core</h3><ul>
+        <li>Agent 状态、PR、用量</li>
+        <li>卡片：生成、回答的执行、过期判定</li>
+        <li>消息时间线</li>
+        <li>First Mate：会话、权限闸门、审批与提议、say</li>
+        <li>通知决策：该不该提醒</li>
+        <li>pane / worktree 动作、等待</li>
+        <li>pane 的稳定编号 #n、文本命令的解析与执行</li>
+      </ul></div>
+      <div class="gw"><h3>归 seahelm-gateway</h3><ul>
+        <li>鉴权：配对码、token、Telegram initData 校验、allowed_users、Mini App 域名、分享链接</li>
+        <li>连接：WebSocket、重连、每个客户端的重放序号</li>
+        <li>终端转发：直连 seahelmd，不经 core</li>
+        <li>Telegram 适配：长轮询、格式转换、分段、媒体、限流</li>
+        <li>通知路由：发到哪个聊天、默认聊天、静音</li>
+        <li>渠道呈现：按钮与卡片 id 的映射、进度草稿、群组与私聊</li>
+        <li>聊天绑定：哪个聊天在跟哪个 pane 说话</li>
+        <li>渠道密钥：bot token、配对密钥，存在 gateway 自己的配置里</li>
+      </ul></div>
+    </div>
+    <ol class="rules">
+      <li>换一个渠道（Slack、邮件）也原样需要的，放 core；只与某个渠道的协议有关的，放 gateway。</li>
+      <li>持有外部世界的凭据或信任关系的，放 gateway。</li>
+      <li>所有入口必须看到一致结果的业务状态，放 core。</li>
+    </ol>
+    <div class="gray"><h3>灰色地带的约定</h3><ol>
+      <li>命令语言（/go #3、/order、@worktree）：解析与执行在 core，接口为“文本 + 上下文（当前绑定的 pane）”；聊天与 pane 的绑定留在 gateway，调用时作为上下文传入。</li>
+      <li>在 Telegram 与 First Mate 对话：core 不知道聊天 id。gateway 调用 autopilot.say 时记下提问的聊天，订阅 First Mate 的消息流，在回合结束时把回复发回去。</li>
+      <li>非授权来源的消息（监控频道等）：识别与解析在 gateway，由此触发的动作走 core 业务接口，同样经过闸门。</li>
+      <li>谁回答了卡片：鉴权只在 gateway；调用带 _meta.via（如 telegram:@name），core 只记入审计，不据此授权。</li>
+      <li>配置与密钥：bot token、host_gateway、配对密钥迁入 gateway 自己的配置文件，不再与 App 设置混在 config.json。</li>
+    </ol></div>
+  </section>
+  <p class="note">此图描述目标边界，连接表示通信关系，不代表代码依赖方向。当前迁移进度（2026-11-04）：</p>
+  <table class="status">
+    <tr><th>连接</th><th>状态</th><th>说明</th></tr>
+    <tr><td>GPUI ↔ core</td><td class="done">已接通</td><td>状态、PR、用量、卡片、First Mate 工作台；消息流接口已就绪，GPUI 尚未使用</td></tr>
+    <tr><td>GPUI / AppKit ↔ seahelmd</td><td class="done">已接通</td><td>桌面端直连终端数据（AppKit 经 Ghostty）</td></tr>
+    <tr><td>AppKit ↔ core</td><td class="part">部分</td><td>仅 First Mate（autopilot_owner: "core"）；Agent 状态仍由 App 自行判断，core 以影子模式镜像比对</td></tr>
+    <tr><td>core ↔ seahelmd</td><td class="done">已接通</td><td>快照、发送按键、建会话（First Mate、新 worktree）、结束会话</td></tr>
+    <tr><td>hooks → core</td><td class="done">已接通</td><td>有无 App 都直达 core</td></tr>
+    <tr><td>First Mate 回路</td><td class="done">已接通</td><td>core 运行时可用；默认仍由 App 运行，需在设置中切换</td></tr>
+    <tr><td>文本命令接口</td><td class="todo">未开始</td><td>命令语言目前在 App（CommandParser / CommandExecutor / PaneHandleRegistry），需迁入 core</td></tr>
+    <tr><td>gateway 独立配置</td><td class="todo">未开始</td><td>渠道密钥仍在 config.json 中，随 gateway 独立一并迁出</td></tr>
+    <tr><td>Web / Telegram</td><td class="todo">未开始</td><td>仍在 macOS App 内（HostGateway、TelegramChannel），未来迁入独立的 seahelm-gateway</td></tr>
+  </table>
+</main>
+<script>
+  for (const name of ['control', 'terminal', 'report']) {
+    document.getElementById(name).addEventListener('change', event => {
+      document.querySelectorAll(`[data-layer="${name}"]`).forEach(group => group.classList.toggle('hidden', !event.target.checked));
+    });
+  }
+</script>
+</body>
+</html>
