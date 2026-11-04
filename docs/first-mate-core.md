@@ -182,3 +182,61 @@ not running) keeps its own First Mate, as today.
    colour, amber with a count), First Mate's pane in the focus area with its
    cards above the terminal, number keys 1–9 to answer, Esc for "Not now"; an
    OS notification points at a new card but never answers it.
+
+## The core and the gateway
+
+Decided 2026-11-04; drawn in `docs/target-architecture.html`.
+
+**The core says what is true and what may be done; the gateway says who is
+asking and how to talk to them.** The core gives every caller the same
+answer, trusts only its local socket (0600) and touches no network. The
+gateway is the only network-facing piece — identity, transport, each
+channel's presentation — and to the core it is one more client: it uses
+the public interface only (`core.sock` calls and `events.subscribe`,
+`message.subscribe`, `cards.changed`, plus seahelmd's session sockets for
+terminal streams), never the core's files, never the app.
+
+Where something goes:
+
+1. A second channel (Slack, mail) would need it unchanged → the core. Tied
+   to one channel's protocol → the gateway.
+2. It holds credentials or trust towards the outside world → the gateway.
+3. Every surface must see the same result → the core.
+
+| The core | The gateway |
+| --- | --- |
+| Agent status, PRs, usage | Auth: pairing codes, tokens, Telegram initData, `allowed_users`, the Mini App host, share links |
+| Cards: raising, performing answers, staleness | Connections: WebSocket, reconnects, each client's replay cursor |
+| Message timelines | Terminal streams: straight from seahelmd, not through the core |
+| First Mate: session, gate, approvals, proposals, `say` | Telegram: long poll, formatting, chunking, media, rate limits |
+| Whether to notify | Where a notice goes: which chat, the default chat, muting |
+| Pane and worktree actions, waits | Channel presentation: buttons ↔ card ids, progress drafts, groups vs private chats |
+| Stable pane handles (`#n`), parsing and running text commands | Chat bindings: which chat is talking to which pane |
+| | Channel secrets: bot token, pairing secret, in the gateway's own config |
+
+The grey areas, settled:
+
+1. **The command language** (`/go #3`, `/order`, `@worktree`) is parsed and
+   run by the core behind one call, text plus context (the pane a chat is
+   bound to); the island's command line, Telegram and mail share it, and the
+   handles mean the same everywhere. The binding itself is the gateway's
+   conversation state, passed in as context.
+2. **Talking to First Mate from Telegram**: the core never sees chat ids. The
+   gateway notes which chat asked when it calls `autopilot.say`, follows
+   First Mate's message stream, and sends the answer back when the turn
+   ends. (In the app this is `AutopilotCoordinator`'s reply targets; it moves
+   to the gateway.)
+3. **Messages from senders who may not command** (a monitoring channel) are
+   recognised and parsed by the gateway; whatever they trigger goes through
+   the core's business calls and the same gate.
+4. **Who answered a card**: authorisation happens only in the gateway. Its
+   calls carry `_meta.via` (`telegram:@name`), which the core writes to the
+   audit and never authorises on.
+5. **Configuration and secrets**: the bot token, `host_gateway` and the
+   pairing secret move to the gateway's own config file instead of sharing
+   `config.json` with the app's settings (which is how they kept being
+   dropped by a settings save).
+
+Still to build for this boundary: the core's text-command call (the command
+language is the app's today: `CommandParser`, `CommandExecutor`,
+`PaneHandleRegistry`), and the gateway itself with its own config.
