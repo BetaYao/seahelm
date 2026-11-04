@@ -16,6 +16,7 @@ seahelm-core-types = { path = "../core-types" }
 seahelm-core-hooks = { path = "../core-hooks" }
 seahelm-core-scan = { path = "../core-scan" }
 seahelm-core-registry = { path = "../core-registry" }
+seahelm-core-messages = { path = "../core-messages" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

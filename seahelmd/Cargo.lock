@@ -424,6 +424,7 @@ dependencies = [
  "anyhow",
  "libc",
  "seahelm-core-hooks",
+ "seahelm-core-messages",
  "seahelm-core-registry",
  "seahelm-core-scan",
  "seahelm-core-types",
@@ -444,6 +445,18 @@ dependencies = [
  "rusqlite",
  "seahelm-core-types",
  "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "seahelm-core-messages"
+version = "0.0.1"
+dependencies = [
+ "seahelm-core-hooks",
+ "seahelm-core-registry",
+ "seahelm-core-scan",
+ "seahelm-core-types",
  "serde_json",
  "tempfile",
 ]

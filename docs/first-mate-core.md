@@ -183,6 +183,31 @@ states 1 and 4 for GPUI:
   session keeps running. Esc stays with the terminal.
 - Not yet: a draggable divider between the two columns (the card column is a
   fixed 340pt).
+## Message timelines in the core
+
+What Island's First Mate conversation (surfaces design, state 3) and
+seahelm-web's Timeline draw, moved into the core (`crates/core-messages`),
+ported from `MessageEvent`, `PaneMessageProjector`, `MessageStreamHub` /
+`MessageStreamStore` and `AgentTranscriptTail`:
+
+- Each outcome the registry makes is projected into rows (user prompt, tool,
+  decision, notice, turn edge, the turn's final message), with the app's
+  coalescing; the prose an agent writes between tool calls is read from its
+  transcript (path from the hook) without the core's lock, and put on the
+  timeline before that hook's own rows.
+- A ring of 80 rows per pane in memory; history on disk, one JSONL file per
+  pane in `~/.config/seahelm/core-message-stream/` (the app keeps its own in
+  `message-stream/` while both run), trimmed to 2000. Sequence numbers are
+  global and survive restarts. A closed pane's history goes.
+- `message.snapshot {pane_id?}`, `message.history {pane_session_key | pane_id,
+  before_seq, limit}` (the app's shapes) and `message.subscribe {pane_id?,
+  after_seq?}`: a stream of its own, not `events.subscribe`, so a busy
+  pane's tool rows never push status events out of that ring. Reconnecting
+  with `after_seq` gets only what came after; `reset` when the client is
+  ahead of the core, `truncated` for rings that may have lost part of the gap.
+- `seahelm-core compare-messages` lines the app's timelines up against the
+  core's for the same panes (shadow mode) and logs what only one side has to
+  `core-messages-shadow.jsonl`.
 
 ## Phases (one PR each)
 

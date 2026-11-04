@@ -137,3 +137,102 @@ pub fn worktree_paths(groups: &Value) -> Vec<String> {
         .filter_map(|i| str_of(&i, "worktree_path"))
         .collect()
 }
+
+/// `seahelm-core compare-messages [--since SECS] [--quiet]`: one look at
+/// each pane's message timeline in the app and in the core, rows of the
+/// same stretch of time aligned (longest common subsequence of kind and
+/// content), and what only one side has. A line per pane to
+/// `core-messages-shadow.jsonl`; a summary on stdout.
+pub fn compare_messages(args: &[String]) -> Result<()> {
+    let since_arg: Option<f64> = args.iter().position(|a| a == "--since").and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok());
+    let quiet = args.iter().any(|a| a == "--quiet");
+    let app = rpc::call(&rpc::app_socket(), "message.snapshot", json!({})).context("app message.snapshot")?;
+    let core = rpc::call(&rpc::core_socket(), "message.snapshot", json!({})).context("core message.snapshot")?;
+    let by_key = |v: &Value| -> BTreeMap<String, Vec<Value>> {
+        let mut m: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        for row in v.get("messages").and_then(Value::as_array).into_iter().flatten() {
+            if let Some(k) = str_of(row, "pane_session_key").filter(|k| !k.is_empty()) {
+                m.entry(k).or_default().push(row.clone());
+            }
+        }
+        m
+    };
+    let (app, core) = (by_key(&app), by_key(&core));
+    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(rpc::config_dir().join("core-messages-shadow.jsonl"))?;
+    let (mut matched, mut only_app, mut only_core) = (0usize, 0usize, 0usize);
+    for (key, core_rows) in &core {
+        let Some(app_rows) = app.get(key) else { continue };
+        // The stretch both have watched: from the later of the two first rows.
+        let first = |rows: &Vec<Value>| rows.iter().filter_map(|r| r.get("ts").and_then(Value::as_f64)).fold(f64::MAX, f64::min);
+        let from = since_arg.map(|s| seahelm_core_types::now() - s).unwrap_or_else(|| first(app_rows).max(first(core_rows)));
+        let a = signatures(app_rows, from);
+        let c = signatures(core_rows, from);
+        if a.is_empty() && c.is_empty() {
+            continue;
+        }
+        let common = lcs(&a, &c);
+        let (oa, oc) = (a.len() - common, c.len() - common);
+        matched += common;
+        only_app += oa;
+        only_core += oc;
+        writeln!(log, "{}", json!({"at": seahelm_core_types::now(), "pane": key, "matched": common, "only_app": oa, "only_core": oc}))?;
+        if !quiet && (oa > 0 || oc > 0) {
+            println!("{key}: {common} matched, {oa} only in the app, {oc} only in the core");
+            for s in a.iter().filter(|s| !c.contains(s)).take(3) {
+                println!("  app : {s}");
+            }
+            for s in c.iter().filter(|s| !a.contains(s)).take(3) {
+                println!("  core: {s}");
+            }
+        }
+    }
+    let total = matched + only_app + only_core;
+    let pct = if total == 0 { 100.0 } else { matched as f64 * 100.0 / total as f64 };
+    println!("messages: {matched} rows agree, {only_app} only in the app, {only_core} only in the core ({pct:.1}%)");
+    Ok(())
+}
+
+/// A row as compared: kind and what it says, from `from` on.
+fn signatures(rows: &[Value], from: f64) -> Vec<String> {
+    rows.iter()
+        .filter(|r| r.get("ts").and_then(Value::as_f64).unwrap_or(0.0) >= from)
+        .map(|r| {
+            let s = |k: &str| str_of(r, k).unwrap_or_default();
+            let body = match s("kind").as_str() {
+                "tool" => format!("{} {}", s("tool"), s("detail")),
+                "status" => format!("{}→{}", s("old_status"), s("status")),
+                _ => s("text").chars().take(120).collect(),
+            };
+            format!("{}: {}", s("kind"), body.trim())
+        })
+        .collect()
+}
+
+fn lcs(a: &[String], b: &[String]) -> usize {
+    let mut prev = vec![0usize; b.len() + 1];
+    for x in a {
+        let mut cur = vec![0usize; b.len() + 1];
+        for (j, y) in b.iter().enumerate() {
+            cur[j + 1] = if x == y { prev[j] + 1 } else { prev[j + 1].max(cur[j]) };
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+
+    #[test]
+    fn aligns_rows_and_counts_what_one_side_lacks() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(lcs(&s(&["user: a", "tool: Bash ls", "assistant: done"]), &s(&["user: a", "assistant: done"])), 2);
+        let rows = vec![
+            json!({"kind": "tool", "tool": "Read", "detail": "a.rs", "ts": 5.0}),
+            json!({"kind": "status", "old_status": "Running", "status": "Idle", "ts": 6.0}),
+            json!({"kind": "user", "text": "old", "ts": 1.0}),
+        ];
+        assert_eq!(signatures(&rows, 2.0), s(&["tool: Read a.rs", "status: Running→Idle"]));
+    }
+}
