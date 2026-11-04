@@ -21,22 +21,16 @@ class AppPage {
         if let path = testConfigPath {
             app.launchArguments += ["-UITestConfig", path]
         }
-        do {
-            let scratch = try ScratchHome()
-            self.scratch = scratch
-            app.launchEnvironment.merge(scratch.environment) { _, new in new }
-            app.launchEnvironment.merge(environment) { _, new in new }
-        } catch {
-            fatalError("UI tests never run on the live setup, and the scratch home failed: \(error)")
-        }
+        let scratch = ScratchHome()
+        self.scratch = scratch
+        app.launchEnvironment.merge(scratch.environment) { _, new in new }
+        app.launchEnvironment.merge(environment) { _, new in new }
         app.launch()
         return self
     }
 
     func terminate() {
         app.terminate()
-        scratch?.tearDown()
-        scratch = nil
     }
 
     lazy var chrome = ChromeHeaderPage(app)

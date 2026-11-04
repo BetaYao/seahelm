@@ -69,8 +69,7 @@ struct ClosedPillView: View {
             .padding(.vertical, 2)
             .background(Capsule().fill(Color.orange.opacity(0.22)))
             .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("island.warning")
-            .accessibilityLabel(warning.badge)
+            .accessibilityIdentifier("island.warning.\(warning.badge)")
             .transition(.opacity.combined(with: .move(edge: .leading)))
         } else if model.orders.isEmpty, let usage = model.pillUsage {
             UsageReadoutView(logoName: usage.logoName, segments: [usage.segment])

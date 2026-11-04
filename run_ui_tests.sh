@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SCHEME="seahelm"
+SCHEME="seahelmUITests"
 DESTINATION="platform=macOS"
 TEST_FILTER="${1:-}"
 
@@ -25,7 +25,6 @@ ARGS=(
     -project "$PROJECT_DIR/seahelm.xcodeproj"
     -scheme "$SCHEME"
     -destination "$DESTINATION"
-    -only-testing:seahelmUITests
     -resultBundlePath "$PROJECT_DIR/.build/ui-test-results"
 )
 
@@ -40,6 +39,21 @@ if [ -n "$TEST_FILTER" ]; then
 fi
 
 echo "=== Building and running UI tests ==="
-xcodebuild test "${ARGS[@]}" 2>&1 | tee "$PROJECT_DIR/.build/ui-test-output.log"
+set +e
+xcodebuild test "${ARGS[@]}" -derivedDataPath "$PROJECT_DIR/.build" -skipPackagePluginValidation -skipMacroValidation \
+    2>&1 | tee "$PROJECT_DIR/.build/ui-test-output.log"
+status=${PIPESTATUS[0]}
+set -e
+
+# Each test launched the app in a scratch home under /tmp/shui-* (UITests'
+# ScratchHome): end the core and seahelmd daemons it left there, then remove it.
+for dir in /tmp/shui-*; do
+    [ -d "$dir" ] || continue
+    pids=$(lsof -t +D "$dir" 2>/dev/null | sort -u || true)
+    [ -n "$pids" ] && { kill $pids 2>/dev/null || true; }
+    rm -rf -- "$dir"
+done
+
 echo "=== UI tests complete ==="
 echo "Results: $PROJECT_DIR/.build/ui-test-results"
+exit "$status"

@@ -17,8 +17,15 @@ final class CoreWarningUITests: XCTestCase {
         super.tearDown()
     }
 
-    private func warning(in app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: "island.warning").firstMatch
+    /// The island's warning badge, by what it says: `island.warning.<badge>`.
+    /// Existence only — resolving the element to read its label waits on a
+    /// view that keeps animating.
+    private func warning(_ badge: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "island.warning.\(badge)").firstMatch
+    }
+
+    private func anyWarning(in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'island.warning.'")).firstMatch
     }
 
     /// A socket nobody can listen on: `seahelm-core ensure` fails every time,
@@ -26,9 +33,7 @@ final class CoreWarningUITests: XCTestCase {
     func testSilentCoreShowsTheCoreBadge() {
         let page = AppPage().launch(environment: ["SEAHELM_CORE_SOCKET": "/nonexistent/seahelm-ui/c.sock"])
         self.page = page
-        let badge = warning(in: page.app)
-        XCTAssertTrue(badge.waitForExistence(timeout: 30), "no island warning with the core unreachable")
-        XCTAssertEqual(badge.label, "CORE")
+        XCTAssertTrue(warning("CORE", in: page.app).waitForExistence(timeout: 30), "no CORE warning with the core unreachable")
     }
 
     /// The scratch core the app starts itself: no warning, ever.
@@ -40,6 +45,6 @@ final class CoreWarningUITests: XCTestCase {
         let quiet = expectation(description: "past the grace")
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { quiet.fulfill() }
         wait(for: [quiet], timeout: 20)
-        XCTAssertFalse(warning(in: page.app).exists, "island warns though the core answers")
+        XCTAssertFalse(anyWarning(in: page.app).exists, "island warns though the core answers")
     }
 }

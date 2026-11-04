@@ -34,6 +34,8 @@ for leaked in leakedEnv {
     unsetenv(leaked)
 }
 
+UITestScratch.prepareIfAsked()
+
 let app = NSApplication.shared
 NSWindow.allowsAutomaticWindowTabbing = false
 

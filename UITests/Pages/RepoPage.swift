@@ -6,6 +6,7 @@ class RepoPage {
 
     init(_ app: XCUIApplication) { self.app = app }
 
-    var terminal: XCUIElement { app.groups["project.terminal"] }
+    /// The terminal area: the split container of the selected worktree.
+    var terminal: XCUIElement { app.descendants(matching: .any)["splitPane.container"] }
     var emptyState: XCUIElement { app.staticTexts["project.emptyState"] }
 }
