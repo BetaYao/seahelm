@@ -519,7 +519,16 @@ impl Core {
                     binding: ctx.get("binding").and_then(seahelm_core_command::Binding::from_json),
                     first_mate_here: ctx.get("first_mate_here").and_then(Value::as_bool).unwrap_or(false),
                 };
-                Ok(seahelm_core_command::run(&text, &context, &crate::command::CoreHost(&self)).to_json())
+                let outcome = seahelm_core_command::run(&text, &context, &crate::command::CoreHost(&self));
+                // The verb only, never what was said: chat text stays out of the log.
+                let verb = if text.trim_start().starts_with('/') { text.split_whitespace().next().unwrap_or("/") } else { "(prose)" };
+                eprintln!(
+                    "seahelm-core: command.run {verb} desktop={} → {}{}",
+                    context.desktop,
+                    if outcome.reply.is_error { "error" } else { "ok" },
+                    if outcome.binding.is_some() { ", binding changed" } else { "" }
+                );
+                Ok(outcome.to_json())
             }
             other => Err(RpcError::not_found(other)),
         };

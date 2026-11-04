@@ -19,12 +19,17 @@ extension MainWindowController {
             let result = CoreSocketClient.call("command.run", ["text": text, "context": context], timeout: 120)
             DispatchQueue.main.async {
                 guard let self else { return }
+                // Which runner answered, never the text itself.
+                let surfaceName = surface.sessionKey.split(separator: ":").first.map(String.init) ?? surface.sessionKey
                 switch result {
                 case .success(let outcome):
+                    NSLog("[Command] \(surfaceName): seahelm-core ran it")
                     self.apply(outcome, line: text, surface: surface, reply: reply)
                 case .failure(.rpc(_, let message)):
+                    NSLog("[Command] \(surfaceName): seahelm-core refused it")
                     reply(.error(message))
-                case .failure:
+                case .failure(let failure):
+                    NSLog("[Command] \(surfaceName): seahelm-core did not answer (\(failure)); the app ran it")
                     self.commandExecutor.run(text, surface: surface, reply: reply)
                 }
             }
