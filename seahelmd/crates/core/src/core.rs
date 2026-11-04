@@ -28,12 +28,16 @@ use seahelm_core_scan::Snapshot;
 use seahelm_core_types::{now, AgentStatus, AgentType, Authority, EventKind, EventSource, NormalizedEvent, Timestamp};
 use seahelmd::proto::Msg;
 
+use crate::pr::{self, PrStore};
 use crate::rpc::{self, Dispatch, Reply, RpcError, RpcResult};
 
 pub struct Core {
     state: Mutex<State>,
     /// Signalled whenever the registry's sequence moves.
     changed: Condvar,
+    /// Each worktree's pull request, refreshed on the PR thread
+    /// (`pr::spawn`); its own lock, so a slow GitHub never holds `state`.
+    prs: PrStore,
 }
 
 struct State {
@@ -119,7 +123,23 @@ impl Core {
                 retries: Vec::new(),
             }),
             changed: Condvar::new(),
+            prs: PrStore::new(Box::new(pr::Live)),
         }))
+    }
+
+    /// One PR refresh: the worktrees clients listed plus every registered
+    /// pane's worktree. Runs on the PR thread.
+    pub fn pr_cycle(&self, now: Instant) {
+        let mut worktrees = self.prs.listed();
+        {
+            let st = self.lock();
+            for p in st.registry.panes() {
+                if !worktrees.contains(&p.worktree_path) {
+                    worktrees.push(p.worktree_path.clone());
+                }
+            }
+        }
+        self.prs.refresh(&worktrees, now);
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -197,6 +217,7 @@ impl Core {
             }
             "worktrees.set" => {
                 let paths: Vec<String> = strings(&p, "paths");
+                self.prs.set_listed(&paths);
                 let mut st = self.lock();
                 st.provider.set_worktrees(&paths, now);
                 st.registry.reorder(&paths);
@@ -257,9 +278,17 @@ impl Core {
                 Ok(st.explain(&id, now))
             }
             "worktree.list" | "fleet.status" => {
-                let st = self.lock();
-                Ok(json!({"worktrees": st.worktrees_json(now)}))
+                let mut worktrees = self.lock().worktrees_json(now);
+                // Worktrees with panes only, as before; their PR rides along.
+                // A worktree without panes is in `pr.list`.
+                for w in &mut worktrees {
+                    if let Some(pr) = w.get("worktree_path").and_then(Value::as_str).and_then(|p| self.prs.status(p)) {
+                        w["pr"] = pr.to_json();
+                    }
+                }
+                Ok(json!({"worktrees": worktrees}))
             }
+            "pr.list" => Ok(json!({"prs": self.prs.list()})),
             "pane.locations" => {
                 let st = self.lock();
                 Ok(json!({"locations": st.locations}))

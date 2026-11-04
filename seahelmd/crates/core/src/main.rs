@@ -17,6 +17,7 @@ mod bridge;
 mod core;
 mod install;
 mod poller;
+mod pr;
 mod rpc;
 mod shadow;
 
@@ -83,6 +84,7 @@ fn serve() -> Result<()> {
         None => rpc::config_dir().join("core-events.jsonl"),
     };
     core.spawn_event_log(event_log);
+    pr::spawn(Arc::clone(&core));
     eprintln!("seahelm-core listening on {}", path.display());
     rpc::serve(listener, core)
 }

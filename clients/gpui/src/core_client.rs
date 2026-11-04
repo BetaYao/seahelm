@@ -118,3 +118,41 @@ pub fn subscribe(types: &[&str], tx: futures::channel::mpsc::UnboundedSender<Val
         }
     });
 }
+
+/// A worktree's pull request, as the core files it (`pr.list`; the app's
+/// `fleet.groups` item `pr` shape).
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct Pr {
+    pub number: u64,
+    #[serde(default)]
+    pub url: String,
+    /// open / draft / merged / closed.
+    #[serde(default)]
+    pub state: String,
+    /// passing / failing / pending, while the PR is live.
+    pub checks: Option<String>,
+    /// approved / changes_requested / review_required, while live.
+    pub review: Option<String>,
+}
+
+/// Every known worktree's PR, by path. The core asks GitHub for the
+/// worktrees `set_worktrees` lists (and those with panes).
+pub fn prs() -> std::collections::HashMap<String, Pr> {
+    let Ok(v) = call("pr.list", json!({})) else { return Default::default() };
+    v.get("prs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            let path = e.get("worktree_path")?.as_str()?.to_string();
+            let pr: Pr = serde_json::from_value(e.get("pr")?.clone()).ok()?;
+            Some((path, pr))
+        })
+        .collect()
+}
+
+/// Tell the core every worktree the fleet shows, so it watches their PRs
+/// even where no pane is open.
+pub fn set_worktrees(paths: &[String]) {
+    let _ = call("worktrees.set", json!({"paths": paths}));
+}
