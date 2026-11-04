@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use gpui::{
-    actions, div, percentage, prelude::*, px, svg, Animation, AnimationExt, App, ClickEvent, Context, Entity,
+    actions, div, percentage, prelude::*, px, svg, App, ClickEvent, Context, Entity,
     FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathPromptOptions,
     Rgba, SharedString, Subscription, Transformation, Window, WindowControlArea,
 };
@@ -116,6 +116,8 @@ pub struct Workspace {
     /// What the core says about First Mate; None while it does not answer.
     first_mate: Option<core_client::FirstMate>,
     first_mate_view: Option<Entity<TerminalView>>,
+    /// The running spinner's step (see `SPIN_STEP`).
+    spin_phase: u8,
 }
 
 impl Workspace {
@@ -148,6 +150,7 @@ impl Workspace {
             first_mate_open: false,
             first_mate: None,
             first_mate_view: None,
+            spin_phase: 0,
             window_active: true,
         };
         Self::poll_core(cx);
@@ -161,6 +164,23 @@ impl Workspace {
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(Duration::from_secs(1)).await;
             if this.update(cx, |_, cx| cx.notify()).is_err() {
+                break;
+            }
+        })
+        .detach();
+        // The running spinner steps on this clock, and only while a row is
+        // running. A GPUI animation instead asks for a frame every vsync and
+        // repaints the whole window with it: ~20% CPU for one spinning dot.
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(SPIN_STEP).await;
+            let alive = this.update(cx, |w, cx| {
+                let running = w.display_groups(fleet::now()).iter().any(|g| g.items.iter().any(|i| i.dot() == Dot::Running));
+                if running {
+                    w.spin_phase = (w.spin_phase + 1) % SPIN_STEPS;
+                    cx.notify();
+                }
+            });
+            if alive.is_err() {
                 break;
             }
         })
@@ -1385,7 +1405,7 @@ impl Workspace {
             .when(selected, |d| d.bg(tokens::row_selected()))
             .when(!selected, |d| d.hover(|s| s.bg(tokens::row_hover())))
             .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| w.select(id.clone(), window, cx)))
-            .child(div().w(px(5.5)).h(px(16.)).flex_none().flex().items_center().child(status_dot(item.dot(), &item.id)))
+            .child(div().w(px(5.5)).h(px(16.)).flex_none().flex().items_center().child(status_dot(item.dot(), self.spin_phase)))
             .child(
                 div()
                     .flex_1()
@@ -1651,20 +1671,21 @@ fn group_header(title: &str, first: bool, can_integrate: bool) -> impl IntoEleme
         .child(glyph("x", 11., tokens::ink_faint()))
 }
 
-fn status_dot(dot: Dot, id: &str) -> gpui::AnyElement {
+/// How often the running spinner steps, and in how many steps it turns.
+const SPIN_STEP: Duration = Duration::from_millis(200);
+const SPIN_STEPS: u8 = 8;
+
+fn status_dot(dot: Dot, spin_phase: u8) -> gpui::AnyElement {
     let text = |g: &'static str, c: Rgba| div().text_size(px(8.)).line_height(px(11.)).text_color(c).child(g).into_any_element();
     match dot {
-        // A 9pt arc, one turn a second; every spinner on one phase.
+        // A 9pt arc stepping round on the workspace's spin clock; every
+        // spinner on one phase.
         Dot::Running => svg()
             .path(icon("spinner-arc"))
             .size(px(9.))
             .flex_none()
             .text_color(tokens::running())
-            .with_animation(
-                SharedString::from(format!("spin-{id}")),
-                Animation::new(Duration::from_secs(1)).repeat(),
-                |svg, delta| svg.with_transformation(Transformation::rotate(percentage(delta))),
-            )
+            .with_transformation(Transformation::rotate(percentage(spin_phase as f32 / SPIN_STEPS as f32)))
             .into_any_element(),
         Dot::Waiting => text("●", tokens::attention()),
         Dot::Idle => text("○", tokens::idle()),
