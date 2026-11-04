@@ -183,19 +183,19 @@ final class PaneTransferTests: XCTestCase {
         XCTAssertNotNil(manager.tree(forPath: "/repo"))
     }
 
-    // MARK: - AgentRegistry.rehome
+    // MARK: - Fleet.rehome
 
     func testRehomeKeepsTheAgentsHistory() {
-        defer { AgentRegistry.shared.unregister(terminalID: "t-move") }
-        AgentRegistry.shared.registerForTesting(terminalID: "t-move", worktreePath: "/wt-a",
+        defer { Fleet.shared.unregister(terminalID: "t-move") }
+        Fleet.shared.registerForTesting(terminalID: "t-move", worktreePath: "/wt-a",
                                                 branch: "main", project: "proj")
-        AgentRegistry.shared.updateStatus(terminalID: "t-move", status: .running,
-                                          lastMessage: "npm test", roundDuration: 12)
+        Fleet.shared.applyForTesting(terminalID: "t-move",
+                                     info: ["status": "Running", "last_message": "npm test", "round_duration": 12.0])
 
-        XCTAssertTrue(AgentRegistry.shared.rehome(terminalID: "t-move", to: "/wt-b",
+        XCTAssertTrue(Fleet.shared.rehome(terminalID: "t-move", to: "/wt-b",
                                                   branch: "feature", project: "proj"))
 
-        let moved = AgentRegistry.shared.pane(for: "t-move")
+        let moved = Fleet.shared.pane(for: "t-move")
         XCTAssertEqual(moved?.worktreePath, "/wt-b")
         XCTAssertEqual(moved?.branch, "feature")
         // unregister+register would have reset all three — the agent is still
@@ -204,20 +204,20 @@ final class PaneTransferTests: XCTestCase {
         XCTAssertEqual(moved?.lastMessage, "npm test")
         XCTAssertEqual(moved?.roundDuration, 12)
 
-        XCTAssertTrue(AgentRegistry.shared.terminalIDs(forWorktree: "/wt-a").isEmpty)
-        XCTAssertEqual(AgentRegistry.shared.terminalIDs(forWorktree: "/wt-b"), ["t-move"])
+        XCTAssertTrue(Fleet.shared.terminalIDs(forWorktree: "/wt-a").isEmpty)
+        XCTAssertEqual(Fleet.shared.terminalIDs(forWorktree: "/wt-b"), ["t-move"])
     }
 
     func testRehomeToTheSameWorktreeIsRejected() {
-        defer { AgentRegistry.shared.unregister(terminalID: "t-same") }
-        AgentRegistry.shared.registerForTesting(terminalID: "t-same", worktreePath: "/wt-a",
+        defer { Fleet.shared.unregister(terminalID: "t-same") }
+        Fleet.shared.registerForTesting(terminalID: "t-same", worktreePath: "/wt-a",
                                                 branch: "main", project: "proj")
-        XCTAssertFalse(AgentRegistry.shared.rehome(terminalID: "t-same", to: "/wt-a",
+        XCTAssertFalse(Fleet.shared.rehome(terminalID: "t-same", to: "/wt-a",
                                                    branch: "main", project: "proj"))
     }
 
     func testRehomeOfUnknownPaneIsRejected() {
-        XCTAssertFalse(AgentRegistry.shared.rehome(terminalID: "ghost", to: "/wt-b",
+        XCTAssertFalse(Fleet.shared.rehome(terminalID: "ghost", to: "/wt-b",
                                                    branch: "b", project: "p"))
     }
 
@@ -228,19 +228,19 @@ final class PaneTransferTests: XCTestCase {
         let first = Station()
         let second = Station()
         defer {
-            AgentRegistry.shared.unregister(terminalID: first.id)
-            AgentRegistry.shared.unregister(terminalID: second.id)
+            Fleet.shared.unregister(terminalID: first.id)
+            Fleet.shared.unregister(terminalID: second.id)
         }
         for station in [first, second] {
-            AgentRegistry.shared.register(station: station, worktreePath: "/wt-multi", branch: "main",
+            Fleet.shared.register(station: station, worktreePath: "/wt-multi", branch: "main",
                                           project: "proj", startedAt: nil,
                                           paneSessionKey: "seahelm-wt-multi", backend: "seahelmd")
         }
-        AgentRegistry.shared.unregister(terminalID: first.id)
-        XCTAssertEqual(AgentRegistry.shared.backendForTesting(worktreePath: "/wt-multi"), "seahelmd")
+        Fleet.shared.unregister(terminalID: first.id)
+        XCTAssertEqual(Fleet.shared.backend(forWorktree: "/wt-multi"), "seahelmd")
 
-        AgentRegistry.shared.unregister(terminalID: second.id)
-        XCTAssertNil(AgentRegistry.shared.backendForTesting(worktreePath: "/wt-multi"),
+        Fleet.shared.unregister(terminalID: second.id)
+        XCTAssertNil(Fleet.shared.backend(forWorktree: "/wt-multi"),
                      "the last pane leaving should still clear it")
     }
 }

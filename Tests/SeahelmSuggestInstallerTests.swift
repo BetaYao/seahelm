@@ -4,9 +4,9 @@ import XCTest
 final class SeahelmSuggestInstallerTests: XCTestCase {
     func testScriptContainsPortMarkerAndEndpoint() {
         let script = SeahelmSuggestInstaller.scriptContents()
-        XCTAssertTrue(script.contains("seahelm-suggest v4"))          // version marker
-        XCTAssertTrue(script.contains("nc -U \"$sock\""))            // control socket (Apple-nc compatible)
-        XCTAssertTrue(script.contains("SEAHELM_SOCKET_PATH"))
+        XCTAssertTrue(script.contains("seahelm-suggest v5"))          // version marker
+        XCTAssertTrue(script.contains("nc -U \"$sock\""))            // seahelm-core's socket (Apple-nc compatible)
+        XCTAssertTrue(script.contains("SEAHELM_CORE_SOCKET"))
         XCTAssertTrue(script.contains("SEAHELM_PANE_ID"))            // pane targeting
         XCTAssertTrue(script.contains("\"method\":\"suggest\""))
         XCTAssertFalse(script.contains("/webhook"))                 // HTTP fallback removed

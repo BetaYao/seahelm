@@ -58,35 +58,9 @@ final class UserPromptTextTests: XCTestCase {
         XCTAssertEqual(UserPromptText.humanText(raw), "merge #1561 first")
     }
 
-    /// The old entry point still answers, so callers reading a prompt for a
-    /// title get the same unwrapping they always did.
-    func testProviderEntryPointStillDelegates() {
-        XCTAssertEqual(
-            WebhookStatusProvider.unwrapPastedContent("<pasted_content>\nhi\n</pasted_content>"), "hi")
-    }
 
     // MARK: - Healing a history that was already written
 
-    /// Stored rows go back through the same rule on the way out, so a timeline
-    /// someone already has stops showing what should never have been recorded.
-    func testStoredNotificationDoesNotDecodeBack() {
-        var row = MessageEvent(seq: 7, paneId: "p", paneSessionKey: "k", kind: .user, ts: Date())
-        row.text = notification
-        XCTAssertNil(MessageStreamHub.decodeForTests(row.dict))
-    }
 
-    func testStoredPromptIsUnwrappedOnTheWayOut() throws {
-        var row = MessageEvent(seq: 8, paneId: "p", paneSessionKey: "k", kind: .user, ts: Date())
-        row.text = "<pasted_content id=\"1\">\nship it\n</pasted_content id=\"1\">"
-        let decoded = try XCTUnwrap(MessageStreamHub.decodeForTests(row.dict))
-        XCTAssertEqual(decoded.text, "ship it")
-    }
 
-    /// Nothing else is touched on the way out.
-    func testStoredToolRowIsUnchanged() throws {
-        var row = MessageEvent(seq: 9, paneId: "p", paneSessionKey: "k", kind: .tool, ts: Date())
-        row.text = notification          // a tool row is not a prompt, whatever it says
-        let decoded = try XCTUnwrap(MessageStreamHub.decodeForTests(row.dict))
-        XCTAssertEqual(decoded.kind, .tool)
-    }
 }

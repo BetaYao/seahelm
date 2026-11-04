@@ -2,90 +2,75 @@ import XCTest
 @testable import seahelm
 
 final class SuggestionSeenSetTests: XCTestCase {
-    private func order(message: String, options: [String], terminalID: String = "t1",
-                       wt: String = "/wt/x") -> PendingOrder {
-        let action = FirstMateAction(kind: .suggestNextOrder, zone: .red, worktreePath: wt,
-                                     branch: "b", project: "p", terminalID: terminalID,
-                                     message: message, options: options)
-        return PendingOrder(id: PendingOrdersQueue.key(action), action: action)
+    private func card(_ id: String = "c1", message: String, options: [String], kind: Card.Kind = .suggestion,
+                      wt: String = "/wt/x") -> Card {
+        Card(id: id, kind: kind, terminalID: "t1", worktreePath: wt, message: message, options: options)
     }
 
     func testFirstSightIsFresh() {
         var seen = SuggestionSeenSet()
-        XCTAssertEqual(seen.absorb([order(message: "shipped", options: ["test", "commit"])]).count, 1)
+        XCTAssertEqual(seen.absorb([card(message: "shipped", options: ["test", "commit"])]).count, 1)
     }
 
     func testUnchangedCardIsNotFreshAgain() {
         var seen = SuggestionSeenSet()
-        let card = order(message: "shipped", options: ["test", "commit"])
-        _ = seen.absorb([card])
-        XCTAssertTrue(seen.absorb([card]).isEmpty, "the 10s fallback refresh must not re-pop a card")
+        let c = card(message: "shipped", options: ["test", "commit"])
+        _ = seen.absorb([c])
+        XCTAssertTrue(seen.absorb([c]).isEmpty, "the fallback refresh must not re-pop a card")
     }
 
-    /// The regression this type exists for: card ids are stable per pane, so the
-    /// second suggestion from one pane reuses the id an id-set comparison keys on.
-    func testSecondSuggestionForSamePaneIsFresh() {
+    /// A pane's next suggestion reuses its card's id; what it shows is new.
+    func testNextSuggestionUnderTheSameIdIsFresh() {
         var seen = SuggestionSeenSet()
-        let first = order(message: "shipped", options: ["test", "commit"])
-        let second = order(message: "tests pass", options: ["push", "open PR"])
-        _ = seen.absorb([first])
-        XCTAssertEqual(second.id, first.id, "precondition: ids collide per pane")
-        XCTAssertEqual(seen.absorb([second]).count, 1)
-    }
-
-    func testRewrittenSummaryWithSameOptionsIsFresh() {
-        var seen = SuggestionSeenSet()
-        _ = seen.absorb([order(message: "shipped", options: ["test", "commit"])])
-        let reAsked = order(message: "reverted the migration", options: ["test", "commit"])
-        XCTAssertEqual(seen.absorb([reAsked]).count, 1)
-    }
-
-    /// `PendingOrdersQueue.refreshSuggestMessage` upgrades a junk summary to the
-    /// agent's real prose without touching the options — same ask, better text.
-    func testJunkSummaryUpgradeIsNotFresh() {
-        var seen = SuggestionSeenSet()
-        _ = seen.absorb([order(message: "Shell", options: ["test", "commit"])])
-        let upgraded = order(message: "Removed the dead migration path", options: ["test", "commit"])
-        XCTAssertTrue(seen.absorb([upgraded]).isEmpty)
+        _ = seen.absorb([card(message: "shipped", options: ["test", "commit"])])
+        XCTAssertEqual(seen.absorb([card(message: "tests pass", options: ["push", "open PR"])]).count, 1)
     }
 
     func testBrieflyVanishedCardDoesNotReopen() {
         var seen = SuggestionSeenSet()
-        let card = order(message: "shipped", options: ["test", "commit"])
+        let c = card(message: "shipped", options: ["test", "commit"])
         let now = Date()
-        _ = seen.absorb([card], now: now)
+        _ = seen.absorb([c], now: now)
         _ = seen.absorb([], now: now.addingTimeInterval(1))
-        XCTAssertTrue(seen.absorb([card], now: now.addingTimeInterval(2)).isEmpty)
+        XCTAssertTrue(seen.absorb([c], now: now.addingTimeInterval(2)).isEmpty)
     }
 
-    func testReAskedHookQuestionIsShownAgain() {
+    /// A question asked again is a new ask, even in the same words.
+    func testReAskedQuestionIsShownAgain() {
         var seen = SuggestionSeenSet()
-        let action = FirstMateAction(kind: .suggestNextOrder, zone: .red, worktreePath: "/wt/x",
-                                     branch: "b", project: "p", terminalID: "t1", message: "Pick fruits",
-                                     payload: FirstMateAction.askUserQuestionPayload, options: ["Apple", "Banana"])
-        let card = PendingOrder(id: PendingOrdersQueue.key(action), action: action)
+        let q = card(message: "Pick fruits", options: ["Apple", "Banana"], kind: .question)
         let now = Date()
-        _ = seen.absorb([card], now: now)
+        _ = seen.absorb([q], now: now)
         _ = seen.absorb([], now: now.addingTimeInterval(5))
-        XCTAssertEqual(seen.absorb([card], now: now.addingTimeInterval(60)).count, 1)
+        XCTAssertEqual(seen.absorb([q], now: now.addingTimeInterval(60)).count, 1)
     }
 
     func testLongGoneCardCanBeRaisedAgain() {
         var seen = SuggestionSeenSet()
-        let card = order(message: "shipped", options: ["test", "commit"])
+        let c = card(message: "shipped", options: ["test", "commit"])
         let now = Date()
-        _ = seen.absorb([card], now: now)
+        _ = seen.absorb([c], now: now)
         _ = seen.absorb([], now: now.addingTimeInterval(1))
-        XCTAssertEqual(seen.absorb([card], now: now.addingTimeInterval(SuggestionSeenSet.reappearanceGrace + 2)).count, 1)
+        XCTAssertEqual(seen.absorb([c], now: now.addingTimeInterval(SuggestionSeenSet.reappearanceGrace + 2)).count, 1)
     }
 
-    func testFreshEntriesAreReturnedNotJustCounted() {
+    func testFreshCardsAreReturned() {
         var seen = SuggestionSeenSet()
-        let known = order(message: "shipped", options: ["test"], terminalID: "t1", wt: "/wt/a")
+        let known = card("a", message: "shipped", options: ["test"], wt: "/wt/a")
         _ = seen.absorb([known])
-        let other = order(message: "needs review", options: ["review"], terminalID: "t2", wt: "/wt/b")
-        let fresh = seen.absorb([known, other])
-        XCTAssertEqual(fresh.map(\.action.worktreePath), ["/wt/b"],
-                       "callers route by which worktree the new card belongs to")
+        let other = card("b", message: "needs review", options: ["review"], wt: "/wt/b")
+        XCTAssertEqual(seen.absorb([known, other]).map(\.worktreePath), ["/wt/b"])
+    }
+
+    func testCardReadsTheCoresJSON() {
+        let c = Card(json: ["id": "c9", "kind": "question", "pane_session_key": "s", "worktree_path": "/wt",
+                            "message": "which?", "options": ["a", "b"], "labels": ["☑ a", "☐ b", "✔ Done"],
+                            "multi_select": true, "checked": [0], "created_at": 5.0],
+                     terminalID: { key, _ in key == "s" ? "t1" : nil })
+        XCTAssertEqual(c?.terminalID, "t1")
+        XCTAssertEqual(c?.labels.last, Card.doneLabel)
+        XCTAssertEqual(c?.checked, [0])
+        XCTAssertTrue(c?.isAgentQuestion == true)
+        XCTAssertNil(Card(json: ["id": "x", "kind": "nonsense"], terminalID: { _, _ in nil }))
     }
 }

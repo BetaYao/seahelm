@@ -5,13 +5,12 @@ final class SeahelmHookInstallerTests: XCTestCase {
     func testScriptShape() {
         let s = SeahelmHookInstaller.scriptContents()
         XCTAssertTrue(s.hasPrefix("#!/bin/sh"))
-        XCTAssertTrue(s.contains("seahelm-hook v7"))
-        XCTAssertTrue(s.contains("nc -U \"$sock\""))     // control socket (Apple-nc compatible)
-        XCTAssertTrue(s.contains("nc -U \"$core\""))     // and seahelm-core's, directly
+        XCTAssertTrue(s.contains("seahelm-hook v8"))
+        XCTAssertTrue(s.contains("nc -U \"$core\""))     // seahelm-core's socket (Apple-nc compatible)
         XCTAssertTrue(s.contains("SEAHELM_CORE_SOCKET"))
+        XCTAssertFalse(s.contains("SEAHELM_SOCKET_PATH"))  // the app hears no hooks
         XCTAssertFalse(s.contains("block_b64"))          // Stop is observation-only
         XCTAssertFalse(s.contains("base64 -d"))
-        XCTAssertFalse(s.contains("/webhook"))           // HTTP fallback removed
         XCTAssertFalse(s.contains("curl"))
         XCTAssertTrue(s.contains("\"method\":\"hook\""))
         XCTAssertTrue(s.contains("seahelm_pane_id"))     // pane id injected
@@ -20,40 +19,79 @@ final class SeahelmHookInstallerTests: XCTestCase {
         XCTAssertTrue(s.contains("src=\"${1:-}\""))
     }
 
-    /// End-to-end over a real control socket: the shipped script must stamp the
-    /// source it was invoked with, and omit the tag entirely when invoked without
-    /// one (hook configs written by an older seahelm).
-    func testScriptStampsSourceOnTheWire() throws {
-        final class CapturingDS: ControlDataSource {
-            var captured: [[String: Any]] = []
-            func snapshotPanes() -> [PaneSnapshot] { [] }
-            func readPane(paneId: String, source: String, lines: Int) -> String? { nil }
-            func ingestHook(json: [String: Any]) { captured.append(json) }
+    /// Records every JSON-RPC line written to a Unix socket: a stand-in for
+    /// seahelm-core.
+    final class LineCapture {
+        let path = "/tmp/sh-core-\(UUID().uuidString.prefix(8)).sock"
+        private(set) var params: [[String: Any]] = []
+        private let lock = NSLock()
+        private var fd: Int32 = -1
+
+        init() throws {
+            let sock = socket(AF_UNIX, SOCK_STREAM, 0)
+            fd = sock
+            var addr = sockaddr_un()
+            addr.sun_family = sa_family_t(AF_UNIX)
+            _ = withUnsafeMutablePointer(to: &addr.sun_path.0) { dst in path.withCString { strcpy(dst, $0) } }
+            let bound = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(sock, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+            }
+            guard bound == 0, listen(sock, 8) == 0 else { throw NSError(domain: "LineCapture", code: 1) }
+            let fd = sock
+            Thread.detachNewThread { [weak self] in
+                while true {
+                    let c = accept(fd, nil, nil)
+                    guard c >= 0 else { return }
+                    var data = Data()
+                    var buf = [UInt8](repeating: 0, count: 4096)
+                    while true {
+                        let n = read(c, &buf, buf.count)
+                        guard n > 0 else { break }
+                        data.append(contentsOf: buf[0..<n])
+                        if data.contains(0x0A) { break }
+                    }
+                    close(c)
+                    if let line = data.split(separator: 0x0A).first,
+                       let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                       let p = obj["params"] as? [String: Any] {
+                        self?.lock.lock(); self?.params.append(p); self?.lock.unlock()
+                    }
+                }
+            }
         }
 
+        func waitFor(_ count: Int) -> [[String: Any]] {
+            let deadline = Date().addingTimeInterval(3)
+            while Date() < deadline {
+                lock.lock(); let n = params.count; lock.unlock()
+                if n >= count { break }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            lock.lock(); defer { lock.unlock() }
+            return params
+        }
+
+        deinit { close(fd); unlink(path) }
+    }
+
+    /// End to end: the shipped script reaches seahelm-core alone, stamped with
+    /// the source it was invoked with (and none when invoked without one) and
+    /// with the pane it runs in.
+    func testScriptReachesTheCoreStampedWithSourceAndPane() throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("seahelm-hook-src-\(UUID().uuidString.prefix(8))")
+            .appendingPathComponent("seahelm-hook-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-
         let scriptURL = dir.appendingPathComponent("seahelm-hook")
         try SeahelmHookInstaller.scriptContents().write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        let core = try LineCapture()
 
-        let sockPath = "/tmp/sh-hook-\(UUID().uuidString.prefix(8)).sock"
-        let ds = CapturingDS()
-        let server = ControlSocketServer(router: ControlRouter(dataSource: ds), path: sockPath)
-        server.start()
-        defer { server.stop() }
-        Thread.sleep(forTimeInterval: 0.1)   // let the accept loop bind
-
-        func runHook(args: [String]) throws {
+        func runHook(args: [String], env: [String: String]) throws -> Int32 {
             let p = Process()
             p.executableURL = scriptURL
             p.arguments = args
-            // A dead core socket: the live core must not hear test events.
-            p.environment = ["SEAHELM_SOCKET_PATH": sockPath, "SEAHELM_PANE_ID": "seahelm-repo-main",
-                             "SEAHELM_CORE_SOCKET": "/nonexistent/core.sock", "PATH": "/usr/bin:/bin"]
+            p.environment = env.merging(["SEAHELM_CORE_SOCKET": core.path, "PATH": "/usr/bin:/bin"]) { a, _ in a }
             let input = Pipe()
             p.standardInput = input
             p.standardOutput = Pipe()
@@ -61,66 +99,17 @@ final class SeahelmHookInstallerTests: XCTestCase {
             input.fileHandleForWriting.write(Data(#"{"hook_event_name":"Stop","session_id":"s","cwd":"/wt"}"#.utf8))
             try? input.fileHandleForWriting.close()
             p.waitUntilExit()
+            return p.terminationStatus
         }
 
-        try runHook(args: ["claude-code"])
-        try runHook(args: [])
-        // The server handles each connection on its own thread.
-        let deadline = Date().addingTimeInterval(2)
-        while ds.captured.count < 2 && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-
-        XCTAssertEqual(ds.captured.count, 2, "both hook invocations should reach the socket")
-        XCTAssertEqual(ds.captured.first?["seahelm_source"] as? String, "claude-code")
-        XCTAssertEqual(ds.captured.first?["seahelm_pane_id"] as? String, "seahelm-repo-main")
-        XCTAssertNil(ds.captured.last?["seahelm_source"], "untagged call must not emit an empty source")
-        XCTAssertEqual(ds.captured.last?["seahelm_pane_id"] as? String, "seahelm-repo-main")
-    }
-
-    /// v7: the same request goes to seahelm-core's socket as well, so the core
-    /// hears hooks with the app's socket absent (the app not running).
-    func testScriptReachesTheCoreWithoutTheApp() throws {
-        final class CapturingDS: ControlDataSource {
-            var captured: [[String: Any]] = []
-            func snapshotPanes() -> [PaneSnapshot] { [] }
-            func readPane(paneId: String, source: String, lines: Int) -> String? { nil }
-            func ingestHook(json: [String: Any]) { captured.append(json) }
-        }
-
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("seahelm-hook-core-\(UUID().uuidString.prefix(8))")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let scriptURL = dir.appendingPathComponent("seahelm-hook")
-        try SeahelmHookInstaller.scriptContents().write(to: scriptURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
-
-        // Something speaking the same line protocol stands in for the core.
-        let corePath = "/tmp/sh-core-\(UUID().uuidString.prefix(8)).sock"
-        let core = CapturingDS()
-        let server = ControlSocketServer(router: ControlRouter(dataSource: core), path: corePath)
-        server.start()
-        defer { server.stop() }
-        Thread.sleep(forTimeInterval: 0.1)
-
-        let p = Process()
-        p.executableURL = scriptURL
-        p.arguments = ["codex"]
-        p.environment = ["SEAHELM_SOCKET_PATH": "/nonexistent/seahelm.sock", "SEAHELM_CORE_SOCKET": corePath,
-                         "SEAHELMD_SESSION": "seahelm-repo-wt", "PATH": "/usr/bin:/bin"]
-        let input = Pipe()
-        p.standardInput = input
-        p.standardOutput = Pipe()
-        try p.run()
-        input.fileHandleForWriting.write(Data(#"{"hook_event_name":"Stop","session_id":"s","cwd":"/wt"}"#.utf8))
-        try? input.fileHandleForWriting.close()
-        p.waitUntilExit()
-
-        let deadline = Date().addingTimeInterval(2)
-        while core.captured.isEmpty && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        XCTAssertEqual(p.terminationStatus, 0)
-        XCTAssertEqual(core.captured.count, 1)
-        XCTAssertEqual(core.captured.first?["seahelm_source"] as? String, "codex")
-        XCTAssertEqual(core.captured.first?["seahelm_pane_id"] as? String, "seahelm-repo-wt")
+        XCTAssertEqual(try runHook(args: ["claude-code"], env: ["SEAHELM_PANE_ID": "seahelm-repo-main"]), 0)
+        XCTAssertEqual(try runHook(args: [], env: ["SEAHELMD_SESSION": "seahelm-repo-wt"]), 0)
+        let got = core.waitFor(2)
+        XCTAssertEqual(got.count, 2, "both hook invocations should reach the core")
+        XCTAssertEqual(got.first?["seahelm_source"] as? String, "claude-code")
+        XCTAssertEqual(got.first?["seahelm_pane_id"] as? String, "seahelm-repo-main")
+        XCTAssertNil(got.last?["seahelm_source"], "untagged call must not emit an empty source")
+        XCTAssertEqual(got.last?["seahelm_pane_id"] as? String, "seahelm-repo-wt")
     }
 
     func testScriptIsValidSh() throws {

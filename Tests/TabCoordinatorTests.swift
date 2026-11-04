@@ -64,7 +64,6 @@ final class TabCoordinatorTests: XCTestCase {
     func testWorktreeDidDeleteRemovesFromList() {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
         let info = WorktreeInfo(path: "/tmp/test-wt", branch: "feature", commitHash: "", isMainWorktree: false)
         let tree = SplitTree(worktreePath: info.path, rootLeafId: "leaf-1", stationId: "surface-1", paneSessionKey: "test")
@@ -175,7 +174,6 @@ final class TabCoordinatorTests: XCTestCase {
     func testReconcileDiscoveredWorktreesRemovesDeletedWorktree() {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
 
         let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
@@ -202,7 +200,6 @@ final class TabCoordinatorTests: XCTestCase {
     func testReconcileDiscoveredWorktreesKeepsWorktreeStillOnDisk() throws {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
 
         // Real directories — the guard's evidence is the filesystem, not the string.
@@ -233,7 +230,6 @@ final class TabCoordinatorTests: XCTestCase {
     func testReconcileDiscoveredWorktreesHandlesAddedAndDeletedInSameScan() {
         let coordinator = TabCoordinator(config: Config())
         coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
-        coordinator.statusPublisher = StatusPublisher(agentConfig: Config().agentDetect)
         coordinator.statusAggregator = WorktreeStatusAggregator()
 
         let main = WorktreeInfo(path: "/repo", branch: "main", commitHash: "abc12345", isMainWorktree: true)
@@ -292,8 +288,9 @@ final class TabCoordinatorTests: XCTestCase {
         coordinator.allWorktrees.append((info: infoB, tree: treeB))
         coordinator.worktreeRepoCache[infoB.path] = "/tmp/repo-b"
 
+        // First Mate's session is the core's and always protected.
         XCTAssertEqual(coordinator.livePaneSessionNames(),
-                       ["seahelm-repo-a-main", "seahelm-repo-b-main"])
+                       ["seahelm-repo-a-main", "seahelm-repo-b-main", FirstMatePane.sessionName])
     }
     // MARK: - Holding a completion until the agent has spoken
 

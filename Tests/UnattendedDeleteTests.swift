@@ -47,8 +47,4 @@ final class UnattendedDeleteTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: workWT))
     }
 
-    func testDeletedReadsAsWords() {
-        XCTAssertEqual(AutopilotCoordinator.compact(["deleted": true, "worktree_path": "/wt/report-membership-ya"]),
-                       "deleted report-membership-ya")
-    }
 }

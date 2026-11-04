@@ -6,7 +6,11 @@ import Foundation
 /// `autopilot_owner` is `core`. Never call on main.
 enum CoreSocketClient {
     static var path: String {
-        if let env = ProcessInfo.processInfo.environment["SEAHELM_CORE_SOCKET"], !env.isEmpty { return env }
+        let env = ProcessInfo.processInfo.environment
+        if let path = env["SEAHELM_CORE_SOCKET"], !path.isEmpty { return path }
+        // Unit tests never reach the user's live core: a test that wants a
+        // core sets SEAHELM_CORE_SOCKET to one of its own.
+        if env["XCTestConfigurationFilePath"] != nil { return "/nonexistent/seahelm-core.sock" }
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/seahelm/core.sock").path
     }

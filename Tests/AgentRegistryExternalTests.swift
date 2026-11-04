@@ -24,21 +24,21 @@ final class MockExternalChannel: ExternalChannel {
     func disconnect() { disconnectCalled = true }
 }
 
-final class AgentRegistryExternalTests: XCTestCase {
+final class FleetExternalTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
         ChannelHub.shared.unregisterAllExternalChannels()
         // Clean up any agents from other tests
-        for agent in AgentRegistry.shared.allPanes() {
-            AgentRegistry.shared.unregister(terminalID: agent.id)
+        for agent in Fleet.shared.allPanes() {
+            Fleet.shared.unregister(terminalID: agent.id)
         }
     }
 
     override func tearDown() {
         ChannelHub.shared.unregisterAllExternalChannels()
-        for agent in AgentRegistry.shared.allPanes() {
-            AgentRegistry.shared.unregister(terminalID: agent.id)
+        for agent in Fleet.shared.allPanes() {
+            Fleet.shared.unregister(terminalID: agent.id)
         }
         super.tearDown()
     }
@@ -74,7 +74,6 @@ final class AgentRegistryExternalTests: XCTestCase {
         ChannelHub.shared.handleInbound(makeMessage(content: "/help"))
 
         XCTAssertEqual(ch.sentMessages.count, 1)
-        XCTAssertTrue(ch.sentMessages[0].content.contains("/idea"))
         XCTAssertTrue(ch.sentMessages[0].content.contains("/status"))
     }
 

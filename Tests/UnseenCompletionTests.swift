@@ -67,18 +67,6 @@ final class UnseenCompletionTests: XCTestCase {
 
     // MARK: - the registry and the wire
 
-    func testRegistryReportsOnlyChanges() {
-        let station = Station()
-        AgentRegistry.shared.register(station: station, worktreePath: "/tmp/unseen-wt",
-                                      branch: "main", project: "P", startedAt: nil)
-        defer { AgentRegistry.shared.unregister(terminalID: station.id) }
-
-        XCTAssertTrue(AgentRegistry.shared.setUnseenCompletion(true, terminalID: station.id))
-        XCTAssertFalse(AgentRegistry.shared.setUnseenCompletion(true, terminalID: station.id))
-        XCTAssertEqual(AgentRegistry.shared.pane(for: station.id)?.unseenCompletion, true)
-        XCTAssertTrue(AgentRegistry.shared.setUnseenCompletion(false, terminalID: station.id))
-        XCTAssertFalse(AgentRegistry.shared.setUnseenCompletion(true, terminalID: "nobody"))
-    }
 
     func testAMovedPaneKeepsItsUnreadFinish() {
         var info = PaneInfo(id: "t", worktreePath: "/a", agentType: .claudeCode, project: "P",

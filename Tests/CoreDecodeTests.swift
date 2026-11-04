@@ -1,50 +1,9 @@
 import XCTest
 @testable import seahelm
 
-/// seahelm-core's pane events read back into the app's types, from the
-/// shapes the core's tests pin (core-registry tests/unseen_and_events.rs).
+/// seahelm-core's pane detail read into the app's types, in the shape the
+/// core's tests pin (core-registry tests/unseen_and_events.rs).
 final class CoreDecodeTests: XCTestCase {
-    func testSourcesAndKinds() {
-        guard case .hook("claude-code") = CoreDecode.source(["type": "hook", "name": "claude-code"]) else {
-            return XCTFail("hook source")
-        }
-        guard case .osc7501 = CoreDecode.source(["type": "osc7501"]) else { return XCTFail("7501 source") }
-
-        guard case .userPrompt("fix it") = CoreDecode.kind(["kind": "user_prompt", "text": "fix it"]) else {
-            return XCTFail("prompt")
-        }
-        let q: [String: Any] = ["kind": "question", "prompt": "which?", "options": ["a", "b"],
-                                "followups": [["prompt": "(2/2) and?", "options": ["c"],
-                                               "flags": ["multi_select": true]]],
-                                "flags": ["multi_select": false, "review_after": true, "checked": [1],
-                                          "cursor": 2, "ask_id": "toolu_1"]]
-        guard case .question(let prompt, let options, let followups, let flags) = CoreDecode.kind(q) else {
-            return XCTFail("question")
-        }
-        XCTAssertEqual(prompt, "which?")
-        XCTAssertEqual(options, ["a", "b"])
-        XCTAssertEqual(followups.first?.flags.multiSelect, true)
-        XCTAssertTrue(flags.reviewAfter)
-        XCTAssertEqual(flags.checked, [1])
-        XCTAssertEqual(flags.askId, "toolu_1")
-
-        guard case .agentStopped(success: false) = CoreDecode.kind(["kind": "agent_stopped", "success": false]) else {
-            return XCTFail("stop")
-        }
-        guard case .toolUse(let a) = CoreDecode.kind(["kind": "tool_use", "activity":
-                ["tool": "Bash", "detail": "ls", "is_error": false, "timestamp": 10.0]]) else {
-            return XCTFail("tool")
-        }
-        XCTAssertEqual(a.tool, "Bash")
-        XCTAssertEqual(a.timestamp, Date(timeIntervalSince1970: 10))
-        guard case .programStatus(let record) = CoreDecode.kind(["kind": "program_status", "record":
-                ["state": "done", "kind": NSNull(), "progress": NSNull(), "app": "claude-code", "title": "", "msg": "ok"]]) else {
-            return XCTFail("7501")
-        }
-        XCTAssertEqual(record?.state, .done)
-        XCTAssertNil(CoreDecode.kind(["kind": "something_new"]))
-    }
-
     func testPaneInfoLaysOverTheAppsSnapshot() {
         var p = PaneInfo(id: "t1", worktreePath: "/wt", agentType: .unknown, project: "p", branch: "b",
                          status: .idle, lastMessage: "", commandLine: "old", roundDuration: 0,
@@ -67,5 +26,17 @@ final class CoreDecodeTests: XCTestCase {
         // The app's own: identity and where it is filed.
         XCTAssertEqual(p.id, "t1")
         XCTAssertEqual(p.worktreePath, "/wt")
+    }
+
+    /// `pane.unseen_changed` carries one field: the rest stays as it was.
+    func testOnlyTheGivenFieldsChange() {
+        var p = PaneInfo(id: "t1", worktreePath: "/wt", agentType: .claudeCode, project: "p", branch: "b",
+                         status: .running, lastMessage: "Bash ls", commandLine: "ls", roundDuration: 4,
+                         startedAt: nil, station: nil, channel: nil, taskProgress: TaskProgress())
+        CoreDecode.apply(["unseen": true], to: &p)
+        XCTAssertTrue(p.unseenCompletion)
+        XCTAssertEqual(p.status, .running)
+        XCTAssertEqual(p.commandLine, "ls")
+        XCTAssertEqual(p.lastMessage, "Bash ls")
     }
 }

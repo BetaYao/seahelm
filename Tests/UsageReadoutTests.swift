@@ -82,10 +82,8 @@ final class UsageReadoutTests: XCTestCase {
         ))
         let widthWithUsage = model.closedWidth
 
-        model.orders = [PendingOrder(id: "o1", action: FirstMateAction(
-            kind: .suggestNextOrder, zone: .red, worktreePath: "/wt", branch: "b",
-            project: "p", terminalID: "t", message: "m", options: ["a", "b"]
-        ))]
+        model.orders = [Card(id: "o1", kind: .suggestion, terminalID: "t", worktreePath: "/wt",
+                             message: "m", options: ["a", "b"])]
 
         XCTAssertNil(model.pillUsage)
         XCTAssertEqual(model.wingUsageWidth, 0)
