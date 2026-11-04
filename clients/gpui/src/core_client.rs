@@ -60,6 +60,9 @@ pub fn call(method: &str, params: Value) -> Result<Value, String> {
 /// What the core says about one worktree.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WorktreeState {
+    /// The row's title (session summary, else the last prompt), when the
+    /// core has one.
+    pub title: Option<String>,
     pub status: String,
     pub unseen: bool,
     pub running_since: Option<f64>,
@@ -78,6 +81,7 @@ pub fn worktrees() -> std::collections::HashMap<String, WorktreeState> {
             Some((
                 path,
                 WorktreeState {
+                    title: w.get("title").and_then(Value::as_str).filter(|t| !t.trim().is_empty()).map(str::to_string),
                     status: w.get("status").and_then(Value::as_str).unwrap_or("Unknown").to_string(),
                     unseen: w.get("unseen").and_then(Value::as_bool).unwrap_or(false),
                     running_since: w.get("running_since").and_then(Value::as_f64),

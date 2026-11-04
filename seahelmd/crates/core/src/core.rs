@@ -58,6 +58,9 @@ struct State {
     app_active: bool,
     /// The newest location each pane's agent reported (`pane.location`).
     locations: HashMap<String, Value>,
+    /// Each worktree's title as the app's rows read it (session summary,
+    /// else the last prompt), worked out off the lock (`spawn_titles`).
+    worktree_titles: HashMap<String, String>,
     /// Agent session references (`config.json` `agent_sessions` shape), by pane.
     session_refs: HashMap<String, Value>,
     session_refs_path: PathBuf,
@@ -115,6 +118,7 @@ impl Core {
                 visible: HashSet::new(),
                 app_active: false,
                 locations: HashMap::new(),
+                worktree_titles: HashMap::new(),
                 session_refs,
                 session_refs_path,
                 cycle: 0,
@@ -337,6 +341,51 @@ impl Core {
     /// completions. `pane.updated` (every refresh) is left out. Each line
     /// carries the wall-clock time. The file rolls over to `<path>.1` past
     /// 20 MB. Runs for the life of the core on a thread of its own.
+    /// Worktree titles, every 15 s on a thread of its own: the session
+    /// summary of the worktree's most recently prompted pane (Claude's
+    /// transcript title, Codex's last prompt), as the app's
+    /// `WorktreeTitleCache`. A transcript can run to tens of megabytes, so
+    /// it is read with the lock released.
+    pub fn spawn_titles(self: &Arc<Self>) {
+        let core = Arc::clone(self);
+        let _ = std::thread::Builder::new().name("seahelm-core-titles".into()).spawn(move || {
+            let mut cache = hooks::titles::TitleCache::new();
+            let home = crate::install::home();
+            loop {
+                // (worktree, session ref) for each worktree's latest-prompted pane.
+                let wanted: Vec<(String, Value)> = {
+                    let st = core.lock();
+                    let mut best: HashMap<String, (f64, String)> = HashMap::new();
+                    for p in st.registry.panes() {
+                        let at = p.last_user_prompt_at.unwrap_or(0.0);
+                        let e = best.entry(p.worktree_path.clone()).or_insert((f64::MIN, p.id.clone()));
+                        if at > e.0 {
+                            *e = (at, p.id.clone());
+                        }
+                    }
+                    best.into_iter()
+                        .filter_map(|(wt, (_, pane))| st.session_refs.get(&pane).map(|r| (wt, r.clone())))
+                        .collect()
+                };
+                let now = wall_clock();
+                let titles: HashMap<String, String> = wanted
+                    .into_iter()
+                    .filter_map(|(wt, r)| {
+                        let r: hooks::session_ref::AgentSessionRef = serde_json::from_value(r).ok()?;
+                        let title = match (r.agent.as_str(), r.kind) {
+                            ("claude", hooks::session_ref::Kind::Id) => cache.claude(&home, &wt, &r.session_id, now),
+                            ("codex", _) => hooks::titles::codex_prompt(&home, &r.session_id),
+                            _ => None,
+                        }?;
+                        Some((wt, title))
+                    })
+                    .collect();
+                core.lock().worktree_titles = titles;
+                std::thread::sleep(Duration::from_secs(15));
+            }
+        });
+    }
+
     pub fn spawn_event_log(self: &Arc<Self>, path: PathBuf) {
         const LOGGED: [&str; 5] = ["pane.status_changed", "pane.notice", "pane.closed", "pane.rehomed", "pane.unseen_changed"];
         const ROLL_AT: u64 = 20 << 20;
@@ -750,8 +799,18 @@ impl State {
                     .filter(|p| p.status == AgentStatus::Running && p.round_duration > 0.0)
                     .map(|p| now - p.round_duration)
                     .reduce(f64::min);
+                // The row's title: the session summary, else the latest
+                // prompt's first line; clients fall back to the worktree's name.
+                let title = self.worktree_titles.get(&wt).cloned().or_else(|| {
+                    panes
+                        .iter()
+                        .filter(|p| !p.last_user_prompt.trim().is_empty())
+                        .max_by(|a, b| a.last_user_prompt_at.unwrap_or(0.0).total_cmp(&b.last_user_prompt_at.unwrap_or(0.0)))
+                        .map(|p| one_line(&p.last_user_prompt, 80))
+                });
                 json!({
                     "worktree_path": wt,
+                    "title": title,
                     "status": dot.as_str(),
                     "group_status": group.as_str(),
                     "panes": panes.len(),
@@ -825,4 +884,14 @@ fn registration(p: &Value) -> Option<Registration> {
 /// Seconds since the epoch, for the event log.
 fn wall_clock() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
+}
+
+/// The first line of `text`, at most `max` characters.
+fn one_line(text: &str, max: usize) -> String {
+    let line = text.trim().lines().next().unwrap_or("").trim();
+    if line.chars().count() > max {
+        line.chars().take(max - 1).collect::<String>() + "…"
+    } else {
+        line.to_string()
+    }
 }

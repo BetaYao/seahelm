@@ -373,7 +373,7 @@ impl Workspace {
             "pane": name,
             "worktree_path": item.worktree_path,
             "project": item.repository,
-            "branch": item.subtitle,
+            "branch": item.branch,
         });
         cx.background_executor()
             .spawn(async move {
@@ -576,6 +576,9 @@ impl Workspace {
         let mut groups = self.fleet.groups.clone();
         for item in groups.iter_mut().flat_map(|g| g.items.iter_mut()) {
             if let Some(c) = self.core.get(&item.worktree_path) {
+                if let Some(title) = &c.title {
+                    item.title = title.clone();
+                }
                 item.status = c.status.clone();
                 item.unseen = c.unseen;
                 item.running_since = c.running_since;
