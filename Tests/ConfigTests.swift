@@ -496,125 +496,18 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(decoded.autoIntegrate)
     }
 
-    /// The one thing this refactor could break silently.
-    ///
-    /// `MqttConfig` became `PairingIdentity` and lost every broker field, but the
-    /// JSON key stays `mqtt` because that is where every install already keeps its
-    /// root secret. Decoding is `decodeIfPresent`: a renamed key would read as
-    /// absent, a fresh secret would be minted, and every paired device would stop
-    /// connecting — with nothing failing anywhere to say why.
-    func testExistingConfigKeepsItsPairingSecret() throws {
+    /// The legacy remote-access keys belong to seahelm-gateway now, which
+    /// imports them once (docs/seahelm-gateway-plan.md); the app neither
+    /// reads nor writes them, so its next save drops them.
+    func testLegacyRemoteAccessKeysAreNotWrittenBack() throws {
         let json = Data("""
-        {"mqtt":{"root_secret":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
-                 "mac_id":"m1a2b3c4",
-                 "host":"broker.example.com","port":8084,"tls":true,
-                 "websocket":true,"ws_path":"/mqtt","client_broker":"wss://old/mqtt",
-                 "enabled":true,"allow_remote_write":false}}
+        {"mqtt":{"root_secret":"AAA"},"telegram":{"bot_token":"1:AA"},
+         "host_gateway":{"enabled":true},"gmail_mail":{"enabled":true}}
         """.utf8)
         let config = try JSONDecoder().decode(Config.self, from: json)
-        XCTAssertEqual(config.pairing?.rootSecret, "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
-        XCTAssertEqual(config.pairing?.macId, "m1a2b3c4")
-    }
-
-    /// And the secret still derives the same token, so the device authenticates.
-    func testRestoredSecretStillDerivesTheSameToken() throws {
-        let json = Data("{\"mqtt\":{\"root_secret\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\"}}".utf8)
-        let config = try JSONDecoder().decode(Config.self, from: json)
-        let bytes = try XCTUnwrap(PairingCrypto.rootSecret(fromBase64url: config.pairing?.rootSecret ?? ""))
-        XCTAssertEqual(bytes, Data((0..<32).map { UInt8($0) }))
-        XCTAssertEqual(PairingCrypto(rootSecret: bytes).authPassword,
-                       "1f30db8b0e2f696aa5575f7eef0a05eb08b443df09bbad725e21f915b6abc26b")
-    }
-
-    /// Re-encoding must not resurrect the broker fields.
-    func testRoundTripDropsTheBrokerFields() throws {
-        let json = Data("{\"mqtt\":{\"root_secret\":\"AAA\",\"host\":\"broker.example.com\",\"port\":8084}}".utf8)
-        var config = try JSONDecoder().decode(Config.self, from: json)
-        config.workspacePaths = []
         let out = String(data: try JSONEncoder().encode(config), encoding: .utf8) ?? ""
-        XCTAssertTrue(out.contains("root_secret"), out)
-        XCTAssertFalse(out.contains("broker.example.com"), out)
-        XCTAssertFalse(out.contains("ws_path"), out)
-    }
-
-    // MARK: - Settings-owned secrets vs stale writers
-
-    /// A layout/activity save carries `telegram == nil` because that coordinator
-    /// never opened Settings. Nil means "unknown", not "clear" — keep the other.
-    func testPreservingSecretsKeepsTelegramFromOtherCopy() {
-        var writer = Config()
-        writer.workspacePaths = ["/tmp/a"]
-        writer.telegram = nil
-
-        var disk = Config()
-        disk.telegram = TelegramConfig(botToken: "1:AA", allowedUsers: ["42"],
-                                       defaultChatId: "42", autoConnect: true)
-
-        let merged = writer.preservingSettingsOwnedSecrets(from: disk)
-        XCTAssertEqual(merged.telegram?.botToken, "1:AA")
-        XCTAssertEqual(merged.telegram?.allowedUsers, ["42"])
-        XCTAssertEqual(merged.workspacePaths, ["/tmp/a"])
-    }
-
-    /// Clearing Settings writes an empty `TelegramConfig` (non-nil). That must
-    /// not be restored from an older disk snapshot.
-    func testPreservingSecretsDoesNotRestoreDeliberateTelegramClear() {
-        var writer = Config()
-        writer.telegram = TelegramConfig(botToken: nil, allowedUsers: [],
-                                         defaultChatId: nil, autoConnect: false)
-
-        var disk = Config()
-        disk.telegram = TelegramConfig(botToken: "1:AA", allowedUsers: ["42"])
-
-        let merged = writer.preservingSettingsOwnedSecrets(from: disk)
-        XCTAssertEqual(merged.telegram?.botToken, nil)
-        XCTAssertEqual(merged.telegram?.allowedUsers, [])
-        XCTAssertEqual(merged.telegram?.autoConnect, false)
-    }
-
-    /// The window and the coordinator each hold a copy of the config. A copy
-    /// from before the code was refreshed or chosen must not write the old
-    /// code back — it came back at the next launch, and paired nothing.
-    func testAStaleCopyDoesNotWriteBackAnOldPairingCode() {
-        var writer = Config()
-        writer.workspacePaths = ["/tmp/a"]
-        writer.hostGateway = HostGatewayConfig(enabled: true, port: 2783, pairCode: "11111111")
-        var disk = Config()
-        disk.hostGateway = HostGatewayConfig(enabled: true, port: 2783, pairCode: "202609171430")
-
-        let merged = writer.preservingSettingsOwnedSecrets(from: disk)
-        XCTAssertEqual(merged.hostGateway?.pairCode, "202609171430")
-        XCTAssertEqual(merged.workspacePaths, ["/tmp/a"])
-        XCTAssertEqual(merged.hostGateway?.port, 2783)
-    }
-
-    /// Settings still owns the rest of the gateway section.
-    func testTheGatewaySettingsAreStillTheWritersOwn() {
-        var writer = Config()
-        writer.hostGateway = HostGatewayConfig(enabled: false, port: 3001)
-        var disk = Config()
-        disk.hostGateway = HostGatewayConfig(enabled: true, port: 2783, pairCode: "48291736")
-
-        let merged = writer.preservingSettingsOwnedSecrets(from: disk)
-        XCTAssertEqual(merged.hostGateway?.enabled, false)
-        XCTAssertEqual(merged.hostGateway?.port, 3001)
-        XCTAssertEqual(merged.hostGateway?.pairCode, "48291736")
-    }
-
-    /// TelegramConfig only has a custom decoder; encoding must still emit
-    /// `bot_token` or a save looks successful while the file never stores it.
-    func testTelegramConfigRoundTripsThroughJSON() throws {
-        var config = Config()
-        config.telegram = TelegramConfig(botToken: "123:ABC", allowedUsers: ["9"],
-                                         defaultChatId: "9", autoConnect: true)
-        let data = try JSONEncoder().encode(config)
-        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-        XCTAssertTrue(json.contains("\"telegram\""), json)
-        XCTAssertTrue(json.contains("\"bot_token\""), json)
-        XCTAssertTrue(json.contains("123:ABC"), json)
-
-        let decoded = try JSONDecoder().decode(Config.self, from: data)
-        XCTAssertEqual(decoded.telegram?.botToken, "123:ABC")
-        XCTAssertEqual(decoded.telegram?.allowedUsers, ["9"])
+        for key in ["\"mqtt\"", "\"telegram\"", "\"host_gateway\"", "\"gmail_mail\""] {
+            XCTAssertFalse(out.contains(key), out)
+        }
     }
 }

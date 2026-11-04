@@ -394,6 +394,10 @@ class Station {
         ghostty_surface_set_content_scale(surface, Double(xScale), Double(yScale))
     }
 
+    /// seahelm-core ended this pane's session on purpose (`pane.close`, from
+    /// the web). Recovery must not read the dead session as one to recreate.
+    var sessionEndedElsewhere = false
+
     /// Check if the process has exited
     var processExited: Bool {
         // Read `surface` inside the lock: destroy() frees it under the same
@@ -714,8 +718,9 @@ class Station {
         workingDirectory: String?,
         reschedule: Bool
     ) {
-        // If the surface was already destroyed, nothing to do.
-        guard surface != nil else { return }
+        // If the surface was already destroyed, or the session was ended on
+        // purpose, nothing to do.
+        guard surface != nil, !sessionEndedElsewhere else { return }
         if reschedule {
             schedulePeriodicSeahelmdHealthCheck(
                 paneSessionKey: paneSessionKey,
@@ -817,6 +822,7 @@ class Station {
         workingDirectory: String?,
         plan: SeahelmdSessionRecovery.Plan
     ) {
+        guard !sessionEndedElsewhere else { return }
         guard seahelmdRecoveryAttempts < Self.maxSeahelmdRecoveryAttempts else {
             NSLog(
                 "Station: giving up on session '%@' after %d recovery attempts",
@@ -844,7 +850,7 @@ class Station {
             }
 
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, !self.sessionEndedElsewhere else { return }
                 guard let app = GhosttyBridge.shared.app else { return }
 
                 self.destroy()

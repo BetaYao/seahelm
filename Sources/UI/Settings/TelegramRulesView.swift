@@ -71,6 +71,19 @@ final class TelegramRulesView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
+    /// Replace the list with what the gateway holds, keeping the selection
+    /// when it still points at a rule. Does not fire `onChange`.
+    func setRules(_ rules: [TelegramRule]) {
+        guard rules != self.rules else { return }
+        let selected = selectedIndex
+        self.rules = rules
+        tableView.reloadData()
+        if let selected, rules.indices.contains(selected) {
+            tableView.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
+        }
+        renderForm()
+    }
+
     // MARK: - Building
 
     private func build() {
@@ -272,7 +285,7 @@ final class TelegramRulesView: NSView {
     /// re-point a rule at some other project's pane.
     private func rebuildTargetPopups(for target: TelegramRuleTarget) {
         let stored = target.value.trimmingCharacters(in: .whitespaces)
-        let storedPane = TelegramRuleEngine.resolvePane(target, panes: panes)
+        let storedPane = target.resolvePane(in: panes)
 
         var projects = Array(Set(panes.map(\.project))).sorted()
         let selectedProject: String
@@ -498,5 +511,86 @@ extension TelegramRulesView: NSTextViewDelegate {
     func textDidEndEditing(_ notification: Notification) {
         guard notification.object as? NSTextView === promptView else { return }
         formChanged()
+    }
+}
+
+// MARK: - Model
+
+/// One "a message arrived → put an agent on it" rule.
+///
+/// seahelm-gateway runs these (docs/seahelm-gateway-plan.md); Settings edits
+/// them over `gateway.sock` in this shape. This is the *signal* half of the
+/// Telegram bridge, and it is deliberately not the command half. A command (`/status`) is you talking to seahelm and gets
+/// an answer; a signal is a third party — an Aliyun alert, a CI text, a person —
+/// that you want to turn into work without answering it. So rules never reply,
+/// and they never create anything: they route text into a pane that already
+/// exists.
+struct TelegramRule: Codable, Equatable {
+    var name: String
+    var enabled: Bool?
+    /// Regex over the sender handle. Empty matches any sender.
+    var from: String?
+    /// Regex over the message body. Empty matches any body. Capture groups here
+    /// are what `{{1}}`… in the prompt interpolate.
+    var match: String?
+    /// The prompt injected into the target pane. Supports `{{text}}` (whole
+    /// message), `{{from}}` (sender), and `{{1}}`…`{{9}}` (capture groups).
+    var prompt: String
+    var target: TelegramRuleTarget
+
+    var isEnabled: Bool { enabled ?? true }
+
+    init(name: String = "",
+         enabled: Bool? = nil,
+         from: String? = nil,
+         match: String? = nil,
+         prompt: String = "",
+         target: TelegramRuleTarget = TelegramRuleTarget(kind: .worktree, value: "")) {
+        self.name = name
+        self.enabled = enabled
+        self.from = from
+        self.match = match
+        self.prompt = prompt
+        self.target = target
+    }
+}
+
+/// Where a rule sends its prompt. All three resolve to a pane that already
+/// exists — a rule may not spawn one.
+///
+/// The reason is blast radius: an alerting source can fire hundreds of times in
+/// a bad hour, and "create a worktree per alert" turns a noisy monitor into a
+/// disk-filling fork bomb. Routing into an existing pane makes the worst case a
+/// noisy pane.
+struct TelegramRuleTarget: Codable, Equatable {
+    enum Kind: String, Codable, CaseIterable {
+        /// A specific pane, by `SEAHELM_PANE_ID` (session key) or instance id.
+        case pane
+        /// Any pane in this worktree path.
+        case worktree
+        /// Any pane in this project (repo name or path).
+        case project
+    }
+
+    var kind: Kind
+    var value: String
+}
+
+extension TelegramRuleTarget {
+    /// The pane this target names among `panes`, or nil when nothing matches —
+    /// so the editor can show which pane a stored rule points at.
+    func resolvePane(in panes: [PaneSnapshot]) -> PaneSnapshot? {
+        let needle = value.trimmingCharacters(in: .whitespaces)
+        guard !needle.isEmpty else { return nil }
+        switch kind {
+        case .pane:
+            return panes.first { $0.paneSessionKey == needle || $0.paneId == needle }
+        case .worktree:
+            return panes.first { $0.worktreePath == needle }
+                ?? panes.first { ($0.worktreePath as NSString).lastPathComponent == needle }
+        case .project:
+            return panes.first { $0.project == needle }
+                ?? panes.first { ($0.project as NSString).lastPathComponent == needle }
+        }
     }
 }

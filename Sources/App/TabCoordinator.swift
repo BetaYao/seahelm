@@ -6,11 +6,6 @@ protocol TabCoordinatorDelegate: AnyObject {
     func tabCoordinatorRequestUpdateTitleBar(_ coordinator: TabCoordinator)
     func tabCoordinatorRequestShowNewBranchDialog(_ coordinator: TabCoordinator)
     func tabCoordinatorRequestClearContentContainer(_ coordinator: TabCoordinator)
-    /// A pane ended because the tier above it went away — its worktree was
-    /// deleted, its repo closed — rather than because someone closed it. The
-    /// window controller lets go of whatever was bound to it; `reason`
-    /// completes the sentence those conversations are told.
-    func tabCoordinator(_ coordinator: TabCoordinator, paneDidEnd terminalID: String, reason: String)
     /// Worktrees that discovery used to list and no longer does — removed
     /// outside seahelm, which for the `.worktrees/` checkouts an agent makes
     /// and unmakes itself is the normal way they go. The deletion paths inside
@@ -24,66 +19,9 @@ class TabCoordinator {
     var config: Config
     let workspaceManager = WorkspaceManager()
 
-    private var hostGatewayServer: HostGatewayServer?
-    /// Shared with Settings so "Refresh code" updates what live `auth` accepts.
-    private(set) var pairingCodeLive: LivePairingCode?
-    /// Every share link handed out. Outlives a gateway restart: a link is good
-    /// until it is revoked or runs out, not until the next settings change.
-    let shareLinks = ShareLinkStore()
-    private var pairRateLimiter: PairRateLimiter?
-    private var seahelmdVTAttachManager: SeahelmdVTAttachManager?
-    /// The live control data source. Also the pane lookup + write channel the
-    /// Telegram rule engine and Host Gateway dispatch through.
-    private(set) var mqttDataSource: ControlDataSource?
-    private var mailPaneRouter: MailPaneRouter?
-    /// Set by `MainWindowController`, which owns the command executor every
-    /// mail line is run through.
-    var commandRoute: MailPaneRouter.Route? {
-        didSet { mailPaneRouter?.route = commandRoute }
-    }
-    /// Which pane each chat and mail thread is talking to. Read by the
-    /// executor (through `MainWindowController`) and by the mail observer.
-    let commandSessions = CommandSessionStore()
-    private lazy var mailPaneObserver = MailPaneObserver(sessions: commandSessions)
-
-    /// The live "what it's doing right now" line in each bound Telegram chat.
-    /// Wired to the bridge here rather than in MainWindowController because
-    /// this is where the outcome stream already lands.
-    private(set) lazy var chatProgress: ChatProgressReporter = {
-        let reporter = ChatProgressReporter(sessions: commandSessions)
-        reporter.send = { chatId, text, done in
-            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
-                channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
-            ) { messageId in
-                // The bridge reports the id from its own send queue; the
-                // reporter's state belongs to main, where every outcome lands.
-                DispatchQueue.main.async { done(messageId) }
-            }
-        }
-        reporter.edit = { chatId, messageId, text in
-            ChannelHub.shared.editInChannel("telegram", chatId: chatId, messageId: messageId,
-                                               content: text)
-        }
-        reporter.remove = { chatId, messageId in
-            ChannelHub.shared.deleteInChannel("telegram", chatId: chatId, messageId: messageId)
-        }
-        reporter.draft = { chatId, text, canStop in
-            ChannelHub.shared.draftInChannel("telegram", chatId: chatId,
-                                                draftId: ChatProgressReporter.boardDraftId,
-                                                content: text, canStop: canStop)
-        }
-        // Rows are appended on main, in order with the outcomes that start and
-        // end the turn they belong to.
-        _ = CoreMessages.shared.subscribe { [weak reporter] message in
-            reporter?.ingest(message)
-        }
-        return reporter
-    }()
-
-    /// The live Telegram settings — the window's, which Settings edits; this
-    /// coordinator's own `config` copy is not kept in step with them. Read by
-    /// the Host Gateway when a Mini App signs in.
-    var telegramConfigProvider: (() -> TelegramConfig?)?
+    /// The live control data source: the pane lookup + write channel the
+    /// window reads pane snapshots through.
+    private(set) var controlDataSource: ControlDataSource?
 
     var activeTabIndex: Int = 0
     /// Every worktree across all repos. `tree` is optional because the tree is
@@ -206,8 +144,6 @@ class TabCoordinator {
         Fleet.shared.onChange = { [weak self] outcome in
             guard let self else { return }
             self.integration?.handle(outcome)
-            self.mailPaneObserver.ingest(outcome)
-            self.chatProgress.ingest(outcome)
             // Completions and notices are the core's to decide: `pane.notice`
             // (handleCoreNotice).
             // The worktree rows roll up their panes' statuses.
@@ -801,9 +737,13 @@ class TabCoordinator {
                             self.setUnseenCompletion(unseen, terminalID: terminalID)
                         case .connected(true):
                             self.reportVisibility()
+                        case .paneRegistered(let session, let path):
+                            self.adoptCoreSession(session, worktreePath: path)
+                        case .paneClosedByRequest(let session, _):
+                            self.removePaneEndedByRequest(paneSessionKey: session)
                         case .raw(let ev):
-                            // The app's own subscribers (the web, MQTT, the control
-                            // socket) hear the core's events as the core sent them.
+                            // The control socket's subscribers hear the core's
+                            // events as the core sent them.
                             EventHub.shared.publish(seq: (ev["seq"] as? NSNumber)?.uint64Value ?? 0, event: ev)
                         default:
                             break
@@ -811,30 +751,6 @@ class TabCoordinator {
                     }
                     self.cards.start()
                     CoreClient.shared.start()
-                    self.mailPaneRouter = MailPaneRouter(sessions: self.commandSessions, accountEmail: self.config.gmailMail?.accountEmail)
-                    self.mailPaneRouter?.route = self.commandRoute
-                    if let account = self.config.gmailMail?.accountEmail {
-                        let sender = GmailRESTMailSender(account: account)
-                        self.mailPaneObserver.onIntent = { intent, commander in
-                            sender.send(intent, to: commander?.isEmpty == false ? commander! : account) { _ in }
-                        }
-                        // Command replies ride the same in-thread sender as
-                        // status mail, but skip the intent store: a reply is
-                        // already idempotent per inbound mail, and persisting
-                        // one would have it retried after it was answered.
-                        // Echo the subject the thread already carries. Gmail
-                        // threads on `threadId`, but clients group on subject
-                        // too, and nothing parses it any more — the recipient
-                        // alias is the whole gate.
-                        self.mailPaneRouter?.onReply = { body, threadID, subject, replyTo in
-                            let replySubject = subject.isEmpty ? "Seahelm"
-                                : (subject.lowercased().hasPrefix("re:") ? subject : "Re: \(subject)")
-                            sender.send(OutboundMailIntent(id: UUID().uuidString, threadID: threadID, paneSessionKey: "",
-                                                           sequence: 0, kind: .reply, subject: replySubject,
-                                                           body: body, state: "pending"),
-                                        to: replyTo.isEmpty ? account : replyTo) { _ in }
-                        }
-                    }
                     controlDataSource.splitHandler = { [weak self] targetStationId, axis, focus in
                         guard let self, self.preparePaneControlTarget(targetStationId) else { return nil }
                         return self.terminalCoordinator.splitPane(
@@ -942,94 +858,11 @@ class TabCoordinator {
                     if !DebugFlags.forceEmptyState {
                         control.start()
                         self.terminalCoordinator.controlSocketServer = control
-                        // Host Gateway shares the control socket's dataSource.
-                        self.mqttDataSource = controlDataSource
-                        self.setupHostGateway(dataSource: controlDataSource)
+                        self.controlDataSource = controlDataSource
                     }
                 }
             }
         }
-    }
-
-    /// Localhost WebSocket gateway for browser clients when `config.hostGateway` is enabled.
-    private func setupHostGateway(dataSource: ControlDataSource) {
-        guard config.hostGateway?.resolvedEnabled == true else { return }
-        guard hostGatewayServer == nil else { return }
-        guard var hgConfig = config.hostGateway else { return }
-
-        if config.pairing == nil { config.pairing = PairingIdentity() }
-        let mqtt = config.pairing!
-        let macId = mqtt.macId ?? PairingIdentity.deriveMacId()
-        let rootB64 = mqtt.rootSecret ?? ""
-
-        var store = PairingCodeStore(code: hgConfig.pairCode)
-        let ensured = store.ensureCode()
-        if hgConfig.pairCode != ensured {
-            hgConfig.pairCode = ensured
-            config.hostGateway = hgConfig
-            Config.persistPairCode(ensured)
-        }
-        let live = LivePairingCode(store: store)
-        live.onChange = { [weak self] updated in
-            guard let self, let code = updated.code else { return }
-            self.config.hostGateway?.pairCode = code
-            Config.persistPairCode(code)
-        }
-        pairingCodeLive = live
-        let limiter = PairRateLimiter()
-        pairRateLimiter = limiter
-
-        let vt = SeahelmdVTAttachManager()
-        seahelmdVTAttachManager = vt
-        let server = HostGatewayServer(
-            config: hgConfig,
-            router: ControlRouter(dataSource: dataSource),
-            expectedMacId: macId,
-            rootSecretBase64url: rootB64,
-            vt: vt,
-            pairingCode: live,
-            rateLimiter: limiter,
-            shareLinks: shareLinks,
-            telegram: { [weak self] in self?.telegramConfigProvider?() })
-        server.start()
-        hostGatewayServer = server
-        // A revoke drops the pages open on that link now, not at the next ping.
-        shareLinks.onChange = { [weak self] in self?.hostGatewayServer?.enforceShareLinks() }
-        NSLog("[TabCoordinator] Host Gateway started port=\(hgConfig.resolvedPort) pair=\(hgConfig.resolvedPublicURL)")
-    }
-
-    private func stopHostGateway() {
-        hostGatewayServer?.stop()
-        hostGatewayServer = nil
-        seahelmdVTAttachManager = nil
-        pairingCodeLive = nil
-        pairRateLimiter = nil
-    }
-
-    func teardownRemoteBackends() {
-        stopHostGateway()
-    }
-
-    /// Rebuild the gateway after pairing mints a new root secret, or after
-    /// Settings changes what the listener itself is built from (enabled, port,
-    /// web root). Editing the public URL does not come through here: it only
-    /// feeds the pair link, and restarting on it would drop live browsers.
-    func reloadHostGateway() {
-        stopHostGateway()
-        if let ds = mqttDataSource { setupHostGateway(dataSource: ds) }
-    }
-
-    /// Whether the public listener is actually up. The Settings toggle records
-    /// intent; a port already in use fails the bind, and the page should be able
-    /// to say so rather than imply the switch proved anything.
-    var hostGatewayIsListening: Bool { hostGatewayServer?.isListening ?? false }
-
-    /// Apply a freshly-minted pairing secret to the *live* config and reload
-    /// Host Gateway so auth picks up the new root — no app restart needed.
-    func applyMqttRootSecret(_ secret: String) {
-        if config.pairing == nil { config.pairing = PairingIdentity() }
-        config.pairing?.rootSecret = secret
-        reloadHostGateway()
     }
 
     // MARK: - Shared Worktree Integration
@@ -1282,15 +1115,16 @@ class TabCoordinator {
             DispatchQueue.main.async {
                 guard let self, started else { completion(.failure(.launchFailed)); return }
                 NSLog("[TabCoordinator] Forked pane \(stationId) into \(destination.path) as \(name)")
-                completion(.success(self.installForkedPane(sessionName: name, in: destination, reveal: reveal)))
+                completion(.success(self.installPane(sessionName: name, in: destination, reveal: reveal)))
             }
         }
     }
 
     /// File a new pane on an already-running seahelmd session in `destination`, and
-    /// bring it on screen. A placeholder the worktree was standing on is retired
-    /// rather than split beside. Returns the new station id.
-    private func installForkedPane(sessionName: String, in destination: WorktreeInfo, reveal: Bool) -> String {
+    /// bring it on screen when `reveal`. A placeholder the worktree was standing on
+    /// is retired rather than split beside. Returns the new station id.
+    @discardableResult
+    private func installPane(sessionName: String, in destination: WorktreeInfo, reveal: Bool) -> String {
         let manager = terminalCoordinator.stationManager
         retirePlaceholderPane(at: destination.path)
 
@@ -1470,11 +1304,8 @@ class TabCoordinator {
             workspaceManager.updateWorktrees(at: tabIndex, worktrees: remaining)
         }
         // Unregister EVERY pane of the worktree (split worktrees have N agents;
-        // taking just the first leaked the rest for the app's lifetime), and
-        // let go of what each was bound to first — the pane is as gone as one
-        // somebody closed, and only this path knows why.
+        // taking just the first leaked the rest for the app's lifetime).
         for terminalID in Fleet.shared.terminalIDs(forWorktree: info.path) {
-            delegate?.tabCoordinator(self, paneDidEnd: terminalID, reason: "the worktree was deleted")
             Fleet.shared.unregister(terminalID: terminalID)
         }
         WorktreeTitleCache.shared.evict(worktreePath: info.path)
@@ -1512,11 +1343,9 @@ class TabCoordinator {
             // Unregister EVERY pane of the worktree, not just the first pane.
             let ids = Fleet.shared.terminalIDs(forWorktree: worktree.path)
             if ids.isEmpty, let primaryStation {
-                delegate?.tabCoordinator(self, paneDidEnd: primaryStation.id, reason: "the repo was closed")
                 Fleet.shared.unregister(terminalID: primaryStation.id)
             } else {
                 for id in ids {
-                    delegate?.tabCoordinator(self, paneDidEnd: id, reason: "the repo was closed")
                     Fleet.shared.unregister(terminalID: id)
                 }
             }
@@ -2081,9 +1910,68 @@ class TabCoordinator {
     }
 }
 
+// MARK: - Panes the core starts and ends
+
 extension TabCoordinator {
-    func routeMail(message: GmailInboundMessage) {
-        mailPaneRouter?.route(message: message, text: message.bodyText)
+    /// seahelm-core registered a pane. One the app synced itself is already
+    /// here and is ignored; a session the core started (`pane.new`, the web's
+    /// "new pane") in a worktree the app shows joins that worktree's tree as a
+    /// new split leaf attached to the running session — the same path a fork
+    /// takes — without taking focus. A worktree with no tree yet takes the
+    /// session as its first pane when it is opened (`CoreLink`'s adoptable
+    /// sessions), so it is left alone here.
+    func adoptCoreSession(_ paneSessionKey: String, worktreePath: String) {
+        guard runtimeBackend != "local", !paneSessionKey.isEmpty,
+              paneSessionKey != FirstMatePane.sessionName,
+              StationRegistry.shared.station(forSessionName: paneSessionKey) == nil else { return }
+        let manager = terminalCoordinator.stationManager
+        guard !manager.claimedSessionNames.contains(paneSessionKey) else { return }
+        let wanted = WorktreeDiscovery.canonicalPath(worktreePath)
+        guard let info = allWorktrees.first(where: { WorktreeDiscovery.canonicalPath($0.info.path) == wanted })?.info,
+              let tree = manager.tree(forPath: info.path) else { return }
+        let focused = tree.focusedId
+        installPane(sessionName: paneSessionKey, in: info, reveal: false)
+        // `adopt` points the tree at the new leaf; the user was looking at
+        // another one, and stays there.
+        if let after = manager.tree(forPath: info.path), after.root.findLeaf(id: focused) != nil {
+            after.focusedId = focused
+            terminalCoordinator.saveSplitLayout(after)
+        }
+        NSLog("[TabCoordinator] Adopted core session \(paneSessionKey) into \(info.path)")
+    }
+
+    /// seahelm-core ended a pane because a client asked (`pane.close`): take
+    /// its leaf down without the close-last-pane prompt and without killing
+    /// anything — the session is already gone. The station is marked first so
+    /// its health check cannot read the dead session as one to recreate.
+    func removePaneEndedByRequest(paneSessionKey: String) {
+        guard !paneSessionKey.isEmpty,
+              let station = StationRegistry.shared.station(forSessionName: paneSessionKey) else { return }
+        station.sessionEndedElsewhere = true
+        let manager = terminalCoordinator.stationManager
+        guard let (tree, leafId) = manager.locate(stationId: station.id) else { return }
+        let path = tree.worktreePath
+        AgentSessionRef.forget(paneSessionKey)
+        Fleet.shared.unregister(terminalID: station.id)
+        if tree.leafCount > 1 {
+            _ = tree.removeLeaf(id: leafId)
+            station.view?.removeFromSuperview()
+            station.destroy()
+            StationRegistry.shared.unregister(station.id)
+            terminalCoordinator.saveSplitLayout(tree)
+            dashboardVC?.invalidateSplitContainer(forPath: path)
+            dashboardVC?.updatePanes(buildWorktreeRowInfos())
+            statusAggregator.sync(trees: manager.all)
+            delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+        } else {
+            terminalCoordinator.config.splitLayouts.removeValue(forKey: path)
+            terminalCoordinator.config.focusedPaneIds.removeValue(forKey: path)
+            terminalCoordinator.config.save()
+            manager.removeTree(forPath: path)
+            delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+            worktreeSessionDidEnd(path)
+        }
+        NSLog("[TabCoordinator] Pane \(paneSessionKey) closed by request; leaf removed")
     }
 }
 

@@ -117,8 +117,6 @@ targets:
       - sdk: AVFoundation.framework
       - sdk: CoreMedia.framework
       - sdk: QuickLookUI.framework
-      # The Telegram bridge's transport (`CurlClient`).
-      - sdk: libcurl.tbd
     preBuildScripts:
       - name: "Embed and sign seahelmd"
         basedOnDependencyAnalysis: false
@@ -132,7 +130,8 @@ targets:
             TS="--timestamp"
             [ "${CONFIGURATION:-Debug}" = "Debug" ] && TS="--timestamp=none"
             codesign --force --options runtime $TS \
-              --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${RES}/seahelmd" "${RES}/seahelm-core"
+              --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${RES}/seahelmd" "${RES}/seahelm-core" \
+              "${RES}/seahelm" "${RES}/seahelm-gateway"
           fi
     postBuildScripts:
       # libghostty derives TERMINFO as a SIBLING of GHOSTTY_RESOURCES_DIR
@@ -147,7 +146,7 @@ targets:
           RES="${CODESIGNING_FOLDER_PATH}/Contents/Resources"
           rm -rf "${RES}/terminfo"
           cp -R "${RES}/ghostty/terminfo" "${RES}/terminfo"
-      # HostGatewayServer serves this directory at `/`, same origin as `/ws`.
+      # seahelm-gateway serves this directory at `/`, same origin as `/ws`.
       # Copied by script rather than as a folder reference because devbroker/ is
       # a 17MB dev-only MQTT harness that has no business in the shipped bundle.
       - name: "Bundle seahelm-web client"

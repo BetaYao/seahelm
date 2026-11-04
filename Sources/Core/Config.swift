@@ -26,15 +26,6 @@ struct Config: Codable {
     /// from agent hook events; used to relaunch the agent (e.g. `claude
     /// --resume <id>`) when a backend session is recreated instead of falling
     /// back to a plain shell.
-    /// Pairing identity for Host Gateway (`root_secret` / `mac_id`). Broker
-    /// fields are legacy and ignored — MQTT publisher was removed.
-    /// Pairing identity. The JSON key stays `mqtt` — see `PairingIdentity`.
-    var pairing: PairingIdentity?
-    var telegram: TelegramConfig?
-    /// Gmail email channel configuration. OAuth credentials are held separately
-    /// in Keychain, so this remains safe to serialize to config.json.
-    var gmailMail: GmailMailConfig?
-    var hostGateway: HostGatewayConfig?
     /// Whether the integration checkout exists as a concept at all: its button,
     /// its banner, its panel, `/integrate`, and the automatic rounds. Off hides
     /// the feature entirely without deleting any checkout already on disk.
@@ -105,10 +96,6 @@ struct Config: Codable {
         case selectedWorktreePath = "selected_worktree_path"
         case activeWorktreePaths = "active_worktree_paths"
         case focusedPaneIds = "focused_pane_ids"
-        case pairing = "mqtt"
-        case telegram
-        case gmailMail = "gmail_mail"
-        case hostGateway = "host_gateway"
         case notifications
         case islandEnabled = "island_enabled"
         case autopilotEnabled = "autopilot_enabled"
@@ -149,10 +136,6 @@ struct Config: Codable {
         selectedWorktreePath = nil
         activeWorktreePaths = [:]
         focusedPaneIds = [:]
-        pairing = nil
-        telegram = nil
-        gmailMail = nil
-        hostGateway = nil
         notifications = NotificationConfig()
         islandEnabled = true
         autopilotEnabled = false
@@ -196,10 +179,6 @@ struct Config: Codable {
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
         focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
-        pairing = try container.decodeIfPresent(PairingIdentity.self, forKey: .pairing)
-        telegram = try container.decodeIfPresent(TelegramConfig.self, forKey: .telegram)
-        gmailMail = try container.decodeIfPresent(GmailMailConfig.self, forKey: .gmailMail)
-        hostGateway = try container.decodeIfPresent(HostGatewayConfig.self, forKey: .hostGateway)
         notifications = try container.decodeIfPresent(NotificationConfig.self, forKey: .notifications) ?? NotificationConfig()
         islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
         autopilotEnabled = try container.decodeIfPresent(Bool.self, forKey: .autopilotEnabled) ?? false
@@ -329,63 +308,8 @@ struct Config: Codable {
     private static let saveQueue = DispatchQueue(label: "com.seahelm.config-save", qos: .utility)
     private static let pendingSaveLock = NSLock()
     private static var pendingSaveWorkItem: DispatchWorkItem?
-    /// The config the pending debounced write will persist. Kept so a later
-    /// `save()` from a stale coordinator copy can keep secrets (telegram token,
-    /// gmail, mqtt) that this writer never carried.
-    private static var pendingSaveConfig: Config?
-    /// Identity of the currently scheduled debounced write — used so a finishing
-    /// write does not clear a newer pendingSaveConfig.
+    /// Identity of the currently scheduled debounced write.
     private static var pendingSaveGeneration = UUID()
-
-    /// Fields owned by Settings (and similar) that a layout/activity save must
-    /// not erase. `nil` on the writer means "I never heard of this", not "clear
-    /// it" — a deliberate clear writes an empty struct (non-nil).
-    func preservingSettingsOwnedSecrets(from other: Config?) -> Config {
-        guard let other else { return self }
-        var out = self
-        if out.telegram == nil { out.telegram = other.telegram }
-        if out.gmailMail == nil { out.gmailMail = other.gmailMail }
-        if out.pairing == nil { out.pairing = other.pairing }
-        if out.hostGateway == nil { out.hostGateway = other.hostGateway }
-        // The pairing code has one writer, `persistPairCode`, which puts it on
-        // disk at once. Every other copy of the config — the window's, the
-        // coordinator's, Settings' — may hold an older code, and writing it back
-        // silently undid a refreshed or chosen code at the next launch.
-        if out.hostGateway != nil, let code = other.hostGateway?.pairCode {
-            out.hostGateway?.pairCode = code
-        }
-        return out
-    }
-
-    /// Put the pairing code on disk now, and only it. Ordinary saves then keep
-    /// whatever this wrote (see `preservingSettingsOwnedSecrets`), including a
-    /// debounced save already queued with an older copy.
-    static func persistPairCode(_ code: String) {
-        guard !DebugFlags.forceEmptyState else { return }
-        saveQueue.sync {
-            // No readable file: nothing on disk to override, so the owner's
-            // next ordinary save carries the code.
-            guard var disk = diskSnapshot() else { return }
-            if disk.hostGateway == nil { disk.hostGateway = HostGatewayConfig() }
-            disk.hostGateway?.pairCode = code
-            do {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                try encoder.encode(disk).write(to: configPath, options: .atomic)
-            } catch {
-                NSLog("Failed to save pairing code: \(error)")
-            }
-        }
-    }
-
-    /// Disk snapshot for merge-on-write. Nil when the file is missing or undecodable —
-    /// callers then write `self` as-is.
-    private static func diskSnapshot() -> Config? {
-        guard FileManager.default.fileExists(atPath: configPath.path),
-              let data = try? Data(contentsOf: configPath),
-              let disk = try? JSONDecoder().decode(Config.self, from: data) else { return nil }
-        return disk
-    }
 
     /// Synchronous write. Use when a later `Config.load()` on this same turn of
     /// the run loop must observe the change — the debounced `save()` would still
@@ -395,20 +319,35 @@ struct Config: Codable {
         Config.pendingSaveLock.lock()
         Config.pendingSaveWorkItem?.cancel()
         Config.pendingSaveWorkItem = nil
-        let pending = Config.pendingSaveConfig
-        Config.pendingSaveConfig = nil
         Config.pendingSaveGeneration = UUID()
         Config.pendingSaveLock.unlock()
-        let toWrite = preservingSettingsOwnedSecrets(from: pending)
-            .preservingSettingsOwnedSecrets(from: Config.diskSnapshot())
+        let toWrite = self
         do {
             try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            Config.keepPreGatewayCopy()
             try encoder.encode(toWrite).write(to: Config.configPath, options: .atomic)
         } catch {
             NSLog("Failed to save config: \(error)")
         }
+    }
+
+    /// The keys seahelm-gateway imports on its first start (`mqtt`,
+    /// `host_gateway`, `telegram`) are no longer written here, so the first
+    /// save would drop them. Until the gateway has imported, the file as it
+    /// was is kept beside it as `config.pre-gateway.json`, which the import
+    /// reads first. Never overwritten once made.
+    static func keepPreGatewayCopy() {
+        let fm = FileManager.default
+        let copy = configDir.appendingPathComponent("config.pre-gateway.json")
+        guard !fm.fileExists(atPath: configDir.appendingPathComponent("gateway/config.json").path),
+              !fm.fileExists(atPath: copy.path),
+              let data = try? Data(contentsOf: configPath),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              ["mqtt", "host_gateway", "telegram"].contains(where: { obj[$0] != nil }) else { return }
+        try? data.write(to: copy, options: .atomic)
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copy.path)
     }
 
     func save() {
@@ -419,25 +358,15 @@ struct Config: Codable {
         // Debounced async save: coalesces rapid saves into a single write.
         // The pending-item swap is lock-protected — save() has many call sites
         // and an unsynchronized cancel/reassign race can drop a save.
-        //
-        // Merge secrets from the canceled pending write *and* from disk so a
-        // TerminalCoordinator layout save (Config is a value type per owner)
-        // cannot wipe a Telegram token Settings just scheduled.
-        Config.pendingSaveLock.lock()
-        let previousPending = Config.pendingSaveConfig
-        Config.pendingSaveLock.unlock()
-        let configCopy = preservingSettingsOwnedSecrets(from: previousPending)
-            .preservingSettingsOwnedSecrets(from: Config.diskSnapshot())
+        let configCopy = self
         let generation = UUID()
         let workItem = DispatchWorkItem {
             do {
                 try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                // Re-merge disk at write time: another saveNow may have landed
-                // secrets since this item was scheduled.
-                let toWrite = configCopy.preservingSettingsOwnedSecrets(from: Config.diskSnapshot())
-                let data = try encoder.encode(toWrite)
+                let data = try encoder.encode(configCopy)
+                Config.keepPreGatewayCopy()
                 try data.write(to: Config.configPath, options: .atomic)
             } catch {
                 NSLog("Failed to save config: \(error)")
@@ -445,14 +374,12 @@ struct Config: Codable {
             Config.pendingSaveLock.lock()
             if Config.pendingSaveGeneration == generation {
                 Config.pendingSaveWorkItem = nil
-                Config.pendingSaveConfig = nil
             }
             Config.pendingSaveLock.unlock()
         }
         Config.pendingSaveLock.lock()
         Config.pendingSaveWorkItem?.cancel()
         Config.pendingSaveWorkItem = workItem
-        Config.pendingSaveConfig = configCopy
         Config.pendingSaveGeneration = generation
         Config.pendingSaveLock.unlock()
         Config.saveQueue.asyncAfter(deadline: .now() + 0.3, execute: workItem)

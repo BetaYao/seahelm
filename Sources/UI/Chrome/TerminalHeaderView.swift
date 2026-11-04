@@ -349,23 +349,38 @@ final class TerminalHeaderView: NSView {
     }
 
     @objc private func shareClicked() {
-        guard let sharing = paneSharing,
-              let offer = sharing.shareFocusedPane(lifetime: ShareLinkLifetime.lastChosen) else {
+        guard let sharing = paneSharing else {
             NSSound.beep()
             return
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(offer.url, forType: .string)
-        presentSharePopover(offer, sharing: sharing)
+        shareButton.isEnabled = false
+        sharing.shareFocusedPane(lifetime: ShareLinkLifetime.lastChosen) { [weak self] result in
+            guard let self else { return }
+            self.shareButton.isEnabled = true
+            switch result {
+            case .success(let offer):
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(offer.url, forType: .string)
+                self.presentSharePopover(offer, sharing: sharing)
+            case .failure(let failure):
+                self.presentPopover(ShareUnavailableController(message: GatewayClient.describe(failure)))
+            }
+        }
     }
 
     private func presentSharePopover(_ offer: PaneShareOffer, sharing: PaneSharing) {
         let controller = SharePopoverController(offer: offer, sharing: sharing)
+        let popover = presentPopover(controller)
+        controller.dismiss = { [weak popover] in popover?.performClose(nil) }
+    }
+
+    @discardableResult
+    private func presentPopover(_ controller: NSViewController) -> NSPopover {
         let popover = NSPopover()
         popover.contentViewController = controller
         popover.behavior = .transient
-        controller.dismiss = { [weak popover] in popover?.performClose(nil) }
         popover.show(relativeTo: shareButton.bounds, of: shareButton, preferredEdge: .minY)
+        return popover
     }
 
     private func configureExpandButton() {

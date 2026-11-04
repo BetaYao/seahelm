@@ -39,6 +39,20 @@ pub fn ensure() {
         Ok(out) => eprintln!("seahelm-gpui: seahelm-core install-hooks: {}", String::from_utf8_lossy(&out.stderr).trim()),
         Err(e) => eprintln!("seahelm-gpui: seahelm-core install-hooks: {e}"),
     }
+    ensure_gateway();
+}
+
+/// Start seahelm-gateway (web access and Telegram,
+/// docs/seahelm-gateway-plan.md) unless it runs already. It does nothing
+/// until web access or Telegram is turned on in its settings
+/// (`seahelm-gateway call gateway.config.set …`).
+fn ensure_gateway() {
+    let gateway = crate::platform::tool("seahelm-gateway", "SEAHELM_GATEWAY_BIN");
+    match std::process::Command::new(gateway).arg("ensure").status() {
+        Ok(s) if s.success() => {}
+        Ok(s) => eprintln!("seahelm-gpui: seahelm-gateway ensure exited {s}"),
+        Err(e) => eprintln!("seahelm-gpui: cannot start seahelm-gateway ({e}); no web access or Telegram"),
+    }
 }
 
 pub fn call(method: &str, params: Value) -> Result<Value, String> {

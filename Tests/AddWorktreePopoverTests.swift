@@ -62,7 +62,7 @@ final class AddWorktreePopoverTests: XCTestCase {
         controller.submitForTesting()
         XCTAssertEqual(
             submitted,
-            TelegramInboundMedia.composeOrderText(
+            PasteMedia.composeOrderText(
                 paths: [URL(fileURLWithPath: "/tmp/shot-b.png")],
                 caption: "fix this layout"))
     }
@@ -91,7 +91,7 @@ final class AddWorktreePopoverTests: XCTestCase {
 
         XCTAssertEqual(
             submitted,
-            TelegramInboundMedia.composeOrderText(
+            PasteMedia.composeOrderText(
                 paths: [URL(fileURLWithPath: "/tmp/shot-a.png")],
                 caption: nil))
         XCTAssertNil(controller.errorTextForTesting)

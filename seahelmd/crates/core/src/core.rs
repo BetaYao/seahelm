@@ -328,8 +328,8 @@ impl Core {
                 let Some(r) = registration(&p) else {
                     return Reply::Value(Err(RpcError::invalid_params("pane and worktree_path required")));
                 };
-                let mut st = self.lock();
-                st.register(r);
+                self.lock().register(r);
+                self.changed.notify_all();
                 Ok(json!({}))
             }
             "pane.unregister" => {
@@ -342,8 +342,8 @@ impl Core {
             }
             "pane.sync" => {
                 let panes = p.get("panes").and_then(Value::as_array).cloned().unwrap_or_default();
-                let mut st = self.lock();
-                let n = st.sync(&panes);
+                let n = self.lock().sync(&panes);
+                self.changed.notify_all();
                 Ok(json!({"panes": n}))
             }
             "client.visible" => {
@@ -435,7 +435,8 @@ impl Core {
             "pane.wait_agent_status" | "wait.agent_status" => self.wait_status(&p),
             "usage.summary" => Ok(crate::usage::summary(now)),
             "cards.list" => Ok(json!({"cards": self.lock().cards.to_json()})),
-            "pane.read" | "pane.run" | "pane.send_text" | "pane.send_keys" | "worktree.create" | "worktree.delete" => self.act(method, &p),
+            "pane.read" | "pane.run" | "pane.send_text" | "pane.send_keys" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
+            "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             "autopilot.state" => Ok(match self.first_mate.get() {
                 Some(fm) => fm.state(),
                 None => json!({"enabled": false, "owner": "core"}),
@@ -607,7 +608,7 @@ impl Core {
             let answer = st.cards.answer(&id, &label, screen.as_deref(), now).map_err(RpcError::invalid_params)?;
             st.publish_cards();
             if let Answer::Raised { card, option } = &answer {
-                st.registry.publish(json!({"type": "card.answered", "card": card.to_json(), "option": option}));
+                st.registry.publish(json!({"type": "card.answered", "card": card.to_json(), "option": option, "via": via(p)}));
                 if let (Some(fm), Some(payload)) = (&st.first_mate, &card.payload) {
                     fm.send(first_mate::Msg::Answered { payload: payload.clone(), option: Some(option.clone()) });
                 }
@@ -821,6 +822,8 @@ impl Core {
             "pane.send_keys" => crate::actions::pane_send_keys(self, p),
             "worktree.create" => crate::actions::worktree_create(self, p),
             "worktree.delete" => crate::actions::worktree_delete(self, p),
+            "pane.new" => crate::actions::pane_new(self, p),
+            "pane.close" => crate::actions::pane_close(self, p),
             other => Err(RpcError::not_found(other)),
         }
     }
@@ -835,6 +838,29 @@ impl Core {
 
     pub fn register_pane(&self, r: Registration) {
         self.lock().register(r);
+        self.changed.notify_all();
+    }
+
+    /// Forget a pane a client asked to close: its `pane.closed` says so.
+    pub fn close_pane(&self, pane: &str) {
+        let mut st = self.lock();
+        if st.registry.pane(pane).is_some() {
+            st.registry.mark_closing(pane);
+            st.unregister(pane);
+        }
+        drop(st);
+        self.changed.notify_all();
+    }
+
+    /// The pane's registration as `pane.list` shows it.
+    pub fn pane_row(&self, pane: &str) -> Option<Value> {
+        self.lock().registry.pane_json(pane)
+    }
+
+    /// Publish an event of the core's own (First Mate's audit lines).
+    pub fn publish_event(&self, event: Value) {
+        self.lock().registry.publish(event);
+        self.changed.notify_all();
     }
 
     pub fn unregister_pane(&self, pane: &str) {
@@ -1055,6 +1081,11 @@ impl State {
         self.registry.register(r);
         self.aggregator.register_pane(&pane, &worktree, leaf);
         self.panes.entry(pane.clone()).or_insert_with(|| PaneScan { scanner: PaneScanner::for_pane(&pane), ..PaneScan::default() });
+        // So a client that did not register it (the app, for a session the
+        // web started) can show it.
+        if let Some(v) = self.registry.pane_json(&pane) {
+            self.registry.publish(json!({"type": "pane.registered", "pane_session_key": pane, "pane_id": v["pane_id"], "worktree_path": worktree, "pane": v}));
+        }
     }
 
     fn unregister(&mut self, pane: &str) {
@@ -1556,6 +1587,12 @@ fn registration(p: &Value) -> Option<Registration> {
 /// Seconds since the epoch, for the event log.
 fn wall_clock() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
+}
+
+/// Who a call says it is for (`_meta.via`: `web:Safari on iPhone`,
+/// `telegram:@name`). Recorded, never trusted for anything.
+pub fn via(p: &Value) -> Value {
+    p.get("_meta").and_then(|m| m.get("via")).filter(|v| v.is_string()).cloned().unwrap_or(Value::Null)
 }
 
 /// The first line of `text`, at most `max` characters.

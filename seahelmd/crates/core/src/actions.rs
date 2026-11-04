@@ -375,3 +375,123 @@ mod tests {
         assert_eq!(key_bytes("hyper+q"), None);
     }
 }
+
+/// `worktree.options`: what a remote "new worktree" form offers — the repos
+/// of the worktrees clients list, and the agents on PATH.
+pub fn worktree_options(core: &Core) -> Value {
+    let mut repos: Vec<Value> = core
+        .repos()
+        .into_iter()
+        .map(|path| {
+            let name = Path::new(&path).file_name().and_then(|n| n.to_str()).unwrap_or(&path).to_string();
+            json!({"name": name, "path": path})
+        })
+        .collect();
+    repos.sort_by_key(|r| r["name"].as_str().unwrap_or("").to_lowercase());
+    let agents: Vec<Value> = [("claudeCode", "claude", "Claude Code"), ("codex", "codex", "Codex")]
+        .into_iter()
+        .filter(|(_, bin, _)| on_path(bin))
+        .map(|(id, _, label)| json!({"id": id, "label": label}))
+        .collect();
+    json!({"repos": repos, "agents": agents})
+}
+
+fn on_path(bin: &str) -> bool {
+    let exe = format!("{bin}{}", std::env::consts::EXE_SUFFIX);
+    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|d| d.join(&exe).is_file()))
+}
+
+/// `pane.new {worktree_path | pane_session_key, agent_type?}`: a new
+/// session in that worktree (the user's shell, or the agent), registered
+/// here. Where it goes on screen is up to whoever draws the worktree: the
+/// app files it as a new split leaf when it hears `pane.registered`.
+pub fn pane_new(core: &Core, p: &Value) -> RpcResult {
+    let mut worktree = s(p, "worktree_path");
+    let mut like: Option<Value> = None;
+    if worktree.is_empty() {
+        let hint = s(p, "pane_session_key");
+        let hint = if hint.is_empty() { s(p, "pane_id") } else { hint };
+        let pane = core.resolve_pane(&hint).ok_or_else(|| RpcError::invalid_params("worktree_path or a known pane required"))?;
+        like = core.pane_row(&pane);
+        worktree = like.as_ref().and_then(|r| r["worktree_path"].as_str()).unwrap_or_default().to_string();
+    }
+    let dir = PathBuf::from(&worktree);
+    if worktree.is_empty() || !dir.is_dir() {
+        return Err(RpcError::invalid_params("no such worktree"));
+    }
+    if like.is_none() {
+        like = core.panes_in_worktree(&worktree).first().and_then(|k| core.pane_row(k));
+    }
+    let agent = match s(p, "agent_type").as_str() {
+        "" | "shell" => None,
+        "claudeCode" => Some(AgentType::ClaudeCode),
+        "codex" => Some(AgentType::Codex),
+        other => return Err(RpcError::invalid_params(format!("agent_type {other} cannot be launched"))),
+    };
+    let base = gpui_session_name(&worktree);
+    let session = (2..1000)
+        .map(|n| format!("{base}-{n}"))
+        .find(|name| core.pane_row(name).is_none() && seahelmd::client::socket_path(name).map(|p| !p.exists()).unwrap_or(false))
+        .ok_or_else(|| RpcError::internal("no free session name"))?;
+    let launch = agent.and_then(|a| {
+        let (bin, flag) = match a {
+            AgentType::ClaudeCode => ("claude", "--dangerously-skip-permissions"),
+            _ => ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+        };
+        Some(if crate::first_mate::UserConfig::load().agent_yolo { format!("{bin} {flag}") } else { bin.to_string() })
+    });
+    start_plain_session(&session, &dir, launch.as_deref()).map_err(RpcError::internal)?;
+    let field = |k: &str| like.as_ref().and_then(|r| r[k].as_str()).unwrap_or_default().to_string();
+    let project = Some(field("project")).filter(|p| !p.is_empty()).unwrap_or_else(|| {
+        git(&dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
+            .and_then(|c| Path::new(c.trim()).parent().and_then(|r| r.file_name()).map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_default()
+    });
+    core.register_pane(Registration {
+        pane: session.clone(),
+        alias: None,
+        worktree_path: worktree.clone(),
+        project,
+        branch: field("branch"),
+        agent_type: agent.unwrap_or_default(),
+        started_at: Some(seahelm_core_types::now()),
+    });
+    Ok(json!({"pane_session_key": session, "worktree_path": worktree}))
+}
+
+/// The user's login shell, or `<agent>; exec <shell> -l`, held for a client.
+fn start_plain_session(session: &str, dir: &Path, launch: Option<&str>) -> Result<(), String> {
+    let mut cmd = std::process::Command::new(seahelmd_bin());
+    cmd.current_dir(dir).env("SEAHELM_PANE_ID", session).args(["new", "--hold", "15", session, "--"]);
+    #[cfg(unix)]
+    {
+        let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
+        match launch {
+            Some(l) => cmd.args([shell.as_str(), "-lic", &format!("{l}; exec {} -l", shell_quote(&shell))]),
+            None => cmd.args([shell.as_str(), "-l"]),
+        };
+    }
+    #[cfg(windows)]
+    match launch {
+        Some(l) => cmd.args(["cmd.exe", "/k", l]),
+        None => cmd.args(["cmd.exe"]),
+    };
+    let out = cmd.output().map_err(|e| format!("seahelmd new: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("seahelmd new: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(())
+}
+
+/// `pane.close {pane}`: its session ended and the pane forgotten, with
+/// `pane.closed {by_request: true}` so the client drawing it removes it.
+pub fn pane_close(core: &Core, p: &Value) -> RpcResult {
+    let hint = ["pane", "pane_session_key", "pane_id"].iter().map(|k| s(p, k)).find(|h| !h.is_empty()).ok_or_else(|| RpcError::invalid_params("pane required"))?;
+    let pane = core.resolve_pane(&hint).ok_or_else(|| RpcError::invalid_params("unknown pane"))?;
+    if pane == crate::first_mate::policy::SESSION {
+        return Err(RpcError::invalid_params("First Mate's session is not closed this way"));
+    }
+    let _ = seahelmd::client::request(&pane, &Msg::Kill);
+    core.close_pane(&pane);
+    Ok(json!({"closed": true, "pane_session_key": pane}))
+}

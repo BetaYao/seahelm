@@ -306,11 +306,11 @@ final class AddWorktreePopoverController: NSViewController {
     }
 
     /// The brief handed to the agent: caption, then peelable image paths on
-    /// their own line — same shape Telegram inbound media uses so
+    /// their own line — the shape
     /// `sendCommand` can paste attachments for Claude/Codex/Cursor/OpenCode.
     private var composedTask: String {
         let typed = taskView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        return TelegramInboundMedia.composeOrderText(
+        return PasteMedia.composeOrderText(
             paths: pendingImageURLs,
             caption: typed.isEmpty ? nil : typed)
     }

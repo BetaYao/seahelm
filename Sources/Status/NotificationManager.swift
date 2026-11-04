@@ -284,31 +284,6 @@ class NotificationManager: NSObject {
         return String(body.prefix(maxBodyLength - 3)) + "..."
     }
 
-    /// Mirrors a delivered banner out to the registered chat channels
-    /// (Telegram), so a phone learns an agent finished without seahelm having to own
-    /// a transport, a relay, or push certificates — the IM app already has all
-    /// three.
-    ///
-    /// Hung off `deliver` rather than off Fleet's ingest so the chat message
-    /// inherits this type's gating: the running → done edge, the per-key
-    /// cooldown, and the stability delay that swallows an idle flicker mid-turn.
-    /// The Fleet broadcast this replaced had none of those, and never fired on
-    /// completion at all.
-    ///
-    /// Fires on every edge that earns a banner, whether or not the banner is
-    /// actually shown, and reports which via `bannerSuppressed`. Suppression is
-    /// a statement about *this screen* — the pane is on it, frontmost — and the
-    /// phone is not this screen: a chat that bound itself to the pane with
-    /// `/go #n` asked for its answers from somewhere else and must still get
-    /// them. Deciding it here would silence that chat too, which is the bug
-    /// where an order sent from Telegram was answered only in the terminal the
-    /// sender happened to be sitting in front of. The receiver draws the line
-    /// between a bound conversation and a fleet-wide listener.
-    ///
-    /// Set by MainWindowController; nil in tests and headless runs.
-    var onDeliverExternal: ((_ status: AgentStatus, _ title: String, _ subtitle: String, _ body: String,
-                             _ terminalID: String, _ bannerSuppressed: Bool) -> Void)?
-
     /// Whether a suggestion card for this pane is already expanded on screen (the
     /// island popped open with it). Set by MainWindowController; nil in tests and
     /// headless runs, where nothing is on screen to be redundant with.
@@ -362,34 +337,8 @@ class NotificationManager: NSObject {
         return formatBody(status: status, workspaceName: workspaceName, branch: branch, lastMessage: lastMessage)
     }
 
-    /// What a chat channel gets, which is deliberately not what a banner gets.
-    ///
-    /// A macOS banner has two lines, so `formatSystemBody` collapses newlines,
-    /// shortens paths and cuts to `maxBodyLength` (80) — and, when the agent
-    /// produced no prose of its own, falls back to the user's *own* last
-    /// prompt. On a desktop banner that reads as "this is the task you asked
-    /// for"; mirrored to a phone it reads as the bot repeating back the message
-    /// you just sent it, followed by an ellipsis where the rest should be.
-    ///
-    /// A chat has 4096 characters per message (and `TelegramFormatter.chunk`
-    /// past that), keeps its line breaks, and is being read by the person who
-    /// typed the prompt. So: the agent's own words, whole, or a plain statement
-    /// of what happened — never an echo.
-    static func formatExternalBody(
-        status: AgentStatus,
-        workspaceName: String,
-        branch: String,
-        lastMessage: String,
-        lastAssistantMessage: String
-    ) -> String {
-        let prose = lastAssistantMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !prose.isEmpty { return prose }
-        return formatBody(status: status, workspaceName: workspaceName,
-                          branch: branch, lastMessage: lastMessage)
-    }
-
     /// A notice seahelm-core already decided on (`pane.notice`): history,
-    /// banner and the chat mirror, with no decision of the app's own.
+    /// banner, with no decision of the app's own.
     func show(worktreePath: String, workspaceName: String, branch: String, paneIndex: Int, paneCount: Int,
               terminalID: String, newStatus: AgentStatus, lastMessage: String, lastUserPrompt: String,
               lastAssistantMessage: String, isTargetVisible: Bool) {
@@ -459,19 +408,6 @@ class NotificationManager: NSObject {
         let bannerSuppressed = Self.shouldSuppressBanner(appActive: NSApp.isActive,
                                                          targetVisible: isTargetVisible,
                                                          cardOnScreen: cardOnScreen)
-
-        // Mirror the banner, not the history entry: this fires on exactly the
-        // edges that earn a banner, so the chat inherits the same gating. It is
-        // handed the suppression flag rather than gated by it — see the
-        // property's note: a chat bound to this pane hears it even while the
-        // pane is on screen, a fleet-wide listener still yields to the screen.
-        onDeliverExternal?(newStatus, content.title, content.subtitle,
-                           Self.formatExternalBody(status: newStatus,
-                                                   workspaceName: workspaceName,
-                                                   branch: branch,
-                                                   lastMessage: lastMessage,
-                                                   lastAssistantMessage: lastAssistantMessage),
-                           terminalID, bannerSuppressed)
 
         if bannerSuppressed { return }
 

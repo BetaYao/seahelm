@@ -235,6 +235,10 @@ pub struct Registry {
     turn_started_at: HashMap<String, Timestamp>,
     /// The live 7501 root record, for `explain`.
     program_records: HashMap<String, ProgramStatus>,
+    /// Panes a client asked to close (`pane.close`): their `pane.closed`
+    /// says so, so the client drawing them removes them instead of
+    /// recovering the session.
+    closing: std::collections::HashSet<String>,
     seq: u64,
     events: EventHub,
 }
@@ -293,8 +297,14 @@ impl Registry {
         info.alias = alias;
     }
 
+    /// The next `unregister` of `pane` was asked for (`pane.close`).
+    pub fn mark_closing(&mut self, pane: &str) {
+        self.closing.insert(pane.to_string());
+    }
+
     /// Forget a pane and every timer it had, and announce `pane.closed`.
     pub fn unregister(&mut self, pane: &str) {
+        let by_request = self.closing.remove(pane);
         let closed = self.panes.remove(pane);
         if let Some(info) = &closed {
             self.unindex(pane, &info.worktree_path);
@@ -317,7 +327,11 @@ impl Registry {
         self.seq += 1;
         if let Some(info) = closed {
             let seq = self.seq;
-            self.events.publish(seq, events::closed_event(seq, &info));
+            let mut ev = events::closed_event(seq, &info);
+            if by_request {
+                ev["by_request"] = Value::Bool(true);
+            }
+            self.events.publish(seq, ev);
         }
     }
 

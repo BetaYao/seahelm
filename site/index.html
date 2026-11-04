@@ -213,7 +213,7 @@
       </div>
       <div class="row">
         <dt>Remote helm</dt>
-        <dd>A browser client, <code>seahelm-web</code>, served by a gateway inside the app itself. Pair once with an eight-digit code: it lists the fleet and opens a real terminal on any pane &mdash; xterm.js over a single WebSocket, carrying the same control calls the desktop makes and the VT bytes beside them. Taking orders over Telegram and mail is experimental.</dd>
+        <dd>A browser client, <code>seahelm-web</code>, served by <code>seahelm-gateway</code>, a small service beside the core &mdash; so it is there whether the macOS app, the GPUI client on Windows or Linux, or nothing at all is running the desktop. Pair once with an eight-digit code: it lists the fleet and opens a real terminal on any pane &mdash; xterm.js over a single WebSocket, carrying the same control calls the desktop makes and the VT bytes beside them. Each browser gets a token of its own, revoked one at a time. Taking orders over Telegram, through the same gateway, is experimental.</dd>
       </div>
     </dl>
 
@@ -369,7 +369,7 @@
 
           <rect x="610" y="134" width="570" height="44" rx="6" class="svg-box-plain" stroke-dasharray="5 4"/>
           <text x="624" y="161" class="svg-t">gateway</text>
-          <text x="716" y="161" class="svg-t2">auth &middot; relay &middot; chats &mdash; in the app today</text>
+          <text x="716" y="161" class="svg-t2">auth &middot; relay &middot; chats</text>
 
           <g class="svg-line">
             <line x1="735" y1="112" x2="735" y2="130" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>

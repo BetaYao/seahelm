@@ -1,9 +1,10 @@
 import AppKit
 
-/// What the wizard hands back when it finishes.
+/// What the wizard hands back when it finishes. seahelm-gateway has already
+/// written the pairing down (`allowed_users`, `default_chat_id`); this is for
+/// the confirmation line.
 struct TelegramSetupResult: Equatable {
-    let token: String
-    /// The paired Telegram user id, as `allowed_users` stores it.
+    /// The paired Telegram user id.
     let userId: String
     /// `@username` or first name — for the confirmation line, not for config.
     let displayName: String
@@ -12,17 +13,13 @@ struct TelegramSetupResult: Equatable {
     let autoConnect: Bool
 }
 
-/// The two things the wizard cannot do for itself: bring a bridge up on a token
-/// that is not in the saved config yet, and take it back down again.
-///
-/// Pairing has to run on a *live* channel, because only a channel is polling
-/// `getUpdates`, and two pollers on one token collide with 409. So rather than
-/// grow a second poll loop here, the wizard borrows the app's one.
-struct TelegramSetupServices {
-    let beginPairing: (_ token: String,
-                       _ session: TelegramPairingSession,
-                       _ onPaired: @escaping (TelegramPairingResult) -> Void) -> Void
-    let endPairing: () -> Void
+/// The one-time code the bot is waiting for, and how long it is good for.
+private struct TelegramPairingCode {
+    /// How long the wizard shows a code before asking for a fresh one.
+    static let ttl: TimeInterval = 10 * 60
+    let code: String
+    let deepLink: String
+    let expiresAt: Date
 }
 
 /// Guided Telegram setup: create a bot, paste its token, scan to pair, done.
@@ -31,6 +28,12 @@ struct TelegramSetupServices {
 /// "ask @userinfobot for your numeric id" and "work out what a chat id is" —
 /// were asking the user to do a lookup the bot itself performs for free the
 /// moment they send it anything. Pairing collapses those into a QR code.
+///
+/// The bot lives in seahelm-gateway: the token is checked with
+/// `telegram.validate_token`, saved with `gateway.config.set` when pairing
+/// starts (the gateway has to poll the bot to see `/start`), and the code comes
+/// from `telegram.pair.begin`; `telegram.paired` on `events.subscribe` says it
+/// was claimed.
 final class TelegramSetupWizard: NSViewController {
     enum Step: Int, CaseIterable {
         case createBot, token, pair, done
@@ -48,15 +51,17 @@ final class TelegramSetupWizard: NSViewController {
     var onFinish: ((TelegramSetupResult) -> Void)?
     var onCancel: (() -> Void)?
 
-    private let services: TelegramSetupServices
+    private let events = GatewayEventStream()
     private var step: Step = .createBot { didSet { render() } }
 
     // Collected state
     private var token = ""
     private var botUsername: String?
-    private var botDisplayName: String?
-    private var pairResult: TelegramPairingResult?
-    private var session: TelegramPairingSession?
+    private var pairResult: TelegramSetupResult?
+    private var pairing: TelegramPairingCode?
+    /// Bumped per `pair.begin` so a slow answer for an abandoned code cannot
+    /// land on the screen showing a newer one.
+    private var pairGeneration = 0
     private var autoConnect = true
 
     // Chrome
@@ -84,9 +89,12 @@ final class TelegramSetupWizard: NSViewController {
                                                     color: WizardStyle.textFaint)
     private var expiryTimer: Timer?
 
-    init(services: TelegramSetupServices) {
-        self.services = services
+    init() {
         super.init(nibName: nil, bundle: nil)
+        events.onEvent = { [weak self] type, event in
+            guard type == "telegram.paired" else { return }
+            self?.paired(event)
+        }
     }
 
     @available(*, unavailable)
@@ -95,6 +103,7 @@ final class TelegramSetupWizard: NSViewController {
     deinit {
         expiryTimer?.invalidate()
         validateWork?.cancel()
+        events.stop()
     }
 
     // MARK: - Layout
@@ -166,12 +175,10 @@ final class TelegramSetupWizard: NSViewController {
     }
 
     /// Belt and braces: the sheet can also go away with the Settings window,
-    /// and an armed code must not outlive the screen showing it. The owner's
-    /// `endPairing` is idempotent.
+    /// and an armed code must not outlive the screen showing it.
     override func viewDidDisappear() {
         super.viewDidDisappear()
-        expiryTimer?.invalidate()
-        services.endPairing()
+        endPairing()
     }
 
     // MARK: - Rendering
@@ -334,19 +341,16 @@ final class TelegramSetupWizard: NSViewController {
     // MARK: - Step 3: pair
 
     private func buildPairStep() -> NSView {
-        let session = session ?? TelegramPairingSession()
-        self.session = session
-
         let blurb = WizardStyle.wrappingLabel(
             "Point your phone's camera at the code. Telegram opens on your bot with a Start "
             + "button — tap it, and this Mac learns who you are. Nobody else can use the bot.",
             size: 12.5)
 
-        qrView.payload = deepLink(code: session.code)
+        qrView.payload = pairing?.deepLink ?? ""
 
         let orLabel = WizardStyle.label("Or send this code to \(botHandle):", size: 11.5,
                                             color: WizardStyle.textSecondary)
-        codeLabel.stringValue = formatted(session.code)
+        codeLabel.stringValue = pairing.map { formatted($0.code) } ?? "\u{2014}"
 
         let openTelegram = WizardSecondaryButton(text: "Open in Telegram",
                                                      symbol: "arrow.up.forward.app")
@@ -372,10 +376,13 @@ final class TelegramSetupWizard: NSViewController {
         columns.alignment = .top
         columns.spacing = 22
 
-        pairStatus.state = .pending("Waiting for you to tap Start…")
-
-        startPairing(session: session)
-        startExpiryTimer()
+        if pairing == nil {
+            pairStatus.state = .pending("Starting the bot in seahelm-gateway…")
+            startPairing()
+        } else {
+            pairStatus.state = .pending("Waiting for you to tap Start…")
+            startExpiryTimer()
+        }
 
         return verticalStack([blurb, columns, pairStatus], spacing: 18)
     }
@@ -422,19 +429,74 @@ final class TelegramSetupWizard: NSViewController {
 
     // MARK: - Pairing
 
-    private func startPairing(session: TelegramPairingSession) {
-        services.beginPairing(token, session) { [weak self] result in
-            guard let self else { return }
-            self.pairResult = result
-            self.pairStatus.state = .ok("Paired with \(result.displayName)")
-            self.expiryTimer?.invalidate()
-            self.publishCommandMenu()
-            // A beat on the green pill, so the step that just succeeded is seen
-            // to have succeeded rather than vanishing under the next one.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                guard let self, self.step == .pair else { return }
-                self.step = .done
+    /// Save the token in the gateway (enabled, so it polls), then ask it for a
+    /// code. The gateway adds whoever sends `/start <code>` to the allowlist.
+    private func startPairing() {
+        pairGeneration += 1
+        let generation = pairGeneration
+        events.start()
+        GatewayClient.setConfig(["telegram": ["bot_token": token, "enabled": true]]) { [weak self] result in
+            guard let self, generation == self.pairGeneration else { return }
+            if case .failure(let failure) = result {
+                self.pairStatus.state = .failed(GatewayClient.describe(failure))
+                return
             }
+            GatewayClient.beginTelegramPairing { [weak self] result in
+                guard let self, generation == self.pairGeneration, self.step == .pair else { return }
+                switch result {
+                case .success(let begun) where !begun.code.isEmpty:
+                    self.showCode(begun)
+                case .success:
+                    self.pairStatus.state = .failed("seahelm-gateway gave no code.")
+                case .failure(let failure):
+                    self.pairStatus.state = .failed(GatewayClient.describe(failure))
+                }
+            }
+        }
+    }
+
+    private func showCode(_ begun: GatewayTelegramPairing) {
+        let link = begun.deepLink.isEmpty ? deepLink(code: begun.code) : begun.deepLink
+        pairing = TelegramPairingCode(code: begun.code, deepLink: link,
+                                      expiresAt: Date().addingTimeInterval(TelegramPairingCode.ttl))
+        qrView.payload = link
+        codeLabel.stringValue = formatted(begun.code)
+        pairStatus.state = .pending("Waiting for you to tap Start…")
+        startExpiryTimer()
+    }
+
+    /// `telegram.paired {user_id, display, chat_id}`.
+    private func paired(_ event: [String: Any]) {
+        guard step == .pair, pairing != nil else { return }
+        func text(_ key: String) -> String {
+            if let s = event[key] as? String { return s }
+            if let n = event[key] as? NSNumber { return n.stringValue }
+            return ""
+        }
+        let userId = text("user_id")
+        let display = text("display")
+        let result = TelegramSetupResult(userId: userId, displayName: display.isEmpty ? userId : display,
+                                         chatId: text("chat_id"), autoConnect: autoConnect)
+        pairResult = result
+        pairing = nil
+        pairStatus.state = .ok("Paired with \(result.displayName)")
+        expiryTimer?.invalidate()
+        // A beat on the green pill, so the step that just succeeded is seen
+        // to have succeeded rather than vanishing under the next one.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, self.step == .pair else { return }
+            self.step = .done
+        }
+    }
+
+    /// Disarm the code, if one is out. Safe to call when none is.
+    private func endPairing() {
+        expiryTimer?.invalidate()
+        events.stop()
+        pairGeneration += 1
+        if pairing != nil {
+            GatewayClient.cancelTelegramPairing()
+            pairing = nil
         }
     }
 
@@ -449,33 +511,18 @@ final class TelegramSetupWizard: NSViewController {
     }
 
     private func tickExpiry() {
-        guard let session, step == .pair else { return }
-        let remaining = session.expiresAt.timeIntervalSinceNow
+        guard let pairing, step == .pair else { return }
+        let remaining = pairing.expiresAt.timeIntervalSinceNow
         guard remaining > 0 else {
             expiryLabel.stringValue = "Code expired."
             pairStatus.state = .failed("Code expired — generate a new one.")
             expiryTimer?.invalidate()
+            GatewayClient.cancelTelegramPairing()
             return
         }
         let minutes = Int(remaining) / 60
         let seconds = Int(remaining) % 60
         expiryLabel.stringValue = String(format: "Expires in %d:%02d", minutes, seconds)
-    }
-
-    /// Publish the verb table so `/` opens a menu in the chat. Best effort: a
-    /// failure here costs discoverability, not function, and the user is
-    /// finished either way.
-    private func publishCommandMenu() {
-        let token = self.token
-        DispatchQueue.global(qos: .utility).async {
-            let api = TelegramBotAPI(token: token)
-            do {
-                try api.setMyCommands(CommandSpecs.botCommands)
-            } catch {
-                NSLog("[Telegram] setMyCommands failed: \(error.localizedDescription)")
-            }
-            api.invalidate()
-        }
     }
 
     // MARK: - Token validation
@@ -503,27 +550,20 @@ final class TelegramSetupWizard: NSViewController {
     private func validate(_ candidate: String) {
         validateGeneration += 1
         let generation = validateGeneration
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let api = TelegramBotAPI(token: candidate)
-            let outcome = Result { try api.getMe() }
-            // A bot wired to a webhook by something else answers `getMe` and
-            // then refuses to be polled (409). Clearing it here turns a
-            // baffling failure at the pairing step into no failure at all.
-            if case .success = outcome { try? api.deleteWebhook() }
-            api.invalidate()
-            DispatchQueue.main.async {
-                guard let self, generation == self.validateGeneration else { return }
-                switch outcome {
-                case .success(let me):
-                    self.token = candidate
-                    self.botUsername = me.username
-                    self.botDisplayName = me.firstName
-                    self.tokenStatus.state = .ok("Connected as \(self.botHandle)")
-                    self.primaryButton.isEnabled = true
-                case .failure(let error):
-                    self.tokenStatus.state = .failed(error.localizedDescription)
-                    self.primaryButton.isEnabled = false
-                }
+        GatewayClient.validateTelegramToken(candidate) { [weak self] result in
+            guard let self, generation == self.validateGeneration else { return }
+            switch result {
+            case .success(let check) where check.ok:
+                self.token = candidate
+                self.botUsername = check.username
+                self.tokenStatus.state = .ok("Connected as \(self.botHandle)")
+                self.primaryButton.isEnabled = true
+            case .success(let check):
+                self.tokenStatus.state = .failed(check.error ?? "Telegram refused this token.")
+                self.primaryButton.isEnabled = false
+            case .failure(let failure):
+                self.tokenStatus.state = .failed(GatewayClient.describe(failure))
+                self.primaryButton.isEnabled = false
             }
         }
     }
@@ -565,9 +605,7 @@ final class TelegramSetupWizard: NSViewController {
         case .pair:
             // Leaving the step disarms the code: it exists only while its QR is
             // on screen.
-            services.endPairing()
-            expiryTimer?.invalidate()
-            session = nil
+            endPairing()
             step = .token
         case .done:
             step = .pair
@@ -581,24 +619,23 @@ final class TelegramSetupWizard: NSViewController {
             finish()
             return
         }
-        services.endPairing()
-        expiryTimer?.invalidate()
+        endPairing()
         onCancel?()
         dismiss(nil)
     }
 
     private func finish() {
-        services.endPairing()
-        expiryTimer?.invalidate()
+        endPairing()
         guard let result = pairResult else {
             dismiss(nil)
             return
         }
-        onFinish?(TelegramSetupResult(token: token,
-                                      userId: result.userId,
-                                      displayName: result.displayName,
-                                      chatId: result.chatId,
-                                      autoConnect: autoConnect))
+        let finished = TelegramSetupResult(userId: result.userId, displayName: result.displayName,
+                                           chatId: result.chatId, autoConnect: autoConnect)
+        // The pairing itself is already in the gateway; only the switch is left.
+        GatewayClient.setConfig(["telegram": ["enabled": autoConnect]]) { [weak self] _ in
+            self?.onFinish?(finished)
+        }
         dismiss(nil)
     }
 
@@ -616,17 +653,14 @@ final class TelegramSetupWizard: NSViewController {
     }
 
     @objc private func openDeepLinkClicked() {
-        guard let session, let url = URL(string: deepLink(code: session.code)) else { return }
+        guard let pairing, let url = URL(string: pairing.deepLink) else { return }
         NSWorkspace.shared.open(url)
     }
 
     @objc private func newCodeClicked() {
-        guard let session else { return }
-        let next = session.refresh()
-        qrView.payload = deepLink(code: next)
-        codeLabel.stringValue = formatted(next)
-        pairStatus.state = .pending("Waiting for you to tap Start…")
-        startExpiryTimer()
+        endPairing()
+        pairStatus.state = .pending("Asking seahelm-gateway for a new code…")
+        startPairing()
     }
 
     @objc private func pasteTokenClicked() {
@@ -639,12 +673,12 @@ final class TelegramSetupWizard: NSViewController {
 
     private var botHandle: String {
         if let botUsername, !botUsername.isEmpty { return "@\(botUsername)" }
-        return botDisplayName ?? "your bot"
+        return "your bot"
     }
 
     private func deepLink(code: String) -> String {
         guard let botUsername, !botUsername.isEmpty else { return "" }
-        return TelegramPairingCode.deepLink(botUsername: botUsername, code: code)
+        return "https://t.me/\(botUsername)?start=\(code)"
     }
 
     /// `ABCD 2345` — grouped, because an eight-character code read off a screen

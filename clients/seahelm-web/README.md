@@ -1,6 +1,6 @@
 # seahelm-web — Host Gateway browser client
 
-The browser client for Seahelm (plain static page + xterm.js). **In production it talks to the Host Gateway embedded in the Mac app over WSS.**
+The browser client for Seahelm (plain static page + xterm.js). **In production it talks to seahelm-gateway over WSS** — a standalone service that is a pure client of seahelm-core (wire protocol: `docs/seahelm-gateway-plan.md`, "Web wire protocol").
 Once paired it connects straight to `wss://…/ws` and speaks JSON-RPC request/reply plus VT notifies; terminal bytes no longer travel over MQTT.
 
 > **Not an Artifact**: a Claude Artifact's CSP forbids connecting to an external WS, so this has to be opened as an ordinary static page in a browser.
@@ -32,11 +32,22 @@ Transport: `/ws` on the page's own origin — the WebSocket the Host Gateway ser
 
 Gateway handshake:
 
-1. first visit: `auth` → `{code}` → returns `{ok, mac_id, token, vt_binary, vt_deflate}`
-2. return visit: `auth` → `{mac_id, token}` (from localStorage)
-3. `session.snapshot` → fills First Mate
+1. first visit: `auth` → `{code}` → returns `{ok, mac_id, token, vt_binary, vt_deflate, panes}`
+2. return visit: `auth` → `{mac_id, token}` (from localStorage); every successful paired auth returns a `token`, and the page stores whichever comes back (a share sign-in never replaces the stored pairing)
+3. the auth reply's `panes` fill the list; then a `cards` notify, the `pane.message` replay and `autopilot.state` follow
 4. pick a pane → `pane.vt_open`; the server pushes binary VT frames (or legacy JSON)
 5. keystrokes → `pane.send_keys` `{pane_session_key, b64}`
+
+Fleet notifies: `pane.status`, `pane.added` (a Pane row), `pane.closed`. The pane menu's **New pane** calls `pane.new {pane_session_key}` and **Close pane** `pane.close {pane_session_key}`; the page re-reads `session.snapshot` after either. There is no split tree on the wire: a worktree's panes are stacked.
+
+### Decisions (core cards)
+
+Everything waiting on the user is a seahelm-core card. The gateway sends `cards {cards: [Card]}` with the **full** current list after auth and on every change, and the page rebuilds its decision state from it (`card-model.js`):
+
+- `question` / `choice` → the question card above that pane's composer; `suggestion` → the "What next?" card. One per pane, a question outranking a suggestion.
+- `approval` / `proposal` / `report` → First Mate's cards, above First Mate's composer, keyed by card id (they may have no pane); the ⎈ count is how many there are.
+- tapping label *i* → `cards.answer {id, index: i}`; Skip → `cards.dismiss {id}`. For a multi-select question the labels are the options with ☑/☐ ticks then "✔ Done": an option toggles, Done (index `options.length`) answers. The next `cards` notify is the truth.
+- danger styling is computed here: `/(delete|remove|rm -rf|drop|force|reset --hard|overwrite|revoke)/i` on the message, for question / choice / approval.
 
 Wire format:
 
@@ -60,6 +71,7 @@ push:     {"type":"notify","method","params"}
 | `composer-keys.js` | what Enter / Esc mean in the timeline composer; hands both back to an IME while it is composing |
 | `timeline-scroll.js` | the timeline sticks to the bottom while you are at it and holds your row when you are not — a rebuild replaces every row, so the place has to be taken and put back by hand |
 | `timeline-patch.js` | plans the smallest DOM change from the timeline on screen to the next one: a new message appends, a growing run of calls or the `live` line rewrites the tail, and only a different pane or history paged in above rebuilds |
+| `card-model.js` | the core's card list → one decision per pane plus First Mate's cards, danger, multi-select ticks |
 | `pane-pick.js` | which pane a worktree opens on, and the words a row uses for its status |
 | `composer-action.js` | what the composer's one button means right now — send, stop, or nothing. Typed text always wins, so an agent being busy never refuses the message you just wrote |
 | `devbroker/` | dependency-free node unit tests for the modules above, plus the result collector for `bench.html` |
@@ -72,7 +84,7 @@ Dark and iOS-native on a phone (17px body, 44pt targets, the system font for pro
 - **The detail** — a slim head (‹ back, the worktree, ⋯) and a **tab per pane** when it has more than one. **Timeline / Terminal** is the first thing in the ⋯ menu, so the head gives its height to the content. The tabs serve both surfaces. A worktree opens on the pane that wants you: waiting on you, then failed, then running, then the one you last looked at (`pane-pick.js`).
 - **Timeline** has its own composer; an open question is a card above it with full-width answers.
 - **Terminal** has no composer of ours: tap the screen and type, keys go straight to the pane. A bar carries the keys a phone keyboard lacks — keyboard show/hide, esc, tab, ⇧tab, a sticky **ctrl** (applies to the next key), ^C, ^D and the arrows — and sits above the soft keyboard (`visualViewport`).
-- **⋯ menus** — the page's (message log, disconnect) and the pane's (Timeline / Terminal, terminal layout, renderer, copy, split, close).
+- **⋯ menus** — the page's (message log, disconnect) and the pane's (Timeline / Terminal, terminal layout, renderer, copy, new pane, close).
 - **New work** — the **+** in the list's title bar opens a sheet: prompt, project, agent.
 - **First Mate** — the ⎈ beside it (amber with a count when cards wait) opens First Mate's pane; its cards are answered above the composer.
 - **PRs** — a worktree with a PR shows `#12 ✓ approved` on its row and, as a link to GitHub, in the detail header.
@@ -95,7 +107,7 @@ The terminal fits itself to the width, down to a 9px floor, and pans past that; 
 | Mode | Behaviour |
 |---|---|
 | **Single** (default) | attach only the focused pane — kind to a weak link and a small screen; with several panes you switch with the tabs in the head |
-| **Mirror** | one VT stream per pane, rendered together in the Mac's split layout |
+| **Mirror** ("Every pane") | one VT stream per pane, the worktree's panes stacked top to bottom |
 
 A narrow window is forced to single anyway (a mirror preference is ignored when `layoutFitsMirror` is not satisfied).
 

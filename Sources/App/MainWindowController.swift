@@ -77,25 +77,9 @@ class MainWindowController: NSWindowController {
     private var config = Config.load()
     private var pairingWindowController: PairingWindowController?
     private var settingsWindowController: SettingsWindowController?
-    /// Live Telegram bridge, held so a Settings save can tear the old one down.
-    /// Nil when the bridge is unconfigured or was started by AppDelegate and
-    /// never reconfigured — `unregisterChannel("telegram")` covers that case.
-    private var telegramChannel: TelegramChannel?
-    /// The throwaway bridge the setup wizard runs on. Held apart from
-    /// `telegramChannel` so ending pairing restores the configured bridge
-    /// rather than leaving the wizard's token in place.
-    private var telegramPairingChannel: TelegramChannel?
     /// Fleet row lit while a context-menu `/return` is assessing. Cleared when
     /// a sheet appears, the command fails, or the tear-down finishes.
     private var pendingReturnPath: String?
-    /// One executor for every surface: the Helm line, Telegram and mail all
-    /// run their lines through it, so a command means one thing everywhere.
-    /// The app's own runner of the command language, for when seahelm-core
-    /// does not answer (`routeCommand`).
-    private var gmailOAuthCoordinator: GmailOAuthCoordinator?
-    private var gmailMailPoller: GmailMailPoller?
-    /// Suppresses repeat alerts while the same failure persists.
-    private var lastTelegramError: String?
     private var runtimeBackend: String = "seahelmd"
     private var primaryCapsuleNotification: NotificationEntry?
     private var dismissedPrimaryCapsuleNotificationIDs: Set<UUID> = []
@@ -112,19 +96,6 @@ class MainWindowController: NSWindowController {
     /// separately from `islandSeenSuggestions`: the island's set is also advanced by
     /// its 10s fallback timer, which would eat the "new order" edge this needs.
     private var revealedSuggestions = SuggestionSeenSet()
-    /// Cards already mirrored to chat. Its own set: a card the island has shown
-    /// still has to reach the phone, and the phone must not be sent the same
-    /// question twice because the desktop happened to re-pop it.
-    private var chatSeenCards = SuggestionSeenSet()
-    /// The labels a chat was last shown for a card, to redraw its ticks.
-    private var chatCardLabels: [String: [String]] = [:]
-    /// Where each card's buttons are drawn right now, so they can be taken down
-    /// when the card goes — answered on the Mac, or the agent moved past it.
-    private var cardButtonMessages: [String: [ChatNoticeBook.Ref]] = [:]
-    /// The last thing said about a pane in each chat. An agent's suggested next
-    /// steps are added to that message as buttons rather than arriving as a
-    /// second message repeating the words it already carries.
-    private var noticeBook = ChatNoticeBook()
 
     // Terminal management
     /// GitHub token 解析，来源优先级：
@@ -298,7 +269,7 @@ class MainWindowController: NSWindowController {
 
     // Status detection
     private let statusAggregator = WorktreeStatusAggregator()
-    /// Notices and chat routes, wired once, before the tab coordinator.
+    /// Notices and status routes, wired once, before the tab coordinator.
     private lazy var channelWiring: Void = {
         // The island popping open with this pane's suggestion card already told
         // the user, better than a banner can — it carries the buttons. Only
@@ -306,43 +277,6 @@ class MainWindowController: NSWindowController {
         NotificationManager.shared.isCardOnScreen = { [weak self] terminalID in
             guard let self, self.islandController.model.isOpened else { return false }
             return self.islandController.model.orders.contains { $0.terminalID == terminalID }
-        }
-        // Pane-status banners go to Telegram with binding awareness: after
-        // `/go #n` that chat only hears #n, not the rest of the fleet. Other
-        // external channels still get every event.
-        //
-        // `bannerSuppressed` means the user is looking at this very pane, so
-        // the audiences that hear the whole fleet stay quiet — a phone ping for
-        // something already on screen is noise. It does not silence a chat
-        // bound to the pane: that conversation is happening away from this
-        // desk, and its own order's answer must reach it.
-        NotificationManager.shared.onDeliverExternal = { [weak self] status, title, subtitle, body, terminalID, bannerSuppressed in
-            let text = Self.noticeText(icon: status.icon, title: title, subtitle: subtitle, body: body)
-            if !bannerSuppressed {
-                ChannelHub.shared.broadcast(text, format: .markdown, excluding: ["telegram"])
-            }
-            self?.notifyTelegramSessions(terminalID: terminalID, fleetSilenced: bannerSuppressed) { handle in
-                Self.noticeText(icon: status.icon, title: title, subtitle: subtitle, body: body, handle: handle)
-            }
-        }
-        // Not `tabCoordinator.commandRoute` here: that coordinator's own
-        // initializer reads `channelWiring`, and two lazy vars that reach
-        // for each other recurse until the stack goes. Mail is wired in
-        // `startGmailMailChannel`, after both exist.
-        ChannelHub.shared.commandRoute = { [weak self] text, surface, reply in
-            self?.routeCommand(text, surface: surface, reply: reply)
-        }
-        ChannelHub.shared.ruleTriggerRoute = { [weak self] prompt, target in
-            self?.dispatchRuleTrigger(prompt: prompt, target: target) ?? false
-        }
-        ChannelHub.shared.callbackRoute = { [weak self] callback in
-            self?.handleChatCallback(callback)
-        }
-        ChannelHub.shared.draftStopRoute = { [weak self] chatId, _ in
-            self?.stopBoundPane(chatId: chatId)
-        }
-        ChannelHub.shared.chatGoneRoute = { [weak self] chatId in
-            self?.letGoOfGoneChat(chatId)
         }
         statusAggregator.delegate = self
         statusAggregator.seedLastActivity(persistedActivityMap())
@@ -416,16 +350,6 @@ class MainWindowController: NSWindowController {
         updateCoordinator.setup(config: config)
         normalizeBackendAvailabilityIfNeeded()
         tabCoordinator.loadWorkspaces()
-        // A worktree deleted while the app was closed leaves nobody to report
-        // it: discovery has no previous list to miss it from, so this is the
-        // only pass that catches it.
-        reconcileChatBindings()
-        // Here, not beside the other routes: those are wired from inside
-        // `channelWiring`, which `tabCoordinator` reads.
-        tabCoordinator.chatProgress.fleetChats = { [weak self] in
-            [self?.config.telegram?.resolvedDefaultChatId].compactMap { $0 }
-        }
-        tabCoordinator.telegramConfigProvider = { [weak self] in self?.config.telegram }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleNavigateToWorktree(_:)),
@@ -521,8 +445,7 @@ class MainWindowController: NSWindowController {
     @objc func showSettings() {
         if let existing = settingsWindowController {
             // Reused windows still hold the SettingsVC's private Config copy from
-            // first open — refresh so a telegram token written after that open
-            // (or restored from disk via merge-on-write) shows up.
+            // first open — refresh it, and the gateway pages re-read the gateway.
             existing.reload(config: config)
             existing.show()
             return
@@ -532,73 +455,21 @@ class MainWindowController: NSWindowController {
         wc.show()
     }
 
-    /// Browser pairing window (pairing code). Held strongly so it survives
-    /// past this call. See `PairingWindowController`.
+    /// Browser pairing window: the code, the access URL and the paired
+    /// devices, all from seahelm-gateway. Held strongly so it survives past
+    /// this call; reused so the menu item twice raises one window.
     @objc func showPairing() {
-        _ = mintPairingContext()
-        let accessURL = (config.hostGateway ?? HostGatewayConfig()).resolvedPageURL
-        let code = currentPairingCode()
-        let wc = PairingWindowController(
-            accessURL: accessURL,
-            code: code,
-            onRefresh: { [weak self] in self?.refreshPairingCode() ?? "" },
-            onSet: { [weak self] raw in self?.setPairingCode(raw) },
-            onRevokeAll: { [weak self] in self?.revokeAllRemotes() })
+        if let existing = pairingWindowController {
+            existing.reload()
+            existing.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let wc = PairingWindowController()
         wc.showWindow(nil)
         wc.window?.center()
         NSApp.activate(ignoringOtherApps: true)
         pairingWindowController = wc
-    }
-
-    /// Type a rule-matched prompt into the pane its target names.
-    ///
-    /// Goes through `sendText(enter: true)` — the same write channel the control
-    /// socket uses — so a triggered prompt is indistinguishable from one typed
-    /// by hand, and lands whatever agent already owns that pane.
-    private func dispatchRuleTrigger(prompt: String, target: TelegramRuleTarget) -> Bool {
-        guard let dataSource = tabCoordinator.mqttDataSource else { return false }
-        guard let pane = TelegramRuleEngine.resolvePane(target,
-                                                        panes: dataSource.snapshotPanes())
-        else { return false }
-        return dataSource.sendText(paneId: pane.paneId, text: prompt, enter: true)
-    }
-
-    /// Mint + persist the root secret on the LIVE config (a throwaway
-    /// `Config.load()` copy is clobbered by the app's own config saves), then
-    /// reload Host Gateway so auth picks up the secret — no restart needed.
-    ///
-    /// Shared by the pairing window and the Settings pairing page: both render
-    /// the same payload, and neither may mint its own.
-    private func mintPairingContext() -> (secret: Data, mqtt: PairingIdentity) {
-        if config.pairing == nil { config.pairing = PairingIdentity() }
-        if config.pairing?.rootSecret == nil {
-            config.pairing?.rootSecret = PairingCrypto.base64url(PairingCrypto.newRootSecret())
-        }
-        config.saveNow()
-        let mqtt = config.pairing!
-        tabCoordinator.applyMqttRootSecret(mqtt.rootSecret ?? "")
-        let secret = PairingCrypto.rootSecret(fromBase64url: mqtt.rootSecret ?? "") ?? PairingCrypto.newRootSecret()
-        return (secret, mqtt)
-    }
-
-    /// The Telegram bridge could not start. What reaches here is final — a
-    /// token Telegram rejects, a bot already polled elsewhere — and only the
-    /// user can fix it, so say it in a sheet rather than a log line the
-    /// channel would otherwise sit silently dead behind.
-    private func presentTelegramError(_ message: String) {
-        guard let window, lastTelegramError != message else { return }
-        lastTelegramError = message
-
-        let alert = NSAlert()
-        alert.messageText = "Telegram bridge unavailable"
-        alert.informativeText = "\(message)\n\nCheck the bot token and allowed users under Settings › Telegram."
-        alert.addButton(withTitle: "Open Settings")
-        alert.addButton(withTitle: "Later")
-
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
-            self?.showSettings()
-        }
     }
 
     @objc func showNewBranchDialog() {
@@ -1282,7 +1153,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
         // much is read here, to know what the spinner waits for.
         let kind: Kind = text.trimmingCharacters(in: .whitespaces).hasPrefix("/new ") ? .new : .other
         var replies = 0
-        routeCommand(text, surface: .desktop) { [weak self] reply in
+        routeCommand(text) { [weak self] reply in
             guard let self else { return }
             replies += 1
             // The dashboard is the desktop's listing; text replies are for the
@@ -1671,20 +1542,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
     private var headerMemoryProbedAt: [String: Date] = [:]
     private var headerMemoryInFlight: Set<String> = []
 
-    private func shareOffer(_ link: ShareLink, url: String, lifetime: ShareLinkLifetime) -> PaneShareOffer {
-        let others = tabCoordinator.shareLinks.active()
-            .filter { $0.paneSessionKey == link.paneSessionKey && $0.id != link.id }.count
-        return PaneShareOffer(
-            url: url,
-            gatewayListening: tabCoordinator.hostGatewayIsListening,
-            linkId: link.id,
-            paneSessionKey: link.paneSessionKey,
-            lifetime: lifetime,
-            expiresAt: link.expiresAt,
-            recipient: link.recipient,
-            otherLinks: others)
-    }
-
     private func focusedPaneSessionKey(worktreePath: String) -> String? {
         let tree = terminalCoordinator.stationManager.tree(forPath: worktreePath)
         guard let stationId = PaneTitleResolver.focusedStationId(in: tree) else { return nil }
@@ -1867,7 +1724,6 @@ extension MainWindowController: NSWindowDelegate {
         usageSummaryStore.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
-        tabCoordinator.teardownRemoteBackends()
         terminalCoordinator.cleanup()
     }
 
@@ -1882,27 +1738,7 @@ extension MainWindowController: NSWindowDelegate {
         pairingWindowController = nil
     }
 
-    func startGmailMailChannel(config gmailConfig: GmailMailConfig?) {
-        gmailMailPoller?.stop()
-        gmailMailPoller = nil
-        // Mail runs its lines through the same executor as the Helm line and
-        // Telegram; wired here, once both coordinators exist.
-        tabCoordinator.commandRoute = { [weak self] text, surface, reply in
-            self?.routeCommand(text, surface: surface, reply: reply)
-        }
-        guard let gmailConfig, gmailConfig.enabled, gmailConfig.validationError == nil else { return }
-        let poller = GmailMailPoller(client: GmailRESTMailClient(accountEmail: gmailConfig.accountEmail))
-        poller.onAcceptedMessage = { [weak self] message in
-            DispatchQueue.main.async { self?.tabCoordinator.routeMail(message: message) }
-        }
-        poller.onStateChange = { code in NSLog("[App] Gmail mail channel state: \(code.rawValue)") }
-        poller.start(config: gmailConfig)
-        gmailMailPoller = poller
-    }
-
     func cleanupBeforeTermination() {
-        gmailMailPoller?.stop()
-        gmailMailPoller = nil
         usageSummaryStore.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
@@ -2443,8 +2279,6 @@ extension MainWindowController {
         // Notification Center's job. Frontmost, this yields to the First Mate
         // sidebar only for a card that sidebar is actually showing — a
         // suggestion raised in a worktree that isn't on screen pops here.
-        publishCardsToChat(tabCoordinator.cards.cards)
-
         let fresh = islandSeenSuggestions.absorb(orders)
         if IslandModel.shouldOpen(for: fresh), !model.isOpened {
             let targetVisible = fresh.allSatisfy {
@@ -2554,117 +2388,10 @@ extension MainWindowController {
 // MARK: - SettingsDelegate
 
 extension MainWindowController: SettingsDelegate {
-    func settings(_ settings: SettingsViewController, connectGmailAccount email: String) {
-        let coordinator = GmailOAuthCoordinator()
-        gmailOAuthCoordinator = coordinator
-        coordinator.connect(accountEmail: email) { [weak self] result in
-            guard let self else { return }
-            self.gmailOAuthCoordinator = nil
-            switch result {
-            case .success:
-                settings.setGmailConnectionStatus("Connected. Gmail credentials are stored in Keychain.")
-                if self.config.gmailMail == nil {
-                    self.config.gmailMail = GmailMailConfig(accountEmail: email,
-                                                            inboundAlias: GmailMailConfig(accountEmail: email).derivedInboundAlias)
-                    self.saveConfig()
-                }
-            case .failure(let error):
-                NSLog("[Gmail] OAuth failed: %@", error.localizedDescription)
-                settings.setGmailConnectionStatus("Connection failed: \(error.localizedDescription)")
-            }
-        }
-    }
-    func settingsPairingContext(_ settings: SettingsViewController) -> (secret: Data, mqtt: PairingIdentity)? {
-        mintPairingContext()
-    }
-
-    func settingsPairingCode(_ settings: SettingsViewController) -> String {
-        currentPairingCode()
-    }
-
-    func settingsRefreshPairingCode(_ settings: SettingsViewController) -> String {
-        refreshPairingCode()
-    }
-
-    func settings(_ settings: SettingsViewController, setPairingCode code: String) -> String? {
-        setPairingCode(code)
-    }
-
-    func settingsRevokeAllRemotes(_ settings: SettingsViewController) {
-        revokeAllRemotes()
-    }
-
-    func settingsShareLinks(_ settings: SettingsViewController) -> [ShareLink] {
-        tabCoordinator.shareLinks.active()
-    }
-
-    func settings(_ settings: SettingsViewController, revokeShareLink id: String) {
-        tabCoordinator.shareLinks.revoke(id: id)
-    }
-
-    func settingsRevokeAllShareLinks(_ settings: SettingsViewController) {
-        tabCoordinator.shareLinks.revokeAll()
-    }
-
-    func settingsHostGatewayListening(_ settings: SettingsViewController) -> Bool {
-        tabCoordinator.hostGatewayIsListening
-    }
-
-    /// Ensure a pairing code exists on the live config (and LivePairingCode if Gateway is up).
-    @discardableResult
-    private func currentPairingCode() -> String {
-        if let live = tabCoordinator.pairingCodeLive {
-            return live.current()
-        }
-        var store = PairingCodeStore(code: config.hostGateway?.pairCode)
-        let code = store.ensureCode()
-        storePairingCode(code)
-        return code
-    }
-
-    @discardableResult
-    private func refreshPairingCode() -> String {
-        if let live = tabCoordinator.pairingCodeLive {
-            return live.refresh()
-        }
-        var store = PairingCodeStore(code: config.hostGateway?.pairCode)
-        let code = store.refresh()
-        storePairingCode(code)
-        return code
-    }
-
-    /// A code you chose. Nil when it is not 8–16 digits; the current code stays.
-    private func setPairingCode(_ raw: String) -> String? {
-        if let live = tabCoordinator.pairingCodeLive {
-            return live.set(raw)
-        }
-        var store = PairingCodeStore(code: config.hostGateway?.pairCode)
-        guard let code = store.set(raw) else { return nil }
-        storePairingCode(code)
-        return code
-    }
-
-    private func storePairingCode(_ code: String) {
-        if config.hostGateway == nil { config.hostGateway = HostGatewayConfig() }
-        config.hostGateway?.pairCode = code
-        Config.persistPairCode(code)
-    }
-
-    /// Rotate root secret and pairing code so every remembered browser must re-pair.
-    private func revokeAllRemotes() {
-        if config.pairing == nil { config.pairing = PairingIdentity() }
-        config.pairing?.rootSecret = PairingCrypto.base64url(PairingCrypto.newRootSecret())
-        _ = refreshPairingCode()
-        config.saveNow()
-        tabCoordinator.applyMqttRootSecret(config.pairing?.rootSecret ?? "")
-        // "Revoke all remote access" means the share links too.
-        tabCoordinator.shareLinks.revokeAll()
-    }
-
     /// Live panes, so a rule's target is picked from what exists rather than
     /// recalled from memory.
     func settingsPaneTargets(_ settings: SettingsViewController) -> [PaneSnapshot] {
-        tabCoordinator.mqttDataSource?.snapshotPanes() ?? []
+        tabCoordinator.controlDataSource?.snapshotPanes() ?? []
     }
 
     /// Session names the live panes are attached to, so the monitor can mark a
@@ -2681,9 +2408,6 @@ extension MainWindowController: SettingsDelegate {
 
     func settingsDidUpdateConfig(_ settings: SettingsViewController, config: Config) {
         let oldPaths = Set(self.config.workspacePaths)
-        let oldTelegram = self.config.telegram
-        let oldGmail = self.config.gmailMail
-        let oldGateway = self.config.hostGateway ?? HostGatewayConfig()
         // Preserve split layouts — SettingsVC doesn't track them
         var merged = config
         merged.splitLayouts = terminalCoordinator.config.splitLayouts
@@ -2699,112 +2423,6 @@ extension MainWindowController: SettingsDelegate {
         if oldPaths != newPaths {
             tabCoordinator.loadWorkspaces()
         }
-
-        // Host Gateway: restart only on what the listener is actually built from.
-        // `public_url` feeds the pair link and nothing else, so typing one must
-        // not drop the browser sessions already attached.
-        let newGateway = config.hostGateway ?? HostGatewayConfig()
-        if oldGateway.resolvedEnabled != newGateway.resolvedEnabled
-            || oldGateway.resolvedPort != newGateway.resolvedPort
-            || oldGateway.webRoot != newGateway.webRoot {
-            tabCoordinator.reloadHostGateway()
-        }
-
-        // Hot-reload the mail channel too. The poller captures its config when
-        // it starts, so without this an edited sender whitelist (or account, or
-        // alias) sat in config.json doing nothing until the next launch, while
-        // inbound mail was rejected against the values from startup.
-        if oldGmail != config.gmailMail {
-            startGmailMailChannel(config: config.gmailMail)
-        }
-
-        // Hot-reload the Telegram bridge on config change. Not while the setup
-        // wizard is pairing: that bridge is holding the bot's single poll slot,
-        // and its own teardown brings the configured one back.
-        if oldTelegram != config.telegram, telegramPairingChannel == nil {
-            restartTelegramBridge()
-            // A Mini App URL just cleared leaves the menu button pointing at
-            // it; the new bridge only ever sets the button, so take it down.
-            if oldTelegram?.resolvedMiniAppURL != nil, config.telegram?.resolvedMiniAppURL == nil {
-                telegramChannel?.resetMenuButton()
-            }
-        }
-    }
-
-    /// Tear the Telegram bridge down and stand it back up from `config`.
-    ///
-    /// `disconnect()` rather than a bare release: the old poller is parked in a
-    /// `getUpdates` that Telegram holds open for twenty seconds, and a
-    /// successor that starts while it is still in flight is the 409 the error
-    /// text blames on "a second seahelm running".
-    private func restartTelegramBridge() {
-        ChannelHub.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
-        telegramChannel?.disconnect()
-        telegramChannel = nil
-        // A fresh save deserves a fresh alert, even for the same mistake.
-        lastTelegramError = nil
-
-        guard let telegramConfig = config.telegram, telegramConfig.resolvedAutoConnect else { return }
-        let channel = TelegramChannel(config: telegramConfig)
-        channel.onStateChange = { [weak self] state in
-            // A rejected token or a bot polled elsewhere is something only the
-            // user can fix, so a failure has to be said out loud — otherwise
-            // the channel is just silently dead.
-            if case .error(let msg) = state { self?.presentTelegramError(msg) }
-        }
-        ChannelHub.shared.registerChannel(channel)
-        channel.connect()
-        telegramChannel = channel
-        NSLog("[Settings] Telegram bridge reconnecting")
-    }
-
-    func settings(_ settings: SettingsViewController,
-                  beginTelegramPairing token: String,
-                  session: TelegramPairingSession,
-                  onPaired: @escaping (TelegramPairingResult) -> Void) {
-        // One poller per bot. Whatever is live has to go first, or Telegram
-        // answers 409 and the QR on screen never resolves.
-        ChannelHub.shared.unregisterChannel(telegramChannel?.channelId ?? "telegram")
-        telegramChannel?.disconnect()
-        telegramChannel = nil
-        telegramPairingChannel?.disconnect()
-
-        // The token is not in the saved config yet — the wizard writes it only
-        // when it finishes — so this bridge runs on a config that lives exactly
-        // as long as the pairing. Empty allowlist and no rules on purpose:
-        // until someone claims the code this bot obeys nobody, and a stray
-        // message must not trip a trigger. A zero backfill keeps a stale
-        // `/start` from before the wizard opened out of the pairing.
-        var pairingConfig = config.telegram ?? TelegramConfig()
-        pairingConfig.botToken = token
-        pairingConfig.allowedUsers = []
-        pairingConfig.rules = []
-        pairingConfig.backfillSeconds = 0
-
-        let channel = TelegramChannel(config: pairingConfig)
-        channel.armPairing(session)
-        channel.onPaired = onPaired
-        channel.onStateChange = { [weak self] state in
-            if case .error(let msg) = state { self?.presentTelegramError(msg) }
-        }
-        // Deliberately not registered with Fleet: this bridge exists to
-        // receive one `/start`, and a registered channel could carry orders
-        // from a bot nobody has been allowed on yet.
-        telegramPairingChannel = channel
-        lastTelegramError = nil
-        channel.connect()
-        NSLog("[Settings] Telegram pairing bridge up")
-    }
-
-    func settingsEndTelegramPairing(_ settings: SettingsViewController) {
-        guard let channel = telegramPairingChannel else { return }
-        channel.armPairing(nil)
-        channel.disconnect()
-        telegramPairingChannel = nil
-        // Back to whatever is saved. On the wizard's success path this is the
-        // pre-pairing config and the save that follows immediately restarts the
-        // bridge again with the new one; on cancel it is the only restart.
-        restartTelegramBridge()
     }
 }
 
@@ -2850,14 +2468,9 @@ extension MainWindowController: TabCoordinatorDelegate {
     func tabCoordinatorRequestClearContentContainer(_ coordinator: TabCoordinator) {
         // Keep the chrome shell mounted; switchToTab(0) re-slots dashboard hosts.
     }
-    func tabCoordinator(_ coordinator: TabCoordinator, paneDidEnd terminalID: String, reason: String) {
-        endChatBindings(forPaneId: terminalID, reason: reason)
-    }
-
     func tabCoordinator(_ coordinator: TabCoordinator, worktreesDidVanish paths: [String]) {
         for path in paths {
             tabCoordinator.cards.clear(worktreePath: path)
-            endChatBindings(forWorktreePath: path, reason: "the worktree was deleted")
         }
     }
 }
@@ -2873,12 +2486,7 @@ extension MainWindowController: TerminalCoordinatorDelegate {
         // Sweep the worktree's cards before the UI drops it: deleting a worktree
         // takes every pane with it, so worktree-scoped cards are stale too.
         tabCoordinator.cards.clear(worktreePath: info.path)
-        endChatBindings(forWorktreePath: info.path, reason: "its worktree was deleted")
         worktreeDidDelete(info)
-    }
-
-    func terminalCoordinator(_ coordinator: TerminalCoordinator, didClosePane terminalID: String) {
-        endChatBindings(forPaneId: terminalID, reason: "the pane was closed")
     }
 
     func terminalCoordinator(_ coordinator: TerminalCoordinator, didCloseLastPaneInWorktree path: String) {
@@ -2921,443 +2529,80 @@ extension MainWindowController {
 }
 
 
-// MARK: - Chat bindings
-
-extension MainWindowController {
-    /// Let go of every conversation bound to a pane that has ended.
-    ///
-    /// The one path for it, because a pane ends more ways than a person
-    /// closing it: the worktree it lived in is deleted, or the repo is. Each of
-    /// those used to tear the pane down without telling the chat layer
-    /// anything, which left its chat counted as bound, so fleet notices stayed
-    /// silenced in it for good.
-    ///
-    /// `reason` completes the sentence the far end is told, so it says what
-    /// actually happened rather than the same line for every ending.
-    func endChatBindings(forPaneId paneId: String, reason: String) {
-        for session in tabCoordinator.commandSessions.close(paneId: paneId) {
-            retireChatBinding(session, reason: reason)
-        }
-    }
-
-    /// The worktree is gone, so is every conversation bound to it.
-    func endChatBindings(forWorktreePath path: String, reason: String) {
-        for session in tabCoordinator.commandSessions.close(worktreePath: path) {
-            retireChatBinding(session, reason: reason)
-        }
-    }
-
-    /// One conversation, let go of: whatever the binding owned is cleaned up,
-    /// and the far end stops being left to guess.
-    func retireChatBinding(_ session: CommandSession, reason: String) {
-        if session.surface == "mail", let account = config.gmailMail?.accountEmail {
-            EmailAttachmentStore().remove(threadID: session.id, account: account)
-        }
-        guard session.surface == "telegram" else { return }
-        noticeUnbound(session, reason: reason)
-    }
-
-    /// Say once, in the room itself, that this conversation is no longer
-    /// pointed at anything. Without it the next order typed there is the first
-    /// anyone hears of it, hours later.
-    private func noticeUnbound(_ session: CommandSession, reason: String) {
-        ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
-            channelId: "telegram", targetChatId: session.id,
-            content: "Unbound — \(reason). `/status` lists what is running, `/go #n` picks a pane.",
-            format: .markdown))
-    }
-
-    /// Retire the bindings the teardown paths never saw, and report how many.
-    ///
-    /// Run from `/status`, which is already the fleet inventory: the listing
-    /// and the reconciliation answer the same question, and a sweep nobody has
-    /// to remember to run is the only kind that stays true. Deliberately not on
-    /// a timer — unbinding chats on a schedule while nobody is watching is not
-    /// something to do quietly.
-    ///
-    /// The rule for what counts as stale is `StaleChatBindings`, which is where
-    /// the reasoning about false positives lives.
-    @discardableResult
-    func reconcileChatBindings() -> Int {
-        let store = tabCoordinator.commandSessions
-        let sessions = store.allSessions()
-        let paths = sessions.filter { !$0.closed }
-            .compactMap(\.boundWorktreePath).filter { !$0.isEmpty }
-        guard !paths.isEmpty else { return 0 }
-        // Probed off the main thread and with a deadline: these paths live on a
-        // removable volume, and a stale mount's `stat()` blocks forever. Only
-        // what is *definitively* absent counts as missing — a probe that timed
-        // out is not an answer.
-        let missing = FileSystemProbe.missingPaths(from: paths)
-        // Every last one missing reads as a volume that went away, not a fleet
-        // deleted one worktree at a time. Believing it would unbind every chat.
-        guard missing.count < Set(paths).count else {
-            NSLog("[Telegram] Binding sweep skipped — every worktree probed missing, which reads as an unmounted volume.")
-            return 0
-        }
-        let stale = StaleChatBindings.stale(
-            in: sessions,
-            worktreeExists: { !missing.contains($0) },
-            paneIsLive: { Fleet.shared.pane(for: $0) != nil })
-        var retired = 0
-        for session in stale {
-            // Counted on the close, not on the candidate: the count is what the
-            // reader is told, and a binding something else closed first is not
-            // work this sweep did.
-            guard let closed = store.close(key: session.key) else { continue }
-            NSLog("[Telegram] Binding \(closed.key) retired — \(closed.boundWorktreePath ?? "?") is gone")
-            retireChatBinding(closed, reason: "the worktree was deleted")
-            retired += 1
-        }
-        return retired
-    }
-}
-
-
-// MARK: - Chat cards
-
-extension MainWindowController {
-    /// One message per card, and only when there is something to say.
-    ///
-    /// Both kinds of card carry options, but they earn their place on a phone
-    /// differently:
-    ///
-    ///   - A **question** is a stop. The pane sits at its prompt until someone
-    ///     picks, and until this existed the only place to pick was this Mac,
-    ///     which made every approval a walk back to the desk. It gets a message
-    ///     of its own.
-    ///   - A **suggestion** is an offer, and its words have already been sent:
-    ///     the card's summary and the completion notice are both the agent's
-    ///     final prose. So it gets no message — its options are added to that
-    ///     notice as buttons. No notice, no buttons: if the completion was
-    ///     never worth telling the phone about, neither are its next steps.
-    ///
-    /// A suggestion whose notice has not come back with an id yet is left out
-    /// of the seen set rather than dropped, so the next pass picks it up.
-    func publishCardsToChat(_ cards: [Card]) {
-        retireVanishedCardButtons(live: Set(cards.map(\.id)))
-        // A multi-select question the user is ticking from a chat: its new
-        // ticks come back from the core; redraw them where it was shown.
-        for card in cards where card.multiSelect {
-            guard let refs = cardButtonMessages[card.id], chatCardLabels[card.id] != card.labels else { continue }
-            chatCardLabels[card.id] = card.labels
-            let buttons = optionButtons(for: card, dismissable: true)
-            for ref in refs {
-                ChannelHub.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
-                                             messageId: ref.messageId, buttons: buttons)
-            }
-        }
-        let attachable = cards.filter { card in
-            guard !card.options.isEmpty else { return false }
-            return card.isAgentQuestion || card.isFirstMates || !noticeBook.recent(pane: card.terminalID).isEmpty
-        }
-        for card in chatSeenCards.absorb(attachable) {
-            // First Mate's asks stop it like a question stops an agent.
-            if card.isAgentQuestion || card.isFirstMates {
-                chatCardLabels[card.id] = card.labels
-                sendCardToChat(card)
-            } else {
-                attachOptionsToNotice(card)
-            }
-        }
-    }
-
-    /// Add a suggestion's options to the completion notice they belong under.
-    private func attachOptionsToNotice(_ order: Card) {
-        let targets = noticeBook.recent(pane: order.terminalID)
-        guard !targets.isEmpty else { return }
-        let buttons = optionButtons(for: order)
-        for target in targets {
-            ChannelHub.shared.setButtons(channelId: "telegram", chatId: target.chatId,
-                                            messageId: target.messageId, buttons: buttons)
-        }
-        cardButtonMessages[order.id] = targets
-    }
-
-    func rememberNotice(terminalID: String, chatId: String, messageId: String) {
-        noticeBook.record(pane: terminalID, chatId: chatId, messageId: messageId)
-    }
-
-    /// Take the buttons off cards that have left the queue, and forget notices
-    /// too old to attach to. Runs on the island's refresh, which is the only
-    /// place that sees the queue as a whole.
-    private func retireVanishedCardButtons(live: Set<String>) {
-        for orderId in cardButtonMessages.keys where !live.contains(orderId) {
-            retireCardButtons(orderId)
-        }
-        noticeBook.prune()
-    }
-
-    /// Take one card's buttons down everywhere they were drawn — answering it
-    /// in one chat must not leave it on offer in another.
-    private func retireCardButtons(_ orderId: String) {
-        for ref in cardButtonMessages.removeValue(forKey: orderId) ?? [] {
-            ChannelHub.shared.setButtons(channelId: "telegram", chatId: ref.chatId,
-                                            messageId: ref.messageId, buttons: [])
-        }
-    }
-
-    /// The card's options as buttons. `dismissable` adds a way to clear a card
-    /// without answering it — worth offering on a question, which otherwise
-    /// sits there, and not on a suggestion, where not tapping *is* declining.
-    private func optionButtons(for order: Card, dismissable: Bool = false) -> [MessageButton] {
-        // Minted once and shared by every chat the card reaches: a token says
-        // what the button means, not who tapped it.
-        var buttons = order.labels.enumerated().map { index, label in
-            MessageButton(label: label, token: ChatCallbackRegistry.shared.mint(
-                .suggestionOption(orderId: order.id, index: index)))
-        }
-        if dismissable {
-            buttons.append(MessageButton(label: "Leave it waiting",
-                                         token: ChatCallbackRegistry.shared.mint(
-                                            .dismissSuggestion(orderId: order.id))))
-        }
-        return buttons
-    }
-
-    private func sendCardToChat(_ order: Card) {
-        let pane = Fleet.shared.pane(for: order.terminalID)
-        let paneKey = pane.map {
-            PaneHandleRegistry.key(sessionKey: $0.station?.paneSessionKey ?? "", paneId: $0.id)
-        }
-        // Unlike a completion notice, a card is not silenced by `/go`. Binding
-        // says "route my conversation to #12"; it does not say "don't tell me
-        // when the fleet stops". A blocked agent is the one thing that never
-        // resolves itself, and a chat bound to another pane is still the only
-        // way its owner can answer this one without walking back to the Mac.
-        var chats = Set(tabCoordinator.commandSessions.telegramChatsToNotify(
-            paneKey: paneKey, fleetListenerChatIds: []))
-        if let chat = config.telegram?.resolvedDefaultChatId { chats.insert(chat) }
-        if let chat = telegramChannel?.fleetNotifyChatId { chats.insert(chat) }
-        let ordered = chats.sorted()
-        guard !ordered.isEmpty else { return }
-
-        let buttons = optionButtons(for: order, dismissable: true)
-        let text = Self.questionCardText(
-            handle: paneKey.map { PaneHandleRegistry.shared.handle(for: $0) },
-            project: order.project, branch: order.branch,
-            message: order.message, options: order.options)
-        for chatId in ordered {
-            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
-                channelId: "telegram", targetChatId: chatId, content: text,
-                format: .markdown, buttons: buttons,
-                packetKey: Self.questionCardPacketKey(order))
-            ) { [weak self] messageId in
-                guard let messageId else { return }
-                DispatchQueue.main.async {
-                    self?.cardButtonMessages[order.id, default: []].append(
-                        ChatNoticeBook.Ref(chatId: chatId, messageId: messageId))
-                }
-            }
-        }
-    }
-
-    /// Stable across a queue flicker. It deliberately names the card contents,
-    /// not a transient event sequence, so rediscovering the same approval is
-    /// the same Telegram packet.
-    static func questionCardPacketKey(_ card: Card) -> String {
-        [card.id, card.message, card.options.joined(separator: "\u{1E}")].joined(separator: "\u{1F}")
-    }
-
-
-    /// The card as a chat message. Pure, so its shape is testable.
-    ///
-    /// The options are spelled out in the text as well as drawn as buttons: a
-    /// button label is trimmed to fit a phone's width, and the difference
-    /// between two options is often in the part that gets trimmed.
-    static func questionCardText(handle: Int?, project: String, branch: String,
-                                 message: String, options: [String]) -> String {
-        let target = [project, branch].filter { !$0.isEmpty }.joined(separator: " / ")
-        let head = [handle.map { "#\($0)" }, target.isEmpty ? nil : target]
-            .compactMap { $0 }.joined(separator: " · ")
-        var lines = ["\(AgentStatus.waiting.icon) **Waiting on you**"]
-        if !head.isEmpty { lines.append(head) }
-        let prompt = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !prompt.isEmpty { lines.append("\n\(prompt)") }
-        if !options.isEmpty {
-            lines.append("")
-            for (index, option) in options.enumerated() {
-                lines.append("\(index + 1). \(option)")
-            }
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    /// Telegram refused a send because the chat is gone — the bot was removed
-    /// from the group, or blocked. Close its binding, or every notice from the
-    /// pane it pointed at fails the same way forever. Nothing is said: there
-    /// is nowhere left to say it.
-    func letGoOfGoneChat(_ chatId: String) {
-        let key = CommandSession.key(surface: "telegram", id: chatId)
-        guard tabCoordinator.commandSessions.close(key: key) != nil else { return }
-        NSLog("[Telegram] Binding \(key) closed — the chat no longer accepts messages")
-    }
-
-    /// Stop was pressed under the progress board in a private chat: interrupt
-    /// the pane that chat is bound to, the one the board shows in full. Esc is
-    /// what every agent TUI takes as "stop this turn" without ending the
-    /// session.
-    func stopBoundPane(chatId: String) {
-        let session = tabCoordinator.commandSessions.session(
-            for: CommandSession.key(surface: "telegram", id: chatId))
-        guard !session.closed, let key = session.boundPaneKey,
-              let pane = fleetIndex().pane(handleKey: key),
-              let station = StationRegistry.shared.station(forId: pane.id) else {
-            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
-                channelId: "telegram", targetChatId: chatId,
-                content: "Nothing to stop — this chat isn't talking to a running pane.", format: .markdown))
-            return
-        }
-        let sent = station.interruptTurn()
-        ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
-            channelId: "telegram", targetChatId: chatId,
-            content: sent ? "Stopped **\(pane.target)** (sent Esc)."
-                          : "Couldn't reach **\(pane.target)** to stop it.",
-            format: .markdown))
-    }
-
-    /// Someone tapped a button in a chat.
-    ///
-    /// A token that no longer resolves is not an error: the tokens live only as
-    /// long as the run, and a card's message sits in the chat's history forever,
-    /// so a tap can arrive from last week or from before a relaunch. Say so and
-    /// change nothing — replaying it against a fleet that has moved on is how a
-    /// stale button ends up typing into somebody else's pane.
-    func handleChatCallback(_ callback: InboundCallback) {
-        guard let action = ChatCallbackRegistry.shared.action(for: callback.token) else {
-            replyToChat(callback, "That card has already been answered — or it is from before seahelm last started.")
-            return
-        }
-        switch action {
-        case .command(let line):
-            // A line's buttons are a listing's shortcuts — `/go #7` beside each
-            // pane — and stay tappable: picking one is not answering anything.
-            let surface = CommandSurface(
-                sessionKey: CommandSession.key(surface: "telegram", id: callback.chatId),
-                isDesktop: false, commander: callback.senderId)
-            // `/yes` answers the question it sat under; leave it tappable and
-            // a second tap reads "Nothing to confirm" under a live-looking card.
-            if line == "/yes" { clearChatButtons(callback) }
-            routeCommand(line, surface: surface) { [weak self] reply in
-                guard !reply.text.isEmpty else { return }
-                self?.replyToChat(callback, reply.text,
-                                  buttons: ChatCallbackRegistry.shared.buttons(for: reply.buttons))
-            }
-            return
-        case .suggestionOption(let orderId, let index):
-            guard let card = tabCoordinator.cards.card(id: orderId), index < card.labels.count else {
-                replyToChat(callback, "That card is gone — the agent moved on.")
-                return
-            }
-            let option = card.labels[index]
-            handleSuggestionTapped(order: card, optionText: option)
-            // A multi-select tick leaves the question up; its new ticks are
-            // redrawn when the core sends the cards again. Say nothing: a reply
-            // per tick would bury the card.
-            if card.multiSelect, option != Card.doneLabel {
-                let tapped = ChatNoticeBook.Ref(chatId: callback.chatId, messageId: callback.messageId)
-                let known = cardButtonMessages[orderId]?.contains {
-                    $0.chatId == tapped.chatId && $0.messageId == tapped.messageId
-                } ?? false
-                if !known { cardButtonMessages[orderId, default: []].append(tapped) }
-                return
-            }
-            ChatCallbackRegistry.shared.retire(orderId: orderId)
-            replyToChat(callback, "Picked **\(Self.pickedSummary(card, tapped: option))**.")
-        case .dismissSuggestion(let orderId):
-            if let card = tabCoordinator.cards.card(id: orderId) { dismissOrder(card) }
-            replyToChat(callback, "Left it. The agent is still waiting — answer it on the Mac when you get there.")
-        }
-        // The card has been dealt with; its buttons must stop offering options
-        // in a message that stays in the chat's history for good — in *every*
-        // chat that was shown it, not only the one that answered. (A `.command`
-        // button returned above; nothing was answered.)
-        let orderId = Self.orderId(of: action)
-        let tapped = ChatNoticeBook.Ref(chatId: callback.chatId, messageId: callback.messageId)
-        if let orderId {
-            // Matched on the message, not the whole ref: `at` is "now" here and
-            // would never equal the moment the card was sent, so an identity
-            // comparison would book the same message twice and edit it twice.
-            let known = cardButtonMessages[orderId]?.contains {
-                $0.chatId == tapped.chatId && $0.messageId == tapped.messageId
-            } ?? false
-            if !known { cardButtonMessages[orderId, default: []].append(tapped) }
-            retireCardButtons(orderId)
-        } else {
-            ChannelHub.shared.setButtons(channelId: callback.channelId, chatId: callback.chatId,
-                                            messageId: callback.messageId, buttons: [])
-        }
-    }
-
-    /// What a tap answered, for the chat's "Picked …" line: Done on a
-    /// multi-select card stands for the rows ticked before it.
-    static func pickedSummary(_ card: Card, tapped: String) -> String {
-        guard card.multiSelect, tapped == Card.doneLabel else { return tapped }
-        let options = card.options
-        let picked = card.checked.sorted().compactMap { $0 < options.count ? options[$0] : nil }
-        return picked.isEmpty ? "nothing" : picked.joined(separator: ", ")
-    }
-
-    /// Which card a tap belongs to, when it belongs to one.
-    private static func orderId(of action: ChatCallbackAction) -> String? {
-        switch action {
-        case .command: return nil
-        case .suggestionOption(let orderId, _): return orderId
-        case .dismissSuggestion(let orderId): return orderId
-        }
-    }
-
-    private func replyToChat(_ callback: InboundCallback, _ markdown: String,
-                             buttons: [MessageButton] = []) {
-        ChannelHub.shared.pushToChannel(callback.channelId, message: OutboundMessage(
-            channelId: callback.channelId, targetChatId: callback.chatId,
-            content: markdown, format: .markdown, buttons: buttons))
-    }
-
-    private func clearChatButtons(_ callback: InboundCallback) {
-        ChannelHub.shared.setButtons(channelId: callback.channelId, chatId: callback.chatId,
-                                        messageId: callback.messageId, buttons: [])
-    }
-}
-
 // MARK: - Sharing one pane
 
 extension MainWindowController: PaneSharing {
-    /// A link another machine opens to see only the focused pane.
-    func shareFocusedPane(lifetime: ShareLinkLifetime) -> PaneShareOffer? {
+    /// A link another machine opens to see only the focused pane, minted by
+    /// seahelm-gateway (`share.create`).
+    func shareFocusedPane(lifetime: ShareLinkLifetime,
+                          completion: @escaping (Result<PaneShareOffer, GatewayClient.Failure>) -> Void) {
         guard let path = tabCoordinator.selectedPane?.worktreePath,
               let stationId = PaneTitleResolver.focusedStationId(
                 in: terminalCoordinator.stationManager.tree(forPath: path)),
               let key = StationRegistry.shared.station(forId: stationId)?.paneSessionKey,
-              !key.isEmpty else { return nil }
-        let pane = tabCoordinator.mqttDataSource?.snapshotPanes().first { $0.paneSessionKey == key }
+              !key.isEmpty else {
+            completion(.failure(.rpc(code: 0, message: "No pane to share.")))
+            return
+        }
+        let pane = tabCoordinator.controlDataSource?.snapshotPanes().first { $0.paneSessionKey == key }
         let title = (pane?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let label = !title.isEmpty ? title
             : pane.map { "\($0.project) \u{00B7} \($0.branch)" } ?? URL(fileURLWithPath: path).lastPathComponent
-        let (link, token) = tabCoordinator.shareLinks.mint(paneSessionKey: key, label: label, lifetime: lifetime)
-        let gateway = config.hostGateway ?? HostGatewayConfig()
-        let url = HostGatewayConfig.shareURL(
-            host: LANAddress.ipv4() ?? "127.0.0.1", port: gateway.resolvedPort,
-            paneSessionKey: key, shareToken: token)
-        return shareOffer(link, url: url, lifetime: lifetime)
+        GatewayClient.createShare(paneSessionKey: key, label: label, lifetime: lifetime, recipient: nil) { result in
+            switch result {
+            case .failure(let failure):
+                completion(.failure(failure))
+            case .success(let created):
+                Self.shareOffer(linkId: created.id, url: created.url, paneSessionKey: key, lifetime: lifetime,
+                                expiresAt: created.expiresAt, recipient: nil) { completion(.success($0)) }
+            }
+        }
     }
 
-    func changeShare(_ offer: PaneShareOffer, lifetime: ShareLinkLifetime) -> PaneShareOffer? {
-        guard let link = tabCoordinator.shareLinks.setLifetime(id: offer.linkId, lifetime) else { return nil }
-        return shareOffer(link, url: offer.url, lifetime: lifetime)
+    func changeShare(_ offer: PaneShareOffer, lifetime: ShareLinkLifetime, completion: @escaping (PaneShareOffer?) -> Void) {
+        GatewayClient.updateShare(id: offer.linkId, lifetime: lifetime) { result in
+            guard case .success(let link) = result else { return completion(nil) }
+            Self.shareOffer(linkId: link.id, url: offer.url, paneSessionKey: offer.paneSessionKey, lifetime: lifetime,
+                            expiresAt: link.expiresAt, recipient: link.recipient, completion: completion)
+        }
     }
 
-    func changeShare(_ offer: PaneShareOffer, recipient: String?) -> PaneShareOffer? {
-        guard let link = tabCoordinator.shareLinks.setRecipient(id: offer.linkId, recipient) else { return nil }
-        return shareOffer(link, url: offer.url, lifetime: offer.lifetime)
+    func changeShare(_ offer: PaneShareOffer, recipient: String?, completion: @escaping (PaneShareOffer?) -> Void) {
+        GatewayClient.updateShare(id: offer.linkId, recipient: .some(recipient)) { result in
+            guard case .success(let link) = result else { return completion(nil) }
+            Self.shareOffer(linkId: link.id, url: offer.url, paneSessionKey: offer.paneSessionKey,
+                            lifetime: offer.lifetime, expiresAt: link.expiresAt, recipient: link.recipient,
+                            completion: completion)
+        }
     }
 
     func revokeShare(_ offer: PaneShareOffer) {
-        tabCoordinator.shareLinks.revoke(id: offer.linkId)
+        GatewayClient.revokeShare(id: offer.linkId)
     }
 
     func revokeAllShares(paneSessionKey: String) {
-        tabCoordinator.shareLinks.revokeAll(paneSessionKey: paneSessionKey)
+        GatewayClient.revokeShares(paneSessionKey: paneSessionKey)
+    }
+
+    /// The offer the popover shows: the link, plus what only the gateway
+    /// knows — whether its listener is up, and how many other links the pane
+    /// has. Completes on main.
+    private static func shareOffer(linkId: String, url: String, paneSessionKey: String, lifetime: ShareLinkLifetime,
+                                   expiresAt: Date?, recipient: String?,
+                                   completion: @escaping (PaneShareOffer) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let status = GatewayClient.call("gateway.status")
+            let links = GatewayClient.call("share.list")
+            let listening = (try? status.get()).map { GatewayStatus($0).web.listening } ?? false
+            let others = ((try? links.get())?["links"] as? [[String: Any]] ?? [])
+                .compactMap(GatewayShareLink.init)
+                .filter { $0.paneSessionKey == paneSessionKey && $0.id != linkId }.count
+            DispatchQueue.main.async {
+                completion(PaneShareOffer(url: url, gatewayListening: listening, linkId: linkId,
+                                          paneSessionKey: paneSessionKey, lifetime: lifetime,
+                                          expiresAt: expiresAt, recipient: recipient, otherLinks: others))
+            }
+        }
     }
 }
 
@@ -3366,28 +2611,8 @@ extension MainWindowController: PaneSharing {
 extension MainWindowController {
     fileprivate func setupFirstMate(_ dashboard: DashboardViewController) {
         let firstMate = tabCoordinator.firstMate
-        // First Mate's answer to a chat goes back to that chat.
-        firstMate.onReply = { [weak self] targets, text in
-            for key in targets where key.hasPrefix("telegram:") {
-                self?.pushFirstMateLine(text, chatId: String(key.dropFirst("telegram:".count)))
-            }
-        }
-        // What it did on its own is worth a line on the phone; reads and
-        // deliveries are not.
-        firstMate.onAudit = { [weak self] entry in
-            guard entry.kind == .action,
-                  let self, let chat = self.config.telegram?.resolvedDefaultChatId else { return }
-            self.pushFirstMateLine("→ \(entry.text)", chatId: chat)
-        }
         firstMate.onStateChange = { [weak self] _ in
             self?.refreshIslandFirstMate()
-            // Remote clients (seahelm-web) draw the same First Mate: the core's.
-            DispatchQueue.global(qos: .utility).async {
-                guard let state = FirstMateLink.remoteState() else { return }
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: .firstMateStateChanged, object: nil, userInfo: state)
-                }
-            }
         }
     }
 
@@ -3401,11 +2626,6 @@ extension MainWindowController {
     /// or shut it when that is what is showing.
     @objc func toggleFirstMate() {
         islandController.toggleFirstMate()
-    }
-
-    fileprivate func pushFirstMateLine(_ text: String, chatId: String) {
-        ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
-            channelId: "telegram", targetChatId: chatId, content: "⎈ First Mate\n\(text)", format: .markdown))
     }
 
     func settingsOpenFirstMate(_ settings: SettingsViewController) {
@@ -3426,8 +2646,8 @@ extension MainWindowController {
 
 extension MainWindowController {
 
-    func sayToFirstMate(_ text: String, from surface: CommandSurface) -> Bool {
-        tabCoordinator.firstMate.sendUserMessage(text, replyTo: surface.isDesktop ? nil : surface.sessionKey)
+    func sayToFirstMate(_ text: String) -> Bool {
+        tabCoordinator.firstMate.sendUserMessage(text)
     }
 
     /// The fleet as the command language sees it, with every pane's stable
@@ -3473,63 +2693,5 @@ extension MainWindowController {
 
     func selectWorktree(path: String) {
         dashboardVC?.commitWorktreeSelection(path: path)
-    }
-
-
-
-
-
-    /// Telegram delivery for a pane-status banner. Bound chats hear only their
-    /// pane; the default / last-order chat hears the whole fleet while unbound.
-    ///
-    /// `fleetSilenced` drops the fleet-wide listeners for this one event — the
-    /// desktop already showed it. Chats bound to the pane are never dropped.
-    private func notifyTelegramSessions(terminalID: String, fleetSilenced: Bool = false,
-                                        text render: (_ handle: Int?) -> String) {
-        let pane = terminalID.isEmpty ? nil : Fleet.shared.pane(for: terminalID)
-        let paneKey: String?
-        if let pane {
-            paneKey = PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "",
-                                             paneId: pane.id)
-        } else {
-            paneKey = nil
-        }
-        let text = render(paneKey.map { PaneHandleRegistry.shared.handle(for: $0) })
-
-        var fleet: [String] = []
-        if !fleetSilenced {
-            if let chat = config.telegram?.resolvedDefaultChatId { fleet.append(chat) }
-            if let chat = telegramChannel?.fleetNotifyChatId, !fleet.contains(chat) {
-                fleet.append(chat)
-            }
-        }
-        deliverTelegram(terminalID: terminalID, text: text, paneKey: paneKey, fleet: fleet)
-    }
-
-    /// A pane-status notice. In a chat the pane's `#handle` leads the second
-    /// line: a fleet-wide chat hears many panes, and the handle is what `/go`
-    /// and `/order` take.
-    static func noticeText(icon: String, title: String, subtitle: String, body: String,
-                           handle: Int? = nil) -> String {
-        let place = handle.map { "#\($0) \(subtitle)" } ?? subtitle
-        return "\(icon) **\(title)**\n\(place)\n\n\(body)"
-    }
-
-    private func deliverTelegram(terminalID: String, text: String, paneKey: String?,
-                                 fleet: [String]) {
-        let chats = tabCoordinator.commandSessions.telegramChatsToNotify(
-            paneKey: paneKey, fleetListenerChatIds: fleet)
-        for chatId in chats {
-            ChannelHub.shared.pushToChannel("telegram", message: OutboundMessage(
-                channelId: "telegram", targetChatId: chatId, content: text, format: .markdown)
-            ) { [weak self] messageId in
-                // Remembered so an agent's next-step options, which land a beat
-                // after this, can be added to it as buttons.
-                guard !terminalID.isEmpty, let messageId else { return }
-                DispatchQueue.main.async {
-                    self?.rememberNotice(terminalID: terminalID, chatId: chatId, messageId: messageId)
-                }
-            }
-        }
     }
 }
