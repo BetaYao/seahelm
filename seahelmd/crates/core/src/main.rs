@@ -15,8 +15,11 @@
 //! takes the agents' lifecycle hooks, decides each pane's state, and serves it
 //! over `~/.config/seahelm/core.sock` (see docs/status-core-port.md).
 
+mod actions;
 mod bridge;
+mod cli;
 mod core;
+mod first_mate;
 mod install;
 mod poller;
 mod pr;
@@ -55,6 +58,8 @@ fn run() -> Result<()> {
             Ok(())
         }
         "shadow" => shadow::run(rest),
+        // The `seahelm` words First Mate's instructions use, on the core.
+        "cli" => std::process::exit(cli::run(rest)),
         // Never an error, never output: an agent runs this on every event.
         "hook" => {
             bridge::run(rest);
@@ -99,6 +104,7 @@ fn serve() -> Result<()> {
     core.spawn_titles();
     pr::spawn(Arc::clone(&core));
     usage::spawn();
+    core.spawn_first_mate();
     eprintln!("seahelm-core listening on {}", path.display());
     rpc::serve(listener, core)
 }

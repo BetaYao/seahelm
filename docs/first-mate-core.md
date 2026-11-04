@@ -1,6 +1,6 @@
 # Cards and First Mate in seahelm-core
 
-Status: phase 1 (cards in the core, GPUI card strip) done; phases 2–4 planned. Decided 2026-11-04: seahelm-core owns First Mate, and every
+Status: phases 1 (cards in the core, GPUI card strip) and 2 (First Mate in the core) done; 3–4 planned. Decided 2026-11-04: seahelm-core owns First Mate, and every
 "something waits on you" item is one card model, served by the core. The
 macOS island, Telegram, seahelm-web and the GPUI client are renderers.
 
@@ -103,6 +103,41 @@ as it runs First Mate. The app, when it sees a core that answers
 `autopilot.state` with `owner: "core"`, runs no coordinator of its own and
 renders the core's state and cards. An app without a core (older core, core
 not running) keeps its own First Mate, as today.
+
+## As built (phase 2)
+
+- `seahelmd/crates/core/src/first_mate/`: `rules` (automations.yml, built-ins,
+  quiet hours, branch globs), `cron`, `clock` (local time from the system
+  offset), `engine` (PR edge detector, ledger, dispatch and prompt, audit),
+  `facts`, `policy`, `pane` (directory, managed files, launch), and `mod.rs`,
+  the coordinator: one thread that owns all First Mate state and is talked to
+  by message (gate / propose / state / say wait for an answer; pane outcomes
+  and answered cards do not), ticking every 20 s for config, session, PRs,
+  schedules and delivery.
+- Ownership: the core runs First Mate only with `autopilot_enabled: true`
+  **and** `autopilot_owner: "core"` in `config.json`, and only while it holds
+  `first-mate/owner.lock` (`File::try_lock`). Without `autopilot_owner` the
+  app keeps First Mate as before, so this phase changes nothing until the
+  key is set. Turning it off stops First Mate within a tick and drops its
+  open cards; the session is left, as the app leaves it.
+- The CLI: First Mate's directory gets `bin/seahelm` (`seahelm.cmd` on
+  Windows), a shim onto `seahelm-core cli`, put first on its PATH inside the
+  session's shell. Verbs: `pane list/read/run/send/keys/wait`, `worktree
+  create/delete`, `propose --json`, `cards`. Every call carries
+  `_meta.caller = $SEAHELM_PANE_ID`, which the core gates on, as the app did.
+- The core performs the gated actions itself (`actions.rs`): `pane.read`,
+  `pane.run`, `pane.send_text`, `pane.send_keys`, `worktree.create` (the
+  app's `task/<slug>` branch beside the repo in `<repo>-worktrees/`, setup
+  hook first, the agent briefed by its positional prompt, `agent_yolo`
+  honoured, in a held seahelmd session named as the GPUI client names a
+  worktree's first pane so it attaches to it) and `worktree.delete` (sessions
+  killed, `git worktree remove` without force, branch kept).
+- Approval and proposal cards are raised in First Mate's directory with the
+  approval id as payload; `card.answered` (and `cards.dismiss`) reach the
+  coordinator, which runs the call off its thread and tells First Mate.
+- `autopilot.state`, `autopilot.propose`, `autopilot.answer {card, option}`
+  and `autopilot.say {text}` on the core socket.
+- First Mate's pane gets no notices; its own questions still become cards.
 
 ## Phases (one PR each)
 

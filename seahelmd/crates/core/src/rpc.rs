@@ -166,8 +166,13 @@ pub fn bind(path: &Path) -> Result<Listener> {
 
 /// One call to a JSON-RPC socket (ours or the app's), with a timeout.
 pub fn call(socket: &Path, method: &str, params: Value) -> Result<Value> {
+    call_with_timeout(socket, method, params, Duration::from_secs(10))
+}
+
+/// `call`, waiting up to `timeout` for the answer (a wait, a worktree add).
+pub fn call_with_timeout(socket: &Path, method: &str, params: Value, timeout: Duration) -> Result<Value> {
     let mut stream = Stream::connect(socket).with_context(|| format!("connect {}", socket.display()))?;
-    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    stream.set_read_timeout(Some(timeout))?;
     write_line(&mut stream, &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))?;
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line)?;
