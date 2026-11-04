@@ -42,16 +42,61 @@ chat progress, completion delivery, the worktree aggregator and the title
 bar. Everything else reads `AgentRegistry.shared` directly: the island, the
 web gateway, `pane.list` on the control socket, Telegram, and `EventHub`.
 
-`AgentRegistry` stays as the app's local model; only its writer changes. A
-new `CoreStatusFeed` follows the core's `events.subscribe` and writes each
-core outcome into the registry as an already-decided snapshot
-(`AgentRegistry.apply(decided)`: set the fields, publish the outcome, no
-arbitration). The three producers are deleted. Consumers keep reading the
-registry, so most of them do not change.
+### Why not keep `AgentRegistry` and change its writer
 
-```
-seahelm-core ─ events.subscribe ─► CoreStatusFeed ─► AgentRegistry.apply(decided) ─► onOutcome ─► consumers
-```
+The first cut did exactly that (an adapter: core outcomes rebuilt into
+`NormalizedEvent` / `IngestOutcome` and pushed down the old funnel). It
+worked, but it kept the boundary blurred: the app still carried a full
+decision engine switched off by flags, `NormalizedEvent` meant "input to a
+decider" in the core and "output of one" in the app, and the card queue
+mixed the core's cards with the app's by id prefix. With no compatibility
+to keep, the app gets a shape of its own instead.
+
+### The boundary
+
+**seahelm-core decides; the app shows, lays out and delivers.** Anything that
+answers "what is this agent doing, and what should the user hear about it"
+lives in the core and nowhere else.
+
+| | seahelm-core | macOS app |
+|---|---|---|
+| Hooks | the only receiver (`seahelm-hook` → `core.sock` only) | none |
+| Screen, OSC 7501 | reads from seahelmd | draws; keeps nothing for status |
+| Status, unseen, notices | decides, pushes | reports what it shows (`client.visible`, `pane.seen`); presents notices |
+| Cards | the only queue: agent cards, and cards a client raises (`cards.raise`) | renders the queue; answers and dismisses through the core; acts on `card.answered` for cards it raised |
+| Message timelines | keeps, serves | renders |
+| Locations | decides, pushes `pane.location` | acts on it (fork, auto-fork, repo auto-add) |
+| First Mate | the only owner | renders its conversation and cards |
+| PR, usage | fetches, serves | renders |
+| Layout, panes, sessions | told by the app (`pane.sync`, `worktrees.set`) | owns |
+
+### The app's side
+
+- **`CoreClient`**: the app's one connection to the core: calls, plus one
+  event stream with typed events (`PaneUpdate`, `Notice`, `CardsChanged`,
+  `CardAnswered`, `LocationChanged`, `Unseen`). Reconnects, and replays
+  `pane.list {detail: true}` and `cards.list` on every connect.
+- **`Fleet`**: a read model of the core's panes, keyed by seahelmd session
+  name: `PaneState` is exactly the core's `pane_detail`. It is written only
+  by `CoreClient` and has no logic beyond lookup and change observers. It
+  replaces `AgentRegistry`'s state half. Rows, the island, chrome, the
+  control socket and the web read it.
+- **`ChannelHub`**: Telegram, mail and chat routing, pulled out of
+  `AgentRegistry` (where it has nothing to do with agent state). It reads
+  `Fleet` and `CoreClient` events like any other consumer, until it moves to
+  seahelm-gateway.
+- **`NotificationPresenter`**: banner and history for a core `Notice`. No
+  cooldowns, no gates.
+- **Cards**: no app queue. The island, Telegram and the web render the
+  core's cards. The app's own asks (integration reports) are raised with
+  `cards.raise`, and their answers come back as `card.answered`.
+- **Deleted** with `AgentRegistry`: `StatusPublisher`, `StatusDetector`,
+  the manifest engine, decoders, `WebhookStatusProvider`, `HookDecoder`,
+  `NormalizedEvent`, `IngestOutcome`, `PaneReducer`, `NotificationManager`'s
+  decisions, `PendingOrdersQueue`, `MessageStreamHub`,
+  `PaneMessageProjector`, the app's First Mate host (`AutopilotCoordinator`'s
+  local mode, `FirstMateCoordinator`, `FirstMate.evaluate`), and the app's
+  hook sink on the control socket.
 
 ## What the core adds first
 
@@ -71,22 +116,22 @@ seahelm-core ─ events.subscribe ─► CoreStatusFeed ─► AgentRegistry.app
 
 ## Steps
 
-Each step replaces the app's code and deletes the old path in the same PR.
-Old sessions (a seahelmd from before `Snapshot`) are restarted once before
-step 2 ships: the core cannot get their OSC 7501 records, and nothing
-bridges that.
+Each step deletes what it replaces in the same change. Old sessions (a
+seahelmd from before `Snapshot`) were restarted on 2026-11-04.
 
 | | Scope |
 |---|---|
-| 1 | Core: the whole pane on the wire, and `pane.location` pushed, with tests. |
-| 2 | Status. `CoreStatusFeed` writes the registry, replaying `pane.list {detail: true}` on every (re)connect. Deleted: `StatusPublisher`, `StatusDetector`, the manifest engine and store, the decoders, `WebhookStatusProvider`'s status path, the 7501 ingest, and the registry's arbitration, grace and reclaim. The hook bridge goes core-only (`seahelm-hook` v8), and the control socket stops taking `hook` / `suggest`. The shadow comparator goes. |
-| 3 | Notices and unseen completion. The app reports `client.visible` and `pane.seen`; `deliverAgentCompletion` fires on `pane.notice`; `unseen_completion` comes with the pane. `NotificationManager` keeps delivery only. |
-| 4 | Cards. The island, Telegram and the web read `cards.list` / `cards.changed` and answer with `cards.answer` / `cards.dismiss`; the app raises its own reports with `cards.raise`. `PendingOrdersQueue` goes. |
-| 5 | Messages. The web gateway, Telegram and the island read `message.*`. `MessageStreamHub` goes. |
-| 6 | Locations. Fork, auto-fork and repo auto-add act on `pane.location`. |
-| 7 | PR and usage. The app reads `pr.list` and `usage.summary`; its GitHub poller and usage providers go. The `CommandExecutor` fallback goes. |
+| 1 | Core: the whole pane on the wire (`pane_detail`), `pane.location` pushed, aliases updated on `pane.sync`, visibility kept per client. **Done.** |
+| 2 | Core: the only hook receiver (`seahelm-hook` v8 sends to `core.sock` only) and the only First Mate owner (no `autopilot_owner`; the app's First Mate host goes). |
+| 3 | App: `CoreClient` and `Fleet`. Every reader of `AgentRegistry` moves to `Fleet`; `ChannelHub` takes the channel half. `AgentRegistry`, the scan, the hook sink and every decider listed above are deleted. |
+| 4 | App: notices through `NotificationPresenter`; unseen from `Fleet`. |
+| 5 | App: cards from the core only; integration reports raised with `cards.raise`. `PendingOrdersQueue` goes. |
+| 6 | App: timelines from `message.*`; `MessageStreamHub` goes. |
+| 7 | App: fork, auto-fork and repo auto-add on `pane.location`. |
+| 8 | App: PR and usage from `pr.list` / `usage.summary`; the GitHub poller, usage providers and the `CommandExecutor` fallback go. |
 
-Steps 3–7 depend only on 2.
+Steps 3–5 land together: `Fleet` replacing `AgentRegistry` takes the
+outcome stream that notices and cards rode on. 6–8 are independent.
 
 ## When the core is not there
 
