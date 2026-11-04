@@ -308,32 +308,34 @@
       <div class="rule-row"><p class="eyebrow">Deck two &middot; below deck</p></div>
       <h2>What runs it</h2>
       <p class="lede prose">
-        247 Swift files in four layers, over the Ghostty terminal engine. No Combine, no SwiftUI &mdash;
-        AppKit and delegates, because the thing on screen is a Metal surface with a PTY behind it.
+        One core, many surfaces. <code>seahelm-core</code> &mdash; a Rust service, one per user &mdash; decides what
+        every agent is doing, holds every card waiting on you, and runs First Mate. Each pane lives in a
+        <code>seahelmd</code> session of its own. The clients only draw, lay out and deliver: the native macOS app,
+        a GPUI client for Windows, Linux and macOS, the browser, Telegram.
       </p>
     </div>
 
     <div class="tbl-scroll">
       <table>
         <thead>
-          <tr><th>Layer</th><th>Path</th><th style="text-align:right">Files</th><th>What lives there</th></tr>
+          <tr><th>Part</th><th>Path</th><th style="text-align:right">Files</th><th>What lives there</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>Coordinators</td><td class="path">Sources/App/</td><td class="num">15</td>
-            <td class="desc">Window, tabs, split operations, side panels, the modal keyboard machine.</td>
+            <td>seahelm-core</td><td class="path">seahelmd/crates/core*</td><td class="num">88</td>
+            <td class="desc">Status from screens and hooks, cards, message timelines, First Mate, notices, the command language, PR and usage. Rust.</td>
           </tr>
           <tr>
-            <td>UI</td><td class="path">Sources/UI/</td><td class="num">75</td>
-            <td class="desc">Dashboard layouts, the Island, split container, worktree sidebar, diff viewer, settings, onboarding.</td>
+            <td>seahelmd</td><td class="path">seahelmd/crates/seahelmd &middot; keep-vt &middot; cli</td><td class="num">27</td>
+            <td class="desc">One daemon per session: the PTY, the screen in libghostty-vt, snapshots for the core. Also the <code>seahelm</code> CLI.</td>
           </tr>
           <tr>
-            <td>Core services</td><td class="path">Sources/Core/ &middot; Status/</td><td class="num">133</td>
-            <td class="desc"><code>AgentRegistry</code>, the detection pipeline, the manifest engine, First Mate, the control socket, hook installers.</td>
+            <td>macOS app</td><td class="path">Sources/</td><td class="num">280</td>
+            <td class="desc">AppKit over the Ghostty engine: windows, splits, the Island, the fleet. It draws what the core decides.</td>
           </tr>
           <tr>
-            <td>Terminal &amp; git</td><td class="path">Sources/Terminal/ &middot; Git/</td><td class="num">19</td>
-            <td class="desc">The Ghostty C API bridge, <code>Station</code> surface lifecycle, the split tree, worktree discovery.</td>
+            <td>GPUI client</td><td class="path">clients/gpui/</td><td class="num">14</td>
+            <td class="desc">The same fleet on Windows, Linux and macOS, drawn with GPUI straight from seahelmd and the core.</td>
           </tr>
         </tbody>
       </table>
@@ -341,119 +343,87 @@
 
     <figure>
       <div class="fig-frame">
-        <svg viewBox="0 0 1200 410" role="img" aria-label="Status detection pipeline: a hook lane and a screen-scan lane are each decoded into one normalized event shape, reduced into AgentRegistry, and published to the UI, First Mate and the event hub">
-          <g class="svg-hd" text-anchor="middle">
-            <text x="94"   y="30">SOURCE</text>
-            <text x="288"  y="30">BRIDGE</text>
-            <text x="493"  y="30">INTERPRET</text>
-            <text x="687"  y="30">DECODE</text>
-            <text x="872"  y="30">REDUCE</text>
-            <text x="1087" y="30">CONSUME</text>
+        <svg viewBox="0 0 1200 470" role="img" aria-label="Architecture: four surfaces (the macOS app, the GPUI client, the browser and Telegram) talk to one seahelm-core service, the browser and Telegram through a gateway; desktop clients stream terminals straight from seahelmd; the core reads seahelmd sessions, takes the agents’ hooks directly, runs First Mate as a session of its own and reads GitHub, transcripts and usage">
+          <g class="svg-hd" text-anchor="end">
+            <text x="1180" y="30">SURFACES</text>
+            <text x="1180" y="214">CORE</text>
+            <text x="1180" y="364">SESSIONS</text>
           </g>
 
-          <!-- hook lane -->
-          <rect x="20" y="62" width="148" height="68" rx="6" class="svg-box"/>
-          <text x="34" y="90" class="svg-t">Claude Code</text>
-          <text x="34" y="112" class="svg-t2">Codex &middot; opencode</text>
+          <!-- surfaces -->
+          <rect x="20" y="44" width="250" height="68" rx="6" class="svg-box"/>
+          <text x="34" y="72" class="svg-t">macOS app</text>
+          <text x="34" y="94" class="svg-t2">AppKit &middot; Ghostty</text>
 
-          <rect x="214" y="62" width="148" height="68" rx="6" class="svg-box"/>
-          <text x="228" y="90" class="svg-t">seahelm-hook</text>
-          <text x="228" y="112" class="svg-t2">socket &#9656; webhook</text>
+          <rect x="290" y="44" width="250" height="68" rx="6" class="svg-box"/>
+          <text x="304" y="72" class="svg-t">GPUI client</text>
+          <text x="304" y="94" class="svg-t2">Windows &middot; Linux &middot; macOS</text>
 
-          <rect x="408" y="54" width="170" height="84" rx="6" class="svg-box"/>
-          <text x="422" y="80" class="svg-t">hook events</text>
-          <text x="422" y="102" class="svg-t2">SessionStart &middot; Stop</text>
-          <text x="422" y="122" class="svg-t2">Pre/PostToolUse</text>
+          <rect x="610" y="44" width="250" height="68" rx="6" class="svg-box"/>
+          <text x="624" y="72" class="svg-t">seahelm-web</text>
+          <text x="624" y="94" class="svg-t2">browser &middot; Mini App</text>
 
-          <rect x="624" y="76" width="126" height="40" rx="6" class="svg-box"/>
-          <text x="638" y="101" class="svg-t">HookDecoder</text>
+          <rect x="880" y="44" width="300" height="68" rx="6" class="svg-box"/>
+          <text x="894" y="72" class="svg-t">Telegram</text>
+          <text x="894" y="94" class="svg-t2">chat &middot; buttons</text>
+
+          <rect x="610" y="134" width="570" height="44" rx="6" class="svg-box-plain" stroke-dasharray="5 4"/>
+          <text x="624" y="161" class="svg-t">gateway</text>
+          <text x="716" y="161" class="svg-t2">auth &middot; relay &middot; chats &mdash; in the app today</text>
 
           <g class="svg-line">
-            <line x1="168" y1="96" x2="208" y2="96" marker-end="url(#ah-b)"/>
-            <line x1="362" y1="96" x2="402" y2="96" marker-end="url(#ah-b)"/>
-            <line x1="578" y1="96" x2="618" y2="96" marker-end="url(#ah-b)"/>
-          </g>
-          <g class="svg-lbl" text-anchor="middle">
-            <text x="191" y="86">exec</text>
-            <text x="385" y="86">JSON</text>
-            <text x="601" y="86">map</text>
+            <line x1="735" y1="112" x2="735" y2="130" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+            <line x1="1030" y1="112" x2="1030" y2="130" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
           </g>
 
-          <!-- scan lane -->
-          <rect x="20" y="272" width="148" height="68" rx="6" class="svg-box"/>
-          <text x="34" y="300" class="svg-t">any of 12 CLIs</text>
-          <text x="34" y="322" class="svg-t2">no integration</text>
+          <!-- the core -->
+          <rect x="340" y="226" width="460" height="104" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+          <text x="358" y="256" class="svg-t">seahelm-core</text>
+          <text x="358" y="280" class="svg-t2">status &middot; cards &middot; messages &middot; First Mate</text>
+          <text x="358" y="300" class="svg-t2">notices &middot; commands &middot; PR &middot; usage</text>
+          <text x="358" y="320" class="svg-lbl">one per user &middot; local socket only</text>
 
-          <rect x="214" y="272" width="148" height="68" rx="6" class="svg-box"/>
-          <text x="228" y="300" class="svg-t">Ghostty screen</text>
-          <text x="228" y="322" class="svg-t2">text under a lock</text>
-
-          <rect x="408" y="264" width="170" height="84" rx="6" class="svg-box"/>
-          <text x="422" y="290" class="svg-t">StatusDetector</text>
-          <text x="422" y="312" class="svg-t2">exit &#9656; OSC 133</text>
-          <text x="422" y="332" class="svg-t2">&#9656; text patterns</text>
-
-          <rect x="624" y="286" width="126" height="40" rx="6" class="svg-box"/>
-          <text x="638" y="311" class="svg-t">ScanDecoder</text>
-
-          <rect x="408" y="364" width="170" height="34" rx="6" class="svg-box"/>
-          <text x="422" y="386" class="svg-t2">12 JSON manifests</text>
-          <line x1="493" y1="348" x2="493" y2="360" class="svg-dash" marker-end="url(#ah-c)"/>
-          <text x="502" y="360" class="svg-lbl">rules</text>
+          <rect x="860" y="242" width="320" height="68" rx="6" class="svg-box"/>
+          <text x="874" y="270" class="svg-t">outside world</text>
+          <text x="874" y="292" class="svg-t2">GitHub &middot; transcripts &middot; usage</text>
 
           <g class="svg-line">
-            <line x1="168" y1="306" x2="208" y2="306" marker-end="url(#ah-b)"/>
-            <line x1="362" y1="306" x2="402" y2="306" marker-end="url(#ah-b)"/>
-            <line x1="578" y1="306" x2="618" y2="306" marker-end="url(#ah-b)"/>
+            <line x1="145" y1="112" x2="420" y2="220" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+            <line x1="415" y1="112" x2="520" y2="220" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+            <line x1="740" y1="178" x2="700" y2="220" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+            <line x1="800" y1="276" x2="854" y2="276" marker-end="url(#ah-b)"/>
           </g>
-          <g class="svg-lbl" text-anchor="middle">
-            <text x="191" y="296">renders</text>
-            <text x="385" y="296">poll</text>
-            <text x="601" y="296">verdict</text>
-          </g>
+          <text x="150" y="214" class="svg-lbl">calls &middot; events</text>
+          <text x="808" y="268" class="svg-lbl">reads</text>
 
-          <!-- both lanes converge on one event shape -->
-          <line x1="750" y1="96"  x2="790" y2="150" class="svg-accent" marker-end="url(#ah-a2)"/>
-          <line x1="750" y1="306" x2="790" y2="178" class="svg-accent" marker-end="url(#ah-a2)"/>
-          <text x="758" y="124" class="svg-lbl">per event</text>
-          <text x="758" y="288" class="svg-lbl">per poll</text>
+          <!-- terminal streams straight from seahelmd -->
+          <line x1="40" y1="112" x2="40" y2="374" class="svg-dash" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+          <line x1="300" y1="112" x2="300" y2="374" class="svg-dash" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+          <text x="48" y="250" class="svg-lbl">terminal</text>
+          <text x="292" y="250" class="svg-lbl" text-anchor="end">terminal</text>
 
-          <rect x="796" y="126" width="152" height="64" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
-          <text x="810" y="152" class="svg-t">NormalizedEvent</text>
-          <text x="810" y="174" class="svg-t2">PaneReducer &middot; pure</text>
+          <!-- sessions -->
+          <rect x="20" y="380" width="700" height="76" rx="6" class="svg-box"/>
+          <text x="34" y="408" class="svg-t">seahelmd</text>
+          <text x="34" y="430" class="svg-t2">one daemon per session</text>
+          <text x="34" y="448" class="svg-t2">PTY &middot; screen &middot; the agent, still running</text>
 
-          <rect x="796" y="214" width="152" height="64" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
-          <text x="810" y="240" class="svg-t">AgentRegistry</text>
-          <text x="810" y="262" class="svg-t2">source of truth</text>
-
-          <line x1="872" y1="190" x2="872" y2="208" class="svg-accent" marker-end="url(#ah-a2)"/>
-          <text x="880" y="205" class="svg-lbl">delta</text>
-          <text x="872" y="306" class="svg-lbl" text-anchor="middle">publishes to all three</text>
-
-          <!-- consumers -->
-          <rect x="994" y="110" width="186" height="58" rx="6" class="svg-box"/>
-          <text x="1008" y="134" class="svg-t">Island &middot; dashboard</text>
-          <text x="1008" y="155" class="svg-t2">status bar</text>
-
-          <rect x="994" y="188" width="186" height="58" rx="6" class="svg-box"/>
-          <text x="1008" y="212" class="svg-t">First Mate</text>
-          <text x="1008" y="233" class="svg-t2">green &#9656; red zone</text>
-
-          <rect x="994" y="266" width="186" height="58" rx="6" class="svg-box"/>
-          <text x="1008" y="290" class="svg-t">EventHub</text>
-          <text x="1008" y="311" class="svg-t2">CLI subscribers</text>
+          <rect x="760" y="380" width="420" height="76" rx="6" class="svg-box"/>
+          <text x="774" y="408" class="svg-t">First Mate</text>
+          <text x="774" y="430" class="svg-t2">an agent session the core starts</text>
+          <text x="774" y="448" class="svg-t2">its seahelm calls pass the core’s gates</text>
 
           <g class="svg-line">
-            <line x1="948" y1="246" x2="988" y2="142" marker-end="url(#ah-b)"/>
-            <line x1="948" y1="246" x2="988" y2="217" marker-end="url(#ah-b)"/>
-            <line x1="948" y1="246" x2="988" y2="292" marker-end="url(#ah-b)"/>
+            <line x1="460" y1="330" x2="460" y2="374" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
           </g>
+          <text x="468" y="356" class="svg-lbl">snapshot &middot; keys</text>
+          <line x1="640" y1="380" x2="640" y2="336" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <text x="648" y="362" class="svg-lbl">hooks</text>
+          <line x1="900" y1="380" x2="806" y2="320" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <text x="860" y="352" class="svg-lbl">seahelm &#9656; gates</text>
 
           <defs>
             <marker id="ah-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-              <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
-            </marker>
-            <marker id="ah-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
             </marker>
             <marker id="ah-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
@@ -463,11 +433,11 @@
         </svg>
       </div>
       <figcaption>
-        Two lanes, one event shape. Agents that report hooks take the fast lane; the other nine are read off
-        the screen every two seconds and matched against a priority-ordered manifest &mdash; process exit beats
-        an OSC&nbsp;133 shell phase, which beats a text pattern. Both lanes decode into the same
-        <code>NormalizedEvent</code>, so the reducer stays a pure function and the UI never learns which lane
-        a status came from. Ask any pane which rule decided it: <code>seahelm pane explain &lt;pane&gt;</code>.
+        Everything that has to look the same from every surface is decided once, in the core: a status, a card
+        and its answer, whether a finished turn is worth a banner. A status has two sources &mdash; the
+        session's screen and the <code>OSC&nbsp;7501</code> record agents report through seahelmd, and the
+        hooks agents send straight to the core &mdash; and the clients never see which one decided it. Ask any
+        pane: <code>seahelm pane explain &lt;pane&gt;</code>.
       </figcaption>
     </figure>
 
@@ -533,7 +503,7 @@
       </figure>
       <div class="side">
         <h3>The surface an agent gets</h3>
-        <p>A python3 wrapper on <code>PATH</code>, newline-delimited JSON-RPC over a 0600 socket. Nothing to authenticate to, nothing on the network.</p>
+        <p>A small native binary on <code>PATH</code>, newline-delimited JSON-RPC over a 0600 socket. Nothing to authenticate to, nothing on the network.</p>
 <pre class="code"><span class="p">$</span> seahelm pane list
 <span class="p">$</span> seahelm pane read &lt;pane&gt; --lines 50
 <span class="p">$</span> seahelm pane split &lt;pane&gt; --direction right
@@ -583,12 +553,13 @@
         </figcaption>
       </figure>
       <div class="side">
-        <h3>Two threads, one terminal engine</h3>
-        <p>The status poll runs on a background queue while you type on the main one, and both call into the
-        same C library. A single lock serializes them &mdash; except key input, which deliberately takes no
-        lock: Ghostty is thread-safe for keys, and holding it there would deadlock on a synchronous callback.</p>
-        <p>The poll is not uniform either. The worktree you are looking at is read every cycle; the rest
-        every third, so a fleet of twenty panes costs about what three do.</p>
+        <h3>Reading a screen nobody is looking at</h3>
+        <p>The core never asks a window what it shows. Every two seconds it asks each session's daemon for a
+        snapshot &mdash; the visible screen, the title, the progress bar and the agent's own <code>OSC&nbsp;7501</code>
+        record &mdash; so a pane counts the same whether it is on screen, behind another tab, or attached to nothing.</p>
+        <p>A daemon nobody is attached to still answers the agent's terminal queries itself, with the colours
+        and capabilities of the pane it will be shown in, so an agent started in the background comes up
+        exactly as it would in front of you.</p>
         <h3>Built on</h3>
         <p><a class="linkout" href="https://ghostty.org">Ghostty</a> for the terminal engine, linked as a
         C xcframework &mdash; its own <code>seahelmd</code> daemon for session persistence &mdash;

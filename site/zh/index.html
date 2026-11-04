@@ -307,32 +307,33 @@
       <div class="rule-row"><p class="eyebrow">甲板二 &middot; 甲板之下</p></div>
       <h2>底下的技术是如何构建的？</h2>
       <p class="lede prose">
-        247 个 Swift 文件，分四层，跑在 Ghostty 终端引擎之上。没有 Combine，也没有 SwiftUI ——
-        用的是 AppKit 加 delegate，因为屏幕上那个东西本质是一块 Metal surface，后面接着一个 PTY。
+        一个核心，多个入口。<code>seahelm-core</code> 是一个 Rust 服务，每个用户一份：它判断每个 agent 在做什么，
+        保管所有等你处理的卡片，也负责运行 First Mate。每个 pane 跑在自己的 <code>seahelmd</code> 会话里。
+        各个客户端只负责展示、布局和投递：原生 macOS app、支持 Windows / Linux / macOS 的 GPUI 客户端、浏览器，还有 Telegram。
       </p>
     </div>
 
     <div class="tbl-scroll">
       <table>
         <thead>
-          <tr><th>分层</th><th>路径</th><th style="text-align:right">文件数</th><th>里面装什么</th></tr>
+          <tr><th>组件</th><th>路径</th><th style="text-align:right">文件数</th><th>里面装什么</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>协调层</td><td class="path">Sources/App/</td><td class="num">15</td>
-            <td class="desc">窗口、tab、分屏操作、侧边面板、模式化键盘状态机。</td>
+            <td>seahelm-core</td><td class="path">seahelmd/crates/core*</td><td class="num">88</td>
+            <td class="desc">从屏幕和 hook 判断状态、卡片、消息时间线、First Mate、通知、命令语言、PR 与用量。Rust 编写。</td>
           </tr>
           <tr>
-            <td>UI</td><td class="path">Sources/UI/</td><td class="num">75</td>
-            <td class="desc">仪表盘布局、灵动岛、分屏容器、worktree 侧栏、diff 查看器、设置、首次引导。</td>
+            <td>seahelmd</td><td class="path">seahelmd/crates/seahelmd &middot; keep-vt &middot; cli</td><td class="num">27</td>
+            <td class="desc">每个会话一个守护进程：持有 PTY，用 libghostty-vt 维护屏幕，给 core 提供快照。<code>seahelm</code> 命令行也在这里。</td>
           </tr>
           <tr>
-            <td>核心服务</td><td class="path">Sources/Core/ &middot; Status/</td><td class="num">133</td>
-            <td class="desc"><code>AgentRegistry</code>、状态识别流水线、manifest 引擎、First Mate、控制 socket、hook 安装器。</td>
+            <td>macOS app</td><td class="path">Sources/</td><td class="num">280</td>
+            <td class="desc">基于 Ghostty 引擎的 AppKit 客户端：窗口、分屏、灵动岛、舰队列表。core 怎么判断，它就怎么画。</td>
           </tr>
           <tr>
-            <td>终端与 git</td><td class="path">Sources/Terminal/ &middot; Git/</td><td class="num">19</td>
-            <td class="desc">Ghostty C API 桥接、<code>Station</code> 的 surface 生命周期、分屏树、worktree 发现。</td>
+            <td>GPUI 客户端</td><td class="path">clients/gpui/</td><td class="num">14</td>
+            <td class="desc">在 Windows、Linux 和 macOS 上呈现同一支舰队，用 GPUI 直接从 seahelmd 和 core 取数据来画。</td>
           </tr>
         </tbody>
       </table>
@@ -340,119 +341,87 @@
 
     <figure>
       <div class="fig-frame">
-        <svg viewBox="0 0 1200 410" role="img" aria-label="状态识别流水线：hook 通道和屏幕扫描通道各自解码成同一种归一化事件，归约进 AgentRegistry，再发布给界面、First Mate 和事件总线">
-          <g class="svg-hd" text-anchor="middle">
-            <text x="94"   y="30">来源</text>
-            <text x="288"  y="30">桥接</text>
-            <text x="493"  y="30">解读</text>
-            <text x="687"  y="30">解码</text>
-            <text x="872"  y="30">归约</text>
-            <text x="1087" y="30">消费</text>
+        <svg viewBox="0 0 1200 470" role="img" aria-label="架构图：四个入口（macOS app、GPUI 客户端、浏览器和 Telegram）连接同一个 seahelm-core 服务，浏览器和 Telegram 经过 gateway；桌面客户端直接从 seahelmd 读取终端流；core 读取 seahelmd 会话、直接接收 agent 的 hook、把 First Mate 作为一个独立会话来运行，并读取 GitHub、对话记录和用量">
+          <g class="svg-hd" text-anchor="end">
+            <text x="1180" y="30">入口</text>
+            <text x="1180" y="214">核心</text>
+            <text x="1180" y="364">会话</text>
           </g>
 
-          <!-- hook lane -->
-          <rect x="20" y="62" width="148" height="68" rx="6" class="svg-box"/>
-          <text x="34" y="90" class="svg-t">Claude Code</text>
-          <text x="34" y="112" class="svg-t2">Codex &middot; opencode</text>
+          <!-- surfaces -->
+          <rect x="20" y="44" width="250" height="68" rx="6" class="svg-box"/>
+          <text x="34" y="72" class="svg-t">macOS app</text>
+          <text x="34" y="94" class="svg-t2">AppKit &middot; Ghostty</text>
 
-          <rect x="214" y="62" width="148" height="68" rx="6" class="svg-box"/>
-          <text x="228" y="90" class="svg-t">seahelm-hook</text>
-          <text x="228" y="112" class="svg-t2">socket &#9656; webhook</text>
+          <rect x="290" y="44" width="250" height="68" rx="6" class="svg-box"/>
+          <text x="304" y="72" class="svg-t">GPUI 客户端</text>
+          <text x="304" y="94" class="svg-t2">Windows &middot; Linux &middot; macOS</text>
 
-          <rect x="408" y="54" width="170" height="84" rx="6" class="svg-box"/>
-          <text x="422" y="80" class="svg-t">hook 事件</text>
-          <text x="422" y="102" class="svg-t2">SessionStart &middot; Stop</text>
-          <text x="422" y="122" class="svg-t2">Pre/PostToolUse</text>
+          <rect x="610" y="44" width="250" height="68" rx="6" class="svg-box"/>
+          <text x="624" y="72" class="svg-t">seahelm-web</text>
+          <text x="624" y="94" class="svg-t2">浏览器 &middot; Mini App</text>
 
-          <rect x="624" y="76" width="126" height="40" rx="6" class="svg-box"/>
-          <text x="638" y="101" class="svg-t">HookDecoder</text>
+          <rect x="880" y="44" width="300" height="68" rx="6" class="svg-box"/>
+          <text x="894" y="72" class="svg-t">Telegram</text>
+          <text x="894" y="94" class="svg-t2">聊天 &middot; 按钮</text>
+
+          <rect x="610" y="134" width="570" height="44" rx="6" class="svg-box-plain" stroke-dasharray="5 4"/>
+          <text x="624" y="161" class="svg-t">gateway</text>
+          <text x="716" y="161" class="svg-t2">鉴权 &middot; 转发 &middot; 聊天 &mdash; 目前在 app 里</text>
 
           <g class="svg-line">
-            <line x1="168" y1="96" x2="208" y2="96" marker-end="url(#ah-b)"/>
-            <line x1="362" y1="96" x2="402" y2="96" marker-end="url(#ah-b)"/>
-            <line x1="578" y1="96" x2="618" y2="96" marker-end="url(#ah-b)"/>
-          </g>
-          <g class="svg-lbl" text-anchor="middle">
-            <text x="191" y="86">执行</text>
-            <text x="385" y="86">JSON</text>
-            <text x="601" y="86">映射</text>
+            <line x1="735" y1="112" x2="735" y2="130" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+            <line x1="1030" y1="112" x2="1030" y2="130" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
           </g>
 
-          <!-- scan lane -->
-          <rect x="20" y="272" width="148" height="68" rx="6" class="svg-box"/>
-          <text x="34" y="300" class="svg-t">12 种 CLI 任选</text>
-          <text x="34" y="322" class="svg-t2">无需集成</text>
+          <!-- the core -->
+          <rect x="340" y="226" width="460" height="104" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+          <text x="358" y="256" class="svg-t">seahelm-core</text>
+          <text x="358" y="280" class="svg-t2">状态 &middot; 卡片 &middot; 消息 &middot; First Mate</text>
+          <text x="358" y="300" class="svg-t2">通知 &middot; 命令 &middot; PR &middot; 用量</text>
+          <text x="358" y="320" class="svg-lbl">每用户一份 &middot; 只开本机 socket</text>
 
-          <rect x="214" y="272" width="148" height="68" rx="6" class="svg-box"/>
-          <text x="228" y="300" class="svg-t">Ghostty 屏幕</text>
-          <text x="228" y="322" class="svg-t2">加锁读取文本</text>
-
-          <rect x="408" y="264" width="170" height="84" rx="6" class="svg-box"/>
-          <text x="422" y="290" class="svg-t">StatusDetector</text>
-          <text x="422" y="312" class="svg-t2">进程退出 &#9656; OSC 133</text>
-          <text x="422" y="332" class="svg-t2">&#9656; 文本模式</text>
-
-          <rect x="624" y="286" width="126" height="40" rx="6" class="svg-box"/>
-          <text x="638" y="311" class="svg-t">ScanDecoder</text>
-
-          <rect x="408" y="364" width="170" height="34" rx="6" class="svg-box"/>
-          <text x="422" y="386" class="svg-t2">12 份 JSON manifest</text>
-          <line x1="493" y1="348" x2="493" y2="360" class="svg-dash" marker-end="url(#ah-c)"/>
-          <text x="502" y="360" class="svg-lbl">规则</text>
+          <rect x="860" y="242" width="320" height="68" rx="6" class="svg-box"/>
+          <text x="874" y="270" class="svg-t">外部数据</text>
+          <text x="874" y="292" class="svg-t2">GitHub &middot; 对话记录 &middot; 用量</text>
 
           <g class="svg-line">
-            <line x1="168" y1="306" x2="208" y2="306" marker-end="url(#ah-b)"/>
-            <line x1="362" y1="306" x2="402" y2="306" marker-end="url(#ah-b)"/>
-            <line x1="578" y1="306" x2="618" y2="306" marker-end="url(#ah-b)"/>
+            <line x1="145" y1="112" x2="420" y2="220" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+            <line x1="415" y1="112" x2="520" y2="220" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+            <line x1="740" y1="178" x2="700" y2="220" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+            <line x1="800" y1="276" x2="854" y2="276" marker-end="url(#ah-b)"/>
           </g>
-          <g class="svg-lbl" text-anchor="middle">
-            <text x="191" y="296">渲染</text>
-            <text x="385" y="296">轮询</text>
-            <text x="601" y="296">判定</text>
-          </g>
+          <text x="150" y="214" class="svg-lbl">调用 &middot; 事件</text>
+          <text x="808" y="268" class="svg-lbl">读取</text>
 
-          <!-- both lanes converge on one event shape -->
-          <line x1="750" y1="96"  x2="790" y2="150" class="svg-accent" marker-end="url(#ah-a2)"/>
-          <line x1="750" y1="306" x2="790" y2="178" class="svg-accent" marker-end="url(#ah-a2)"/>
-          <text x="758" y="124" class="svg-lbl">每个事件</text>
-          <text x="758" y="288" class="svg-lbl">每次轮询</text>
+          <!-- terminal streams straight from seahelmd -->
+          <line x1="40" y1="112" x2="40" y2="374" class="svg-dash" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+          <line x1="300" y1="112" x2="300" y2="374" class="svg-dash" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
+          <text x="48" y="250" class="svg-lbl">终端</text>
+          <text x="292" y="250" class="svg-lbl" text-anchor="end">终端</text>
 
-          <rect x="796" y="126" width="152" height="64" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
-          <text x="810" y="152" class="svg-t">NormalizedEvent</text>
-          <text x="810" y="174" class="svg-t2">PaneReducer 纯函数</text>
+          <!-- sessions -->
+          <rect x="20" y="380" width="700" height="76" rx="6" class="svg-box"/>
+          <text x="34" y="408" class="svg-t">seahelmd</text>
+          <text x="34" y="430" class="svg-t2">每个会话一个守护进程</text>
+          <text x="34" y="448" class="svg-t2">PTY &middot; 屏幕 &middot; 一直在跑的 agent</text>
 
-          <rect x="796" y="214" width="152" height="64" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
-          <text x="810" y="240" class="svg-t">AgentRegistry</text>
-          <text x="810" y="262" class="svg-t2">唯一真相来源</text>
-
-          <line x1="872" y1="190" x2="872" y2="208" class="svg-accent" marker-end="url(#ah-a2)"/>
-          <text x="880" y="205" class="svg-lbl">增量</text>
-          <text x="872" y="306" class="svg-lbl" text-anchor="middle">同时发布给三方</text>
-
-          <!-- consumers -->
-          <rect x="994" y="110" width="186" height="58" rx="6" class="svg-box"/>
-          <text x="1008" y="134" class="svg-t">灵动岛 &middot; 仪表盘</text>
-          <text x="1008" y="155" class="svg-t2">状态栏</text>
-
-          <rect x="994" y="188" width="186" height="58" rx="6" class="svg-box"/>
-          <text x="1008" y="212" class="svg-t">First Mate</text>
-          <text x="1008" y="233" class="svg-t2">绿区 &#9656; 红区</text>
-
-          <rect x="994" y="266" width="186" height="58" rx="6" class="svg-box"/>
-          <text x="1008" y="290" class="svg-t">EventHub</text>
-          <text x="1008" y="311" class="svg-t2">CLI 订阅方</text>
+          <rect x="760" y="380" width="420" height="76" rx="6" class="svg-box"/>
+          <text x="774" y="408" class="svg-t">First Mate</text>
+          <text x="774" y="430" class="svg-t2">core 启动的 agent 会话</text>
+          <text x="774" y="448" class="svg-t2">它的 seahelm 调用要过 core 的闸门</text>
 
           <g class="svg-line">
-            <line x1="948" y1="246" x2="988" y2="142" marker-end="url(#ah-b)"/>
-            <line x1="948" y1="246" x2="988" y2="217" marker-end="url(#ah-b)"/>
-            <line x1="948" y1="246" x2="988" y2="292" marker-end="url(#ah-b)"/>
+            <line x1="460" y1="330" x2="460" y2="374" marker-start="url(#ah-b)" marker-end="url(#ah-b)"/>
           </g>
+          <text x="468" y="356" class="svg-lbl">快照 &middot; 按键</text>
+          <line x1="640" y1="380" x2="640" y2="336" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <text x="648" y="362" class="svg-lbl">hooks</text>
+          <line x1="900" y1="380" x2="806" y2="320" class="svg-accent" marker-end="url(#ah-a2)"/>
+          <text x="860" y="352" class="svg-lbl">seahelm &#9656; 闸门</text>
 
           <defs>
             <marker id="ah-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-              <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
-            </marker>
-            <marker id="ah-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/>
             </marker>
             <marker id="ah-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
@@ -462,11 +431,9 @@
         </svg>
       </div>
       <figcaption>
-        两条通道，一种事件形状。会上报 hook 的 agent 走快车道；另外九种每两秒从屏幕上读一次，
-        再按优先级顺序去匹配 manifest —— 进程退出优先于 OSC&nbsp;133 的 shell 阶段，后者又优先于文本模式匹配。
-        两条通道最终解码成同一个 <code>NormalizedEvent</code>，所以归约器保持是纯函数，
-        界面永远不知道某个状态是从哪条通道来的。想知道某个 pane 是被哪条规则判定的，就问它：
-        <code>seahelm pane explain &lt;pane&gt;</code>。
+        凡是每个入口都必须看到相同结果的事，都只在 core 里决定一次：一个状态、一张卡片和它的回答、一轮结束值不值得弹通知。
+        状态有两个来源：一是会话的屏幕，以及 agent 经 seahelmd 报告的 <code>OSC&nbsp;7501</code> 记录；二是 agent 直接发给 core 的 hook。
+        客户端从来不知道是哪个来源做的判断。想知道某个 pane 是怎么判定的，就问它：<code>seahelm pane explain &lt;pane&gt;</code>。
       </figcaption>
     </figure>
 
@@ -531,7 +498,7 @@
       </figure>
       <div class="side">
         <h3>agent 拿到的接口</h3>
-        <p><code>PATH</code> 上的一个 python3 包装脚本，通过 0600 权限的 socket 走按行分隔的 JSON-RPC。没有需要认证的东西，也不走网络。</p>
+        <p><code>PATH</code> 上的一个小巧的原生程序，通过 0600 权限的 socket 走按行分隔的 JSON-RPC。没有需要认证的东西，也不走网络。</p>
 <pre class="code"><span class="p">$</span> seahelm pane list
 <span class="p">$</span> seahelm pane read &lt;pane&gt; --lines 50
 <span class="p">$</span> seahelm pane split &lt;pane&gt; --direction right
@@ -580,11 +547,12 @@
         </figcaption>
       </figure>
       <div class="side">
-        <h3>两个线程，一个终端引擎</h3>
-        <p>状态轮询跑在后台队列上，而你在主队列上打字，两边调的是同一个 C 库。一把锁把它们串起来 ——
-        唯独按键输入故意不加锁：Ghostty 对按键本身是线程安全的，而在那里持锁会在一次同步回调上死锁。</p>
-        <p>轮询也不是一视同仁的。你正在看的那个 worktree 每个周期都读；其余的每三个周期读一次，
-        所以二十个 pane 的舰队，开销大约只相当于三个。</p>
+        <h3>读一块没人在看的屏幕</h3>
+        <p>core 从不去问某个窗口显示了什么。它每两秒向每个会话的守护进程要一份快照 —— 可见屏幕、标题、进度条，
+        以及 agent 自己报告的 <code>OSC&nbsp;7501</code> 记录 —— 所以一个 pane 无论在屏幕上、藏在别的 tab 后面，
+        还是没有任何窗口挂着，算法都一样。</p>
+        <p>没有任何客户端挂接的守护进程，会自己回答 agent 发来的终端查询，用的是它将来要显示在的那个 pane 的颜色和能力，
+        所以一个在后台启动的 agent，起来的样子和在你眼前启动时完全一样。</p>
         <h3>构建于</h3>
         <p>终端引擎用 <a class="linkout" href="https://ghostty.org">Ghostty</a>，以 C xcframework 链接进来 ——
         会话持久化用自研的 <code>seahelmd</code> 守护进程 —— 自动更新用 Sparkle&nbsp;2，
