@@ -29,6 +29,7 @@ use seahelm_core_scan::Snapshot;
 use seahelm_core_types::{now, AgentStatus, AgentType, Authority, EventKind, EventSource, NormalizedEvent, Timestamp};
 use seahelmd::proto::Msg;
 
+use crate::first_mate::{self, policy as fm_policy};
 use crate::pr::{self, PrStore};
 use crate::rpc::{self, Dispatch, Reply, RpcError, RpcResult};
 
@@ -39,6 +40,8 @@ pub struct Core {
     /// Each worktree's pull request, refreshed on the PR thread
     /// (`pr::spawn`); its own lock, so a slow GitHub never holds `state`.
     prs: PrStore,
+    /// First Mate's thread (`first_mate::spawn`), once started.
+    first_mate: std::sync::OnceLock<crate::first_mate::Handle>,
 }
 
 struct State {
@@ -75,6 +78,8 @@ struct State {
     retries: Vec<Retry>,
     /// Everything waiting on the user (docs/first-mate-core.md).
     cards: Cards,
+    /// Where First Mate's pane outcomes and answered cards go.
+    first_mate: Option<crate::first_mate::Handle>,
 }
 
 /// A completion decision put off for `PROSE_RETRY_INTERVAL`.
@@ -129,9 +134,11 @@ impl Core {
                 signals: CompletionSignals::new(),
                 retries: Vec::new(),
                 cards: Cards::new(),
+                first_mate: None,
             }),
             changed: Condvar::new(),
             prs: PrStore::new(Box::new(pr::Live)),
+            first_mate: std::sync::OnceLock::new(),
         }))
     }
 
@@ -210,6 +217,49 @@ impl Core {
 
     fn call_inner(self: Arc<Self>, method: &str, p: Value) -> Reply {
         let now = now();
+        // First Mate's calls go through its policy before anything runs.
+        let mut gated = false;
+        if fm_policy::is_first_mate(&p) {
+            match fm_policy::classify(method) {
+                fm_policy::Class::Open => {}
+                fm_policy::Class::Forbidden => {
+                    return Reply::Value(Err(first_mate::refused(format!("{method} is not available to First Mate"))));
+                }
+                fm_policy::Class::Gated(action) => {
+                    let Some(fm) = self.first_mate.get() else {
+                        return Reply::Value(Err(first_mate::refused("First Mate is not running")));
+                    };
+                    let mut params = p.clone();
+                    // A card that would delete a worktree shows what is in it, as measured.
+                    if action == first_mate::rules::Action::DeleteWorktree {
+                        if let Some(path) = p.get("worktree_path").and_then(Value::as_str) {
+                            let mut f = first_mate::facts::Facts::probe(std::path::Path::new(path));
+                            f.busy_panes = self.busy_panes(path);
+                            params["_facts"] = json!(f.summary());
+                        }
+                    }
+                    match fm.gate(action, method, params) {
+                        first_mate::Gate::Allow => gated = true,
+                        first_mate::Gate::Queued(card) => {
+                            return Reply::Value(Ok(json!({"queued": "approval", "card": card, "message": "Queued for the user's approval; nothing ran yet."})));
+                        }
+                        first_mate::Gate::Deny(why) => return Reply::Value(Err(first_mate::refused(why))),
+                    }
+                }
+            }
+        } else if method == "autopilot.propose" {
+            return Reply::Value(Err(first_mate::refused("only First Mate proposes")));
+        }
+        let reply = self.clone().dispatch(method, p, now);
+        if gated {
+            if let (Some(fm), Reply::Value(Ok(r))) = (self.first_mate.get(), &reply) {
+                fm.send(first_mate::Msg::DidRun { method: method.into(), result: r.clone() });
+            }
+        }
+        reply
+    }
+
+    fn dispatch(self: Arc<Self>, method: &str, p: Value, now: Timestamp) -> Reply {
         let result: RpcResult = match method {
             "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION")})),
             "hook" | "suggest" => {
@@ -308,6 +358,36 @@ impl Core {
             "pane.wait_agent_status" | "wait.agent_status" => self.wait_status(&p),
             "usage.summary" => Ok(crate::usage::summary(now)),
             "cards.list" => Ok(json!({"cards": self.lock().cards.to_json()})),
+            "pane.read" | "pane.run" | "pane.send_text" | "pane.send_keys" | "worktree.create" | "worktree.delete" => self.act(method, &p),
+            "autopilot.state" => Ok(match self.first_mate.get() {
+                Some(fm) => fm.state(),
+                None => json!({"enabled": false, "owner": "core"}),
+            }),
+            "autopilot.propose" => {
+                let summary = str_param(&p, "summary").unwrap_or_default();
+                let options = p.get("options").and_then(Value::as_array).cloned().unwrap_or_default();
+                match self.first_mate.get() {
+                    Some(fm) => fm.propose(summary, options),
+                    None => Err(first_mate::refused("First Mate is not running")),
+                }
+            }
+            "autopilot.say" => {
+                let text = str_param(&p, "text").unwrap_or_default();
+                Ok(json!({"ok": self.first_mate.get().is_some_and(|fm| fm.say(text))}))
+            }
+            // A First Mate card by its id (the app's `autopilot.answer {card, option}`).
+            "autopilot.answer" => {
+                let card = str_param(&p, "card").unwrap_or_default();
+                let id = self.lock().cards.list().iter().find(|c| c.payload.as_deref() == Some(card.as_str())).map(|c| c.id.clone());
+                match id {
+                    Some(id) => {
+                        let mut q = p.clone();
+                        q["id"] = json!(id);
+                        self.answer_card(&q, now).map(|_| json!({"ok": true}))
+                    }
+                    None => Ok(json!({"ok": false})),
+                }
+            }
             "cards.answer" => self.answer_card(&p, now),
             "cards.dismiss" => {
                 let Some(id) = str_param(&p, "id") else {
@@ -322,6 +402,9 @@ impl Core {
                     // A raised card's owner learns it was declined.
                     if let Some(c) = card.filter(|c| raised(c.kind)) {
                         st.registry.publish(json!({"type": "card.answered", "card": c.to_json(), "option": null}));
+                        if let (Some(fm), Some(payload)) = (&st.first_mate, &c.payload) {
+                            fm.send(first_mate::Msg::Answered { payload: payload.clone(), option: None });
+                        }
                     }
                     Ok(json!({"ok": true}))
                 })
@@ -394,6 +477,9 @@ impl Core {
             st.publish_cards();
             if let Answer::Raised { card, option } = &answer {
                 st.registry.publish(json!({"type": "card.answered", "card": card.to_json(), "option": option}));
+                if let (Some(fm), Some(payload)) = (&st.first_mate, &card.payload) {
+                    fm.send(first_mate::Msg::Answered { payload: payload.clone(), option: Some(option.clone()) });
+                }
             }
             Ok(answer)
         });
@@ -585,6 +671,139 @@ impl Core {
     }
 }
 
+/// What the actions and First Mate's thread ask of the core. Each takes the
+/// lock briefly and never does IO under it.
+impl Core {
+    /// Start First Mate's thread (it idles until the config gives it First Mate).
+    pub fn spawn_first_mate(self: &Arc<Self>) {
+        let handle = first_mate::spawn(Arc::clone(self));
+        self.lock().first_mate = Some(handle.clone());
+        let _ = self.first_mate.set(handle);
+    }
+
+    /// The calls the core performs itself (`actions`).
+    pub fn act(&self, method: &str, p: &Value) -> RpcResult {
+        match method {
+            "pane.read" => crate::actions::pane_read(self, p),
+            "pane.run" => crate::actions::pane_run(self, p),
+            "pane.send_text" => crate::actions::pane_send_text(self, p),
+            "pane.send_keys" => crate::actions::pane_send_keys(self, p),
+            "worktree.create" => crate::actions::worktree_create(self, p),
+            "worktree.delete" => crate::actions::worktree_delete(self, p),
+            other => Err(RpcError::not_found(other)),
+        }
+    }
+
+    pub fn resolve_pane(&self, hint: &str) -> Option<String> {
+        self.lock().registry.resolve(Some(hint), "")
+    }
+
+    pub fn panes_in_worktree(&self, worktree: &str) -> Vec<String> {
+        self.lock().registry.pane_ids_in_worktree(worktree).to_vec()
+    }
+
+    pub fn register_pane(&self, r: Registration) {
+        self.lock().register(r);
+    }
+
+    pub fn unregister_pane(&self, pane: &str) {
+        let mut st = self.lock();
+        if st.registry.pane(pane).is_some() {
+            st.unregister(pane);
+        }
+    }
+
+    /// First Mate's pane, registered under its own directory.
+    pub fn ensure_first_mate_pane(&self, dir: &str) {
+        let mut st = self.lock();
+        if st.registry.pane(fm_policy::SESSION).is_none() {
+            st.register(Registration {
+                pane: fm_policy::SESSION.into(),
+                alias: None,
+                worktree_path: dir.into(),
+                project: first_mate::pane::PROJECT.into(),
+                branch: String::new(),
+                agent_type: AgentType::Unknown,
+                started_at: Some(now()),
+            });
+        }
+    }
+
+    pub fn pane_status(&self, pane: &str) -> Option<AgentStatus> {
+        self.lock().registry.pane(pane).map(|p| p.status)
+    }
+
+    pub fn pane_agent(&self, pane: &str) -> Option<AgentType> {
+        self.lock().registry.pane(pane).map(|p| p.agent_type)
+    }
+
+    /// Panes in a worktree that are running or waiting on someone.
+    pub fn busy_panes(&self, worktree: &str) -> u32 {
+        let st = self.lock();
+        st.registry.panes().filter(|p| p.worktree_path == worktree && matches!(p.status, AgentStatus::Running | AgentStatus::Waiting)).count() as u32
+    }
+
+    /// Worktrees clients list plus those with panes.
+    pub fn live_worktrees(&self) -> HashSet<String> {
+        let mut out: HashSet<String> = self.prs.listed().into_iter().collect();
+        out.extend(self.lock().registry.panes().map(|p| p.worktree_path.clone()));
+        out
+    }
+
+    /// Every known worktree with its PR, as last fetched.
+    pub fn worktree_prs(&self) -> Vec<(String, pr::PrStatus)> {
+        self.live_worktrees().into_iter().filter_map(|w| self.prs.status(&w).map(|p| (w, p))).collect()
+    }
+
+    /// The repos of the worktrees clients list (each worktree's main checkout).
+    pub fn repos(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for w in self.prs.listed() {
+            let common = first_mate::facts::git(std::path::Path::new(&w), &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+            if let Some(repo) = common.and_then(|c| std::path::Path::new(c.trim()).parent().map(|p| p.to_string_lossy().into_owned())) {
+                if !out.contains(&repo) {
+                    out.push(repo);
+                }
+            }
+        }
+        out
+    }
+
+    pub fn raise_card(&self, r: Raise) -> Option<String> {
+        let mut st = self.lock();
+        let id = st.cards.raise(r, now());
+        st.publish_cards();
+        drop(st);
+        self.changed.notify_all();
+        id
+    }
+
+    pub fn drop_card_payload(&self, payload: &str) {
+        let mut st = self.lock();
+        let id = st.cards.list().iter().find(|c| c.payload.as_deref() == Some(payload)).map(|c| c.id.clone());
+        if let Some(id) = id {
+            st.cards.remove(&id, now());
+            st.publish_cards();
+            drop(st);
+            self.changed.notify_all();
+        }
+    }
+
+    pub fn clear_worktree_cards(&self, worktree: &str) {
+        let mut st = self.lock();
+        if st.cards.drop_worktree(worktree, now()) {
+            st.publish_cards();
+            drop(st);
+            self.changed.notify_all();
+        }
+    }
+
+    /// Cards whose payload passes `keep`, in the wire shape.
+    pub fn cards_with_payloads(&self, keep: impl Fn(&str) -> bool) -> Vec<Value> {
+        self.lock().cards.list().iter().filter(|c| c.payload.as_deref().is_some_and(&keep)).map(|c| c.to_json()).collect()
+    }
+}
+
 impl Dispatch for Core {
     fn call(self: Arc<Self>, method: &str, params: Value) -> Reply {
         self.call_inner(method, params)
@@ -705,6 +924,15 @@ impl State {
         // as waiting on top of it.
         if self.cards.observe(o, now) {
             self.publish_cards();
+        }
+        if o.info.id == fm_policy::SESSION {
+            if o.status_changed {
+                if let Some(fm) = &self.first_mate {
+                    fm.send(first_mate::Msg::Outcome { old: o.old_status, new: o.new_status });
+                }
+            }
+            // First Mate is not a member of the fleet: no notices for it.
+            return;
         }
         self.aggregator.update(&o.info.id, PaneUpdate::from_pane(&o.info), now);
         self.registry.settle_unseen(o);

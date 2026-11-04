@@ -1,0 +1,194 @@
+//! Where First Mate lives (`FirstMatePane.swift`): one seahelmd session, one
+//! directory, and the files seahelm keeps there. The same session name,
+//! directory and files as the app's, so whichever owns First Mate finds the
+//! other's state.
+
+use std::path::{Path, PathBuf};
+
+use serde_json::json;
+
+use super::policy::SESSION;
+
+pub const PROJECT: &str = "First Mate";
+
+/// Bumped whenever the instructions or permissions change. Kept equal to
+/// the app's while the text is the same, so the two never fight over the
+/// files.
+pub const VERSION: u32 = 4;
+
+pub const INSTRUCTIONS: &str = include_str!("instructions.md");
+
+pub fn dir() -> PathBuf {
+    crate::rpc::config_dir().join("first-mate")
+}
+
+/// The agents First Mate can be: each has a way to be held to read-mostly
+/// work (Claude Code's permission rules, Codex's sandbox).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Agent {
+    Claude,
+    Codex,
+}
+
+impl Agent {
+    /// `config.json` `autopilot_agent`: the app's `AgentType` raw value.
+    pub fn from_config(raw: &str) -> Self {
+        if raw == "codex" {
+            Agent::Codex
+        } else {
+            Agent::Claude
+        }
+    }
+
+    pub fn raw(self) -> &'static str {
+        match self {
+            Agent::Claude => "claudeCode",
+            Agent::Codex => "codex",
+        }
+    }
+
+    /// Never the bypass flag. `--permission-mode default` because a
+    /// user-level `bypassPermissions` would otherwise switch the gate off;
+    /// Codex's sandbox with network on, or neither gh nor the socket works.
+    pub fn launch(self) -> &'static str {
+        match self {
+            Agent::Claude => "claude --permission-mode default",
+            Agent::Codex => "codex --sandbox workspace-write --ask-for-approval on-request -c sandbox_workspace_write.network_access=true",
+        }
+    }
+}
+
+/// Version and agent: switching agent replaces the session as surely as a
+/// new version does.
+pub fn stamp(agent: Agent) -> String {
+    format!("{VERSION}:{}", agent.raw())
+}
+
+pub fn session_is_current(dir: &Path, agent: Agent) -> bool {
+    std::fs::read_to_string(dir.join(".session-version")).is_ok_and(|s| s.trim() == stamp(agent))
+}
+
+pub fn mark_session_current(dir: &Path, agent: Agent) {
+    let _ = std::fs::write(dir.join(".session-version"), stamp(agent));
+}
+
+/// Claude Code's own gate for this directory: only reads and `seahelm`
+/// itself run unasked, so an agent free to run any shell command cannot
+/// step around seahelm's policy.
+pub fn permissions() -> serde_json::Value {
+    json!({"permissions": {
+        "defaultMode": "default",
+        "allow": [
+            "Bash(seahelm:*)",
+            "Bash(gh pr view:*)", "Bash(gh pr list:*)", "Bash(gh pr checks:*)", "Bash(gh pr diff:*)",
+            "Bash(gh run view:*)", "Bash(gh run list:*)",
+            "Bash(gh issue view:*)", "Bash(gh issue list:*)",
+            "Bash(git -C:*)", "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)",
+            "Read", "Grep", "Glob",
+            "Edit(standing-orders.md)", "Write(standing-orders.md)",
+        ],
+        "deny": ["Bash(gh pr merge:*)", "Bash(git push:*)", "Bash(git worktree remove:*)", "Bash(rm:*)"],
+    }})
+}
+
+/// Write the managed files (when stale), the standing orders (when absent),
+/// and the `seahelm` command First Mate's instructions use: a shim onto
+/// `seahelm-core cli`, first on its PATH, so the same words work on a
+/// machine without the app.
+pub fn provision(dir: &Path, core_exe: &Path) {
+    let _ = std::fs::create_dir_all(dir.join(".claude"));
+    let _ = std::fs::create_dir_all(dir.join("bin"));
+    let marker = format!("<!-- seahelm-first-mate v{VERSION} -->");
+    for name in ["CLAUDE.md", "AGENTS.md"] {
+        let path = dir.join(name);
+        if !std::fs::read_to_string(&path).is_ok_and(|t| t.contains(&marker)) {
+            let _ = std::fs::write(&path, format!("{marker}\n{INSTRUCTIONS}"));
+        }
+    }
+    let settings = dir.join(".claude/settings.json");
+    if let Ok(text) = serde_json::to_string_pretty(&permissions()) {
+        if std::fs::read_to_string(&settings).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) != Some(permissions()) {
+            let _ = std::fs::write(&settings, text);
+        }
+    }
+    let orders = dir.join("standing-orders.md");
+    if !orders.exists() {
+        let _ = std::fs::write(&orders, "# Standing orders\n\nWhat the user has asked First Mate to keep doing (or not doing).\n");
+    }
+    write_shim(&dir.join("bin"), core_exe);
+}
+
+#[cfg(unix)]
+fn write_shim(bin: &Path, core_exe: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = bin.join("seahelm");
+    let body = format!("#!/bin/sh\nexec {} cli \"$@\"\n", crate::install::quote(&core_exe.to_string_lossy()));
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(body.as_str()) {
+        let _ = std::fs::write(&path, body);
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+#[cfg(windows)]
+fn write_shim(bin: &Path, core_exe: &Path) {
+    let path = bin.join("seahelm.cmd");
+    let body = format!("@\"{}\" cli %*\r\n", core_exe.display());
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(body.as_str()) {
+        let _ = std::fs::write(&path, body);
+    }
+}
+
+/// The argv `seahelmd new` runs First Mate's agent with, in `dir`, with its
+/// own `bin` first on PATH (set inside the shell: a login shell's profile
+/// would otherwise put the app's `seahelm` in front of it).
+pub fn session_argv(dir: &Path, agent: Agent) -> Vec<String> {
+    #[cfg(unix)]
+    {
+        let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
+        let q = |s: &str| crate::install::quote(s);
+        let script = format!(
+            "export PATH={}:\"$PATH\" SEAHELM_PANE_ID={SESSION}; cd {} && {}; exec {} -l",
+            q(&dir.join("bin").to_string_lossy()),
+            q(&dir.to_string_lossy()),
+            agent.launch(),
+            q(&shell)
+        );
+        vec![shell, "-lic".into(), script]
+    }
+    #[cfg(windows)]
+    {
+        let script = format!(
+            "set \"PATH={};%PATH%\" && set SEAHELM_PANE_ID={SESSION} && cd /d \"{}\" && {}",
+            dir.join("bin").display(),
+            dir.display(),
+            agent.launch()
+        );
+        vec!["cmd.exe".into(), "/k".into(), script]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provisions_once_and_keeps_standing_orders() {
+        let d = tempfile::tempdir().unwrap();
+        provision(d.path(), Path::new("/opt/seahelm-core"));
+        let claude = std::fs::read_to_string(d.path().join("CLAUDE.md")).unwrap();
+        assert!(claude.starts_with("<!-- seahelm-first-mate v4 -->\n# You are First Mate"));
+        std::fs::write(d.path().join("standing-orders.md"), "mine").unwrap();
+        provision(d.path(), Path::new("/opt/seahelm-core"));
+        assert_eq!(std::fs::read_to_string(d.path().join("standing-orders.md")).unwrap(), "mine");
+        #[cfg(unix)]
+        assert_eq!(std::fs::read_to_string(d.path().join("bin/seahelm")).unwrap(), "#!/bin/sh\nexec /opt/seahelm-core cli \"$@\"\n");
+    }
+
+    #[test]
+    fn stamps_name_the_agent() {
+        let d = tempfile::tempdir().unwrap();
+        mark_session_current(d.path(), Agent::Claude);
+        assert!(session_is_current(d.path(), Agent::Claude));
+        assert!(!session_is_current(d.path(), Agent::Codex));
+    }
+}

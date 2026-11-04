@@ -1,0 +1,377 @@
+//! What the core does to panes and worktrees itself: the calls First Mate
+//! makes (`pane.read`, `pane.run`, `pane.send_text`, `pane.send_keys`,
+//! `worktree.create`, `worktree.delete`), which any client may make too.
+//! All blocking (seahelmd, git); called without the core's lock held.
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde_json::{json, Value};
+
+use seahelm_core_registry::Registration;
+use seahelm_core_types::AgentType;
+use seahelmd::proto::Msg;
+
+use crate::core::Core;
+use crate::first_mate::facts::git;
+use crate::rpc::{RpcError, RpcResult};
+
+const SUBMIT_DELAY: Duration = Duration::from_millis(80);
+
+fn s(p: &Value, k: &str) -> String {
+    p.get(k).and_then(Value::as_str).unwrap_or_default().trim().to_string()
+}
+
+/// A pane by the core's key, a client alias, or a live session name.
+fn pane(core: &Core, p: &Value) -> Result<String, RpcError> {
+    let hint = s(p, "pane_id");
+    if hint.is_empty() {
+        return Err(RpcError::invalid_params("pane_id required"));
+    }
+    if let Some(id) = core.resolve_pane(&hint) {
+        return Ok(id);
+    }
+    if seahelmd::client::connect(&hint).is_ok() {
+        return Ok(hint);
+    }
+    Err(RpcError::invalid_params(format!("no pane {hint}")))
+}
+
+fn send(session: &str, bytes: &[u8]) -> Result<(), RpcError> {
+    seahelmd::client::request(session, &Msg::Send(bytes.to_vec()))
+        .map(|_| ())
+        .map_err(|e| RpcError::internal(format!("{session}: {e}")))
+}
+
+pub fn pane_read(core: &Core, p: &Value) -> RpcResult {
+    let id = pane(core, p)?;
+    let lines = p.get("lines").and_then(Value::as_u64).unwrap_or(200) as usize;
+    let text = match seahelmd::client::request(&id, &Msg::History) {
+        Ok(Msg::Text(t)) => t,
+        Ok(_) => String::new(),
+        Err(e) => return Err(RpcError::internal(format!("{id}: {e}"))),
+    };
+    let all: Vec<&str> = text.trim_end().lines().collect();
+    Ok(json!({"pane_id": id, "text": all[all.len().saturating_sub(lines)..].join("\n")}))
+}
+
+/// Type and submit: the Return as a write of its own, a beat later.
+pub fn pane_run(core: &Core, p: &Value) -> RpcResult {
+    let id = pane(core, p)?;
+    let command = s(p, "command");
+    if command.is_empty() {
+        return Err(RpcError::invalid_params("command required"));
+    }
+    send(&id, command.as_bytes())?;
+    std::thread::sleep(SUBMIT_DELAY);
+    send(&id, b"\r")?;
+    Ok(json!({"sent": true, "pane_id": id}))
+}
+
+pub fn pane_send_text(core: &Core, p: &Value) -> RpcResult {
+    let id = pane(core, p)?;
+    let text = p.get("text").and_then(Value::as_str).unwrap_or_default();
+    if text.is_empty() {
+        return Err(RpcError::invalid_params("text required"));
+    }
+    send(&id, text.as_bytes())?;
+    Ok(json!({"sent": true, "pane_id": id}))
+}
+
+pub fn pane_send_keys(core: &Core, p: &Value) -> RpcResult {
+    let id = pane(core, p)?;
+    let keys: Vec<String> = match p.get("keys") {
+        Some(Value::String(k)) => vec![k.clone()],
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+        _ => vec![],
+    };
+    if keys.is_empty() {
+        return Err(RpcError::invalid_params("keys required"));
+    }
+    for (i, k) in keys.iter().enumerate() {
+        let bytes = key_bytes(k).ok_or_else(|| RpcError::invalid_params(format!("unknown key {k}")))?;
+        if bytes == "\r" && i > 0 {
+            std::thread::sleep(SUBMIT_DELAY);
+        }
+        send(&id, bytes.as_bytes())?;
+    }
+    Ok(json!({"sent": true, "pane_id": id}))
+}
+
+/// A named key's bytes for a pane with no surface (`ControlKeys`): the
+/// common ones, ctrl+letter, and a lone character as itself.
+fn key_bytes(name: &str) -> Option<String> {
+    let k = name.to_lowercase();
+    let named = match k.as_str() {
+        "enter" | "return" => "\r",
+        "escape" | "esc" => "\x1b",
+        "tab" => "\t",
+        "backspace" => "\x7f",
+        "space" => " ",
+        "up" => "\x1b[A",
+        "down" => "\x1b[B",
+        "right" => "\x1b[C",
+        "left" => "\x1b[D",
+        "home" => "\x1b[H",
+        "end" => "\x1b[F",
+        "pageup" => "\x1b[5~",
+        "pagedown" => "\x1b[6~",
+        "delete" => "\x1b[3~",
+        "shift+tab" | "backtab" => "\x1b[Z",
+        _ => "",
+    };
+    if !named.is_empty() {
+        return Some(named.into());
+    }
+    if let Some(c) = k.strip_prefix("ctrl+").filter(|c| c.len() == 1).and_then(|c| c.chars().next()) {
+        if c.is_ascii_lowercase() {
+            return Some(((c as u8 - b'a' + 1) as char).to_string());
+        }
+    }
+    (name.chars().count() == 1).then(|| name.to_string())
+}
+
+/// The session the GPUI client would give a worktree's first pane
+/// (`workspace::session_name`), so a pane the core starts is the one that
+/// client attaches when the worktree is opened.
+pub fn gpui_session_name(worktree: &str) -> String {
+    let base = Path::new(worktree).file_name().and_then(|n| n.to_str()).unwrap_or("worktree");
+    let mut h: u32 = 2166136261;
+    for b in worktree.bytes() {
+        h = (h ^ b as u32).wrapping_mul(16777619);
+    }
+    let clean: String = base.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).take(40).collect();
+    format!("gpui-{clean}-{h:08x}")
+}
+
+/// `task/<slug of the task>`, suffixed past existing branches
+/// (`WorktreeCreator.branchName`).
+pub fn branch_name(task: &str, existing: &[String]) -> String {
+    let mut words: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for c in task.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            cur.push(c);
+        } else if !cur.is_empty() {
+            words.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    let mut slug = String::new();
+    for w in words.iter().take(6) {
+        if slug.len() + w.len() + 1 > 40 {
+            break;
+        }
+        if !slug.is_empty() {
+            slug.push('-');
+        }
+        slug.push_str(w);
+    }
+    if slug.is_empty() {
+        slug = "agent".into();
+    }
+    let base = format!("task/{slug}");
+    if !existing.contains(&base) {
+        return base;
+    }
+    (2..).map(|n| format!("{base}-{n}")).find(|b| !existing.contains(b)).unwrap_or(base)
+}
+
+fn agent_command(agent: AgentType, task: &str, yolo: bool) -> Option<String> {
+    let (bin, flag) = match agent {
+        AgentType::ClaudeCode => ("claude", "--dangerously-skip-permissions"),
+        AgentType::Codex => ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+        _ => return None,
+    };
+    let mut cmd = bin.to_string();
+    if yolo {
+        cmd += &format!(" {flag}");
+    }
+    cmd += &format!(" {}", shell_quote(task));
+    Some(cmd)
+}
+
+fn shell_quote(s: &str) -> String {
+    if cfg!(windows) {
+        format!("\"{}\"", s.replace('"', "\\\""))
+    } else {
+        format!("'{}'", s.replace('\'', r"'\''"))
+    }
+}
+
+/// `worktree.create {repo_path, prompt, agent_type?}`: a new worktree beside
+/// the repo (`<repo>-worktrees/<branch>`) with an agent briefed on the task,
+/// in a seahelmd session the core watches. The repo's `.seahelm/setup.sh`
+/// runs first, and a failed setup leaves the shell with its error.
+pub fn worktree_create(core: &Core, p: &Value) -> RpcResult {
+    let repo = PathBuf::from(s(p, "repo_path"));
+    let task = s(p, "prompt");
+    if repo.as_os_str().is_empty() || task.is_empty() {
+        return Err(RpcError::invalid_params("repo_path and prompt are required"));
+    }
+    let agent = match s(p, "agent_type").as_str() {
+        "" | "claudeCode" => AgentType::ClaudeCode,
+        "codex" => AgentType::Codex,
+        other => return Err(RpcError::invalid_params(format!("agent_type {other} cannot be launched"))),
+    };
+    let top = git(&repo, &["rev-parse", "--show-toplevel"]).ok_or_else(|| RpcError::invalid_params("not a git repository"))?;
+    let repo = PathBuf::from(top.trim());
+    let branches: Vec<String> = git(&repo, &["branch", "-a", "--format=%(refname:short)"])
+        .unwrap_or_default()
+        .lines()
+        .map(|b| b.trim().trim_start_matches("origin/").to_string())
+        .filter(|b| !b.is_empty() && !b.contains("HEAD"))
+        .collect();
+    let base = ["main", "master"].into_iter().find(|b| branches.iter().any(|x| x == b)).map(str::to_string).or_else(|| branches.first().cloned()).unwrap_or_else(|| "main".into());
+    let branch = branch_name(&task, &branches);
+    let name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
+    let path = repo.parent().unwrap_or(&repo).join(format!("{name}-worktrees")).join(&branch);
+    if path.exists() {
+        return Err(RpcError::invalid_params(format!("{} exists", path.display())));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| RpcError::internal(e.to_string()))?;
+    }
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["worktree", "add", "-b", &branch])
+        .arg(&path)
+        .arg(&base)
+        .output()
+        .map_err(|e| RpcError::internal(e.to_string()))?;
+    if !out.status.success() {
+        return Err(RpcError::internal(format!("git worktree add: {}", String::from_utf8_lossy(&out.stderr).trim())));
+    }
+    let path_s = path.to_string_lossy().to_string();
+    let launch = agent_command(agent, &task, crate::first_mate::UserConfig::load().agent_yolo).unwrap_or_default();
+    let setup = [path.join(".seahelm/setup.sh"), repo.join(".seahelm/setup.sh")].into_iter().find(|p| p.exists());
+    let session = gpui_session_name(&path_s);
+    start_session(&session, &path, setup.as_deref(), &repo, &launch).map_err(RpcError::internal)?;
+    core.register_pane(Registration {
+        pane: session.clone(),
+        alias: None,
+        worktree_path: path_s.clone(),
+        project: name.to_string(),
+        branch: branch.clone(),
+        agent_type: agent,
+        started_at: Some(seahelm_core_types::now()),
+    });
+    Ok(json!({"worktree_path": path_s, "branch": branch, "pane_session_key": session}))
+}
+
+/// `seahelmd new --hold 15 <session> -- <shell> -lic '<setup> && <agent>; exec <shell> -l'`
+/// in the worktree: held for a client to attach, so the agent starts at the
+/// pane's size when someone opens it, and on its own after that.
+fn start_session(session: &str, dir: &Path, setup: Option<&Path>, repo: &Path, launch: &str) -> Result<(), String> {
+    let mut line = String::new();
+    if let Some(script) = setup {
+        line += &format!("{} && ", shell_quote(&script.to_string_lossy()));
+    }
+    line += launch;
+    let mut cmd = std::process::Command::new(seahelmd_bin());
+    cmd.current_dir(dir)
+        .env("SEAHELM_WORKTREE", dir)
+        .env("SEAHELM_REPO_ROOT", repo)
+        .env("SEAHELM_PANE_ID", session)
+        .args(["new", "--hold", "15", session, "--"]);
+    #[cfg(unix)]
+    {
+        let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
+        cmd.args([shell.as_str(), "-lic", &format!("{line}; exec {} -l", shell_quote(&shell))]);
+    }
+    #[cfg(windows)]
+    cmd.args(["cmd.exe", "/k", &line]);
+    let out = cmd.output().map_err(|e| format!("seahelmd new: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("seahelmd new: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(())
+}
+
+/// `$SEAHELMD_BIN`, then `seahelmd` beside this binary, then on PATH.
+pub fn seahelmd_bin() -> PathBuf {
+    if let Some(p) = std::env::var_os("SEAHELMD_BIN").filter(|p| !p.is_empty()) {
+        return PathBuf::from(p);
+    }
+    let exe = format!("seahelmd{}", std::env::consts::EXE_SUFFIX);
+    std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join(&exe)))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| PathBuf::from(exe))
+}
+
+/// `worktree.delete {worktree_path}`: its panes' sessions killed, then
+/// `git worktree remove` without force, so a worktree with uncommitted work
+/// stays and the caller hears why. The branch is left.
+pub fn worktree_delete(core: &Core, p: &Value) -> RpcResult {
+    let path = s(p, "worktree_path");
+    if path.is_empty() {
+        return Err(RpcError::invalid_params("worktree_path required"));
+    }
+    let dir = Path::new(&path);
+    let common = git(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok_or_else(|| RpcError::invalid_params("not a worktree"))?;
+    let main = Path::new(common.trim()).parent().map(Path::to_path_buf).unwrap_or_default();
+    if same_dir(&main, dir) {
+        return Err(RpcError::invalid_params("the main checkout is not deleted"));
+    }
+    let mut sessions = core.panes_in_worktree(&path);
+    let own = gpui_session_name(&path);
+    if !sessions.contains(&own) {
+        sessions.push(own);
+    }
+    for session in &sessions {
+        let _ = seahelmd::client::request(session, &Msg::Kill);
+        core.unregister_pane(session);
+    }
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&main)
+        .args(["worktree", "remove"])
+        .arg(dir)
+        .output()
+        .map_err(|e| RpcError::internal(e.to_string()))?;
+    if !out.status.success() {
+        return Err(RpcError::internal(format!("git worktree remove: {}", String::from_utf8_lossy(&out.stderr).trim())));
+    }
+    core.clear_worktree_cards(&path);
+    Ok(json!({"worktree_path": path, "deleted": true}))
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn branch_names_from_tasks() {
+        assert_eq!(branch_name("Fix the login 500 on /api/session!", &[]), "task/fix-the-login-500-on-api");
+        assert_eq!(branch_name("修复登录", &[]), "task/agent");
+        let taken = vec!["task/fix-ci".to_string(), "task/fix-ci-2".to_string()];
+        assert_eq!(branch_name("fix ci", &taken), "task/fix-ci-3");
+    }
+
+    #[test]
+    fn session_names_match_the_gpui_clients() {
+        // What workspace::session_name gives for the same path.
+        assert_eq!(gpui_session_name("/w/repo"), "gpui-repo-cc861fb8");
+        assert!(gpui_session_name("/w/task/a b").starts_with("gpui-a_b-"));
+    }
+
+    #[test]
+    fn keys() {
+        assert_eq!(key_bytes("Enter").as_deref(), Some("\r"));
+        assert_eq!(key_bytes("ctrl+c").as_deref(), Some("\x03"));
+        assert_eq!(key_bytes("2").as_deref(), Some("2"));
+        assert_eq!(key_bytes("hyper+q"), None);
+    }
+}
