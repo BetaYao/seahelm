@@ -1,6 +1,6 @@
 # Cards and First Mate in seahelm-core
 
-Status: phases 1 (cards in the core, GPUI card strip) and 2 (First Mate in the core) done; 3–4 planned. Decided 2026-11-04: seahelm-core owns First Mate, and every
+Status: phases 1 (cards in the core, GPUI card strip), 2 (First Mate in the core), 3 (the app follows the core's First Mate) and 4 (the GPUI workbench) done. Decided 2026-11-04: seahelm-core owns First Mate, and every
 "something waits on you" item is one card model, served by the core. The
 macOS island, Telegram, seahelm-web and the GPUI client are renderers.
 
@@ -139,6 +139,50 @@ not running) keeps its own First Mate, as today.
   and `autopilot.say {text}` on the core socket.
 - First Mate's pane gets no notices; its own questions still become cards.
 
+## As built (phase 3)
+
+- Settings ▸ First Mate ▸ "Run in seahelm-core" writes `autopilot_owner:
+  "core"`. With it, `AutopilotCoordinator` stops its own First Mate and
+  follows the core's: every 2 s it reads `autopilot.state` over
+  `core.sock` (`CoreSocketClient`) and mirrors First Mate's approval and
+  proposal cards into `PendingOrdersQueue` by their ids, so the island,
+  the dock, Telegram cards and seahelm-web show them unchanged; answering
+  or dismissing one goes to `autopilot.answer`. Chat to First Mate goes to
+  `autopilot.say`; its answers still return to the chat that asked (the app
+  watches First Mate's pane as before). The Telegram line for each action
+  comes from reading the core's `audit.jsonl` where the app left off.
+- First Mate's view attaches to the core's session and never creates or
+  replaces it.
+- Handover: the core stamps its session `<version>:<agent>:core`, the app
+  `<version>:<agent>`, so whichever takes First Mate over replaces the
+  other's session (the app's has no `seahelm` shim on its PATH). First
+  Mate's conversation restarts; its rules, ledger, audit and standing
+  orders carry over.
+- Scope: only First Mate's cards come from the core so far. Agent questions
+  and suggestions stay the app's own until the app takes its statuses from
+  the core (a separate plan); integration reports likewise.
+## As built (phase 4, GPUI)
+
+The surfaces design (`docs/superpowers/specs/2026-11-04-first-mate-surfaces-design.md`)
+states 1 and 4 for GPUI:
+
+- The fleet column's foot is First Mate's dock (it replaces the usage strip):
+  ⎈, its state (from `autopilot.state`; "In the macOS app" when the core
+  does not own it but the session is up, "Core offline" without a core),
+  the 5h usage per provider, and how many cards wait.
+- Clicking it puts the workbench in the main area: First Mate's real
+  terminal on the left (attached only once `seahelm-first-mate` exists,
+  never created from here; an empty state says why it is not there), every
+  card on the right in its own scrolling column, each naming its project and
+  worktree. No second chat input: the terminal is the conversation.
+- A card is not done when clicked: it shows "Sending…" until the core takes
+  it off the list (`cards.changed`), and a failure stays on the card with
+  the reason ("Already answered elsewhere" for a stale id) to try again.
+  Without a core nothing can be answered.
+- The header's × or picking any worktree closes the workbench; First Mate's
+  session keeps running. Esc stays with the terminal.
+- Not yet: a draggable divider between the two columns (the card column is a
+  fixed 340pt).
 ## Message timelines in the core
 
 What Island's First Mate conversation (surfaces design, state 3) and
@@ -185,3 +229,61 @@ ported from `MessageEvent`, `PaneMessageProjector`, `MessageStreamHub` /
    colour, amber with a count), First Mate's pane in the focus area with its
    cards above the terminal, number keys 1–9 to answer, Esc for "Not now"; an
    OS notification points at a new card but never answers it.
+
+## The core and the gateway
+
+Decided 2026-11-04; drawn in `docs/target-architecture.html`.
+
+**The core says what is true and what may be done; the gateway says who is
+asking and how to talk to them.** The core gives every caller the same
+answer, trusts only its local socket (0600) and touches no network. The
+gateway is the only network-facing piece — identity, transport, each
+channel's presentation — and to the core it is one more client: it uses
+the public interface only (`core.sock` calls and `events.subscribe`,
+`message.subscribe`, `cards.changed`, plus seahelmd's session sockets for
+terminal streams), never the core's files, never the app.
+
+Where something goes:
+
+1. A second channel (Slack, mail) would need it unchanged → the core. Tied
+   to one channel's protocol → the gateway.
+2. It holds credentials or trust towards the outside world → the gateway.
+3. Every surface must see the same result → the core.
+
+| The core | The gateway |
+| --- | --- |
+| Agent status, PRs, usage | Auth: pairing codes, tokens, Telegram initData, `allowed_users`, the Mini App host, share links |
+| Cards: raising, performing answers, staleness | Connections: WebSocket, reconnects, each client's replay cursor |
+| Message timelines | Terminal streams: straight from seahelmd, not through the core |
+| First Mate: session, gate, approvals, proposals, `say` | Telegram: long poll, formatting, chunking, media, rate limits |
+| Whether to notify | Where a notice goes: which chat, the default chat, muting |
+| Pane and worktree actions, waits | Channel presentation: buttons ↔ card ids, progress drafts, groups vs private chats |
+| Stable pane handles (`#n`), parsing and running text commands | Chat bindings: which chat is talking to which pane |
+| | Channel secrets: bot token, pairing secret, in the gateway's own config |
+
+The grey areas, settled:
+
+1. **The command language** (`/go #3`, `/order`, `@worktree`) is parsed and
+   run by the core behind one call, text plus context (the pane a chat is
+   bound to); the island's command line, Telegram and mail share it, and the
+   handles mean the same everywhere. The binding itself is the gateway's
+   conversation state, passed in as context.
+2. **Talking to First Mate from Telegram**: the core never sees chat ids. The
+   gateway notes which chat asked when it calls `autopilot.say`, follows
+   First Mate's message stream, and sends the answer back when the turn
+   ends. (In the app this is `AutopilotCoordinator`'s reply targets; it moves
+   to the gateway.)
+3. **Messages from senders who may not command** (a monitoring channel) are
+   recognised and parsed by the gateway; whatever they trigger goes through
+   the core's business calls and the same gate.
+4. **Who answered a card**: authorisation happens only in the gateway. Its
+   calls carry `_meta.via` (`telegram:@name`), which the core writes to the
+   audit and never authorises on.
+5. **Configuration and secrets**: the bot token, `host_gateway` and the
+   pairing secret move to the gateway's own config file instead of sharing
+   `config.json` with the app's settings (which is how they kept being
+   dropped by a settings save).
+
+Still to build for this boundary: the core's text-command call (the command
+language is the app's today: `CommandParser`, `CommandExecutor`,
+`PaneHandleRegistry`), and the gateway itself with its own config.

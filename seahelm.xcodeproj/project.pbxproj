@@ -370,6 +370,7 @@
 		A02B7AE16DE638F82673C1ED /* EditTabStripViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4897B4E1D168C012F56E8C79 /* EditTabStripViewTests.swift */; };
 		A03021337425A92FF6DFBE1B /* OpenCodePluginInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */; };
 		A0A5267095AB8E2FBAAB8C03 /* ghostty.conf in Resources */ = {isa = PBXBuildFile; fileRef = E4BEF7BAC8EF2918D2F601F7 /* ghostty.conf */; };
+		A27A11F80B6854A6CE6306E5 /* FirstMateCoreOwnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FECF087A867949C595A76ECA /* FirstMateCoreOwnerTests.swift */; };
 		A2A33CDFDE9F70751E8F5DF0 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E7934A548F91E1E9FB161C /* SmokeTests.swift */; };
 		A30993302260CC1F5B1F7179 /* TelegramRuleCoalescerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A3B9CBE08762DDD19AA2C5 /* TelegramRuleCoalescerTests.swift */; };
 		A36D6F5375FBE77728D7A1FD /* ShareLinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46A2C8EAE50007B4CDE40FA /* ShareLinkStore.swift */; };
@@ -1175,6 +1176,7 @@
 		FDD9C939C052C1049758CFFB /* AutopilotEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopilotEvents.swift; sourceTree = "<group>"; };
 		FE32E46B1123B9F111F2E557 /* SelectedFilePathResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedFilePathResolutionTests.swift; sourceTree = "<group>"; };
 		FEC6CEDF0BAE28FF326D89F9 /* SidebarHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarHeaderView.swift; sourceTree = "<group>"; };
+		FECF087A867949C595A76ECA /* FirstMateCoreOwnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMateCoreOwnerTests.swift; sourceTree = "<group>"; };
 		FF44014C31BB9F7833218FB4 /* AgentRegistryTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegistryTransitionTests.swift; sourceTree = "<group>"; };
 		FF5F2FDB1192CD6A1E031DD1 /* TerminalLinkOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLinkOpener.swift; sourceTree = "<group>"; };
 		FF616B03B16048B3C1157313 /* HostGatewayAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGatewayAuth.swift; sourceTree = "<group>"; };
@@ -1711,6 +1713,7 @@
 				1B08FEEAC5D86CEE353749EA /* FirstMateConfigTests.swift */,
 				12FFAF61BC60167FFCC8DB9E /* FirstMateCoordinatorOutcomeTests.swift */,
 				E060A70CCB13E3B97F8BB18E /* FirstMateCoordinatorTests.swift */,
+				FECF087A867949C595A76ECA /* FirstMateCoreOwnerTests.swift */,
 				4089897C96C2E4E3E151DDD2 /* FirstMateEvaluateOutcomeTests.swift */,
 				3CE5DE803C7E3CAB87BBE48C /* FirstMateScheduleTests.swift */,
 				5C26F710397653CFC65887E7 /* FirstMateSettingsTests.swift */,
@@ -2340,6 +2343,7 @@
 				7A4F6892F9AE56EF60508D89 /* FirstMateConfigTests.swift in Sources */,
 				B130550C82567EFD2850B8E9 /* FirstMateCoordinatorOutcomeTests.swift in Sources */,
 				52CD930C527CB7F3B358EB6D /* FirstMateCoordinatorTests.swift in Sources */,
+				A27A11F80B6854A6CE6306E5 /* FirstMateCoreOwnerTests.swift in Sources */,
 				8F0624099E494AEDE963E0CC /* FirstMateEvaluateOutcomeTests.swift in Sources */,
 				BED60521610EAA570B6CCB67 /* FirstMateScheduleTests.swift in Sources */,
 				6D3B43E246F9F3A6ADF6E9B8 /* FirstMateSettingsTests.swift in Sources */,
