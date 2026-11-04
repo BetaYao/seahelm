@@ -22,7 +22,9 @@
 
 按 core / gateway 的边界（`docs/first-mate-core.md`），解析与执行在 seahelm-core（`seahelmd/crates/core-command`，接口 `command.run {text, context: {desktop?, binding?}}`，返回回复文本、按钮，以及变化后的对话对象）；对话对象由调用方保存、每次随命令带入。`#n` 编号存在 core 的 `core-pane-handles.json`，首次启动时继承 App 的 `pane-handles.json`。
 
-下文第 1 节起是 2026-07 的原始设计，动词表以本节为准。App 内的实现（`Sources/Core/Command/`）尚未同步精简。
+App 的各入口（Helm 输入框、Telegram、邮件、聊天按钮）都经 `MainWindowController.routeCommand` 调 `command.run`：App 把各会话的对话对象（`CommandSessionStore`，桌面则是选中项）带入并应用返回值；First Mate 仍由 App 运行时带 `first_mate_here`，core 把给 First Mate 的话交还 App 转交。core 不应答时退回 App 内的旧执行器（`CommandExecutor`，旧动词仍在其中，只作后备）。App 以 core 的 `#n` 为准（`PaneHandleRegistry.adopt`），并在首次打开 worktree 时接管 core 为 `/new` 起的会话（`CoreLink`）。
+
+下文第 1 节起是 2026-07 的原始设计，动词表以本节为准。
 
 ## 1. 现状的问题
 

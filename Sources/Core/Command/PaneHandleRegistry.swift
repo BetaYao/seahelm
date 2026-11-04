@@ -63,6 +63,30 @@ final class PaneHandleRegistry {
         return handles.first { $0.value == handle }?.key
     }
 
+    /// Take the core's handles (`pane.list`): seahelm-core numbers the panes
+    /// for every surface, and a chat that says `#7` must mean the pane the
+    /// desktop card calls #7. A number the core gives another pane is taken
+    /// from whichever pane here held it; that pane gets the core's number once
+    /// the core knows it, or a fresh one above every number in use.
+    func adopt(_ core: [String: Int]) {
+        lock.lock()
+        defer { lock.unlock() }
+        var changed = false
+        for (key, handle) in core where handles[key] != handle {
+            for (other, h) in handles where h == handle && other != key {
+                handles.removeValue(forKey: other)
+            }
+            handles[key] = handle
+            changed = true
+        }
+        let floor = (handles.values.max() ?? 0) + 1
+        if next < floor {
+            next = floor
+            changed = true
+        }
+        if changed { persistLocked() }
+    }
+
     private func persistLocked() {
         let stored = Persisted(next: next, handles: handles)
         guard let data = try? JSONEncoder().encode(stored) else { return }

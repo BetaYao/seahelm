@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build seahelmd (seahelmd/) for the architecture being built and install it at
-# <dest>. Run by the "Embed and sign seahelmd" build phase and by CI.
+# <dest>, with seahelm-core (the status / cards / First Mate / command service)
+# beside it. Run by the "Embed and sign seahelmd" build phase and by CI.
 #
 #   scripts/build-seahelmd.sh <dest>
 #
@@ -44,7 +45,14 @@ fi
 
 # Xcode's environment is for Xcode's compilers; keep it out of cargo's.
 unset SDKROOT LIBRARY_PATH CPATH LD_LIBRARY_PATH 2>/dev/null || true
-cargo build --release --locked --quiet --manifest-path "$CRATE/Cargo.toml" -p seahelmd --target "$TRIPLE"
+# seahelm-core compiles C (SQLite, for reading agent transcripts); with
+# Xcode's SDKROOT gone it needs the macOS SDK named again.
+if command -v xcrun >/dev/null; then
+  SDKROOT="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+  [ -n "$SDKROOT" ] && export SDKROOT
+fi
+cargo build --release --locked --quiet --manifest-path "$CRATE/Cargo.toml" -p seahelmd -p seahelm-core --target "$TRIPLE"
 TARGET_DIR="${CARGO_TARGET_DIR:-$CRATE/target}"
 mkdir -p "$(dirname "$DEST")"
 install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelmd" "$DEST"
+install -m 755 "$TARGET_DIR/$TRIPLE/release/seahelm-core" "$(dirname "$DEST")/seahelm-core"

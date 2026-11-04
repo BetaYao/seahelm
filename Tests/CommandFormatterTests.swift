@@ -189,7 +189,7 @@ final class CommandFormatterTests: XCTestCase {
         XCTAssertTrue(CommandFormatter.describe(.unknownPane(8)).contains("/status"))
         XCTAssertTrue(CommandFormatter.describe(.unknownWorktree("x")).contains("/status worktrees"))
         XCTAssertTrue(CommandFormatter.describe(.repoNotWorktree("alpha")).contains("/forget @alpha"))
-        XCTAssertTrue(CommandFormatter.describe(.missingArgument(verb: "order", what: "the text")).contains("/order #pane <text>"))
+        XCTAssertTrue(CommandFormatter.describe(.missingArgument(verb: "new", what: "a task")).contains("/new [@repo] <task>"))
         XCTAssertTrue(CommandFormatter.describe(.ambiguousWorktree("main", ["a/main", "b/main"])).contains("`@a/main`"))
     }
 
@@ -202,12 +202,14 @@ final class CommandFormatterTests: XCTestCase {
         }
         XCTAssertTrue(help.contains("<anything>"), help)
         XCTAssertNil(CommandSpecs.help(for: "nope"))
-        XCTAssertTrue(CommandSpecs.help(for: "return")?.contains("/yes") == true)
+        XCTAssertNil(CommandSpecs.help(for: "return"), "cut on 2026-11-04")
     }
 
-    func testChatHelpLeavesOutDesktopOnlyVerbs() {
-        XCTAssertFalse(CommandSpecs.help(desktop: false).contains("/add"))
-        XCTAssertTrue(CommandSpecs.help(desktop: true).contains("/add"))
+    /// The language seahelm-core runs (docs/command-redesign.md §0).
+    func testTheTableIsTheFiveVerbs() {
+        XCTAssertEqual(CommandSpecs.all.map(\.verb), ["go", "new", "status", "show", "help"])
+        XCTAssertFalse(CommandSpecs.help(desktop: false).contains("/order"))
+        XCTAssertTrue(CommandSpecs.help(desktop: false).contains("/go #pane | @worktree | mate"))
     }
 
     // MARK: - /show transcript

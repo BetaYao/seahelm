@@ -132,7 +132,7 @@ targets:
             TS="--timestamp"
             [ "${CONFIGURATION:-Debug}" = "Debug" ] && TS="--timestamp=none"
             codesign --force --options runtime $TS \
-              --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${RES}/seahelmd"
+              --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${RES}/seahelmd" "${RES}/seahelm-core"
           fi
     postBuildScripts:
       # libghostty derives TERMINFO as a SIBLING of GHOSTTY_RESOURCES_DIR

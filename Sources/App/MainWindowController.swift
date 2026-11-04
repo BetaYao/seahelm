@@ -94,7 +94,9 @@ class MainWindowController: NSWindowController {
     private var pendingReturnPath: String?
     /// One executor for every surface: the Helm line, Telegram and mail all
     /// run their lines through it, so a command means one thing everywhere.
-    private lazy var commandExecutor = CommandExecutor(host: self, sessions: tabCoordinator.commandSessions)
+    /// The app's own runner of the command language, for when seahelm-core
+    /// does not answer (`routeCommand`).
+    lazy var commandExecutor = CommandExecutor(host: self, sessions: tabCoordinator.commandSessions)
     private var gmailOAuthCoordinator: GmailOAuthCoordinator?
     private var gmailMailPoller: GmailMailPoller?
     /// Suppresses repeat alerts while the same failure persists.
@@ -332,7 +334,7 @@ class MainWindowController: NSWindowController {
         // for each other recurse until the stack goes. Mail is wired in
         // `startGmailMailChannel`, after both exist.
         AgentRegistry.shared.commandRoute = { [weak self] text, surface, reply in
-            self?.commandExecutor.run(text, surface: surface, reply: reply)
+            self?.routeCommand(text, surface: surface, reply: reply)
         }
         AgentRegistry.shared.ruleTriggerRoute = { [weak self] prompt, target in
             self?.dispatchRuleTrigger(prompt: prompt, target: target) ?? false
@@ -1317,7 +1319,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             }
         }
         var replies = 0
-        commandExecutor.run(text, surface: .desktop) { [weak self] reply in
+        routeCommand(text, surface: .desktop) { [weak self] reply in
             guard let self else { return }
             replies += 1
             // The dashboard is the desktop's listing; text replies are for the
@@ -1925,7 +1927,7 @@ extension MainWindowController: NSWindowDelegate {
         // Mail runs its lines through the same executor as the Helm line and
         // Telegram; wired here, once both coordinators exist.
         tabCoordinator.commandRoute = { [weak self] text, surface, reply in
-            self?.commandExecutor.run(text, surface: surface, reply: reply)
+            self?.routeCommand(text, surface: surface, reply: reply)
         }
         guard let gmailConfig, gmailConfig.enabled, gmailConfig.validationError == nil else { return }
         let poller = GmailMailPoller(client: GmailRESTMailClient(accountEmail: gmailConfig.accountEmail))
@@ -3640,7 +3642,7 @@ extension MainWindowController {
             // `/yes` answers the question it sat under; leave it tappable and
             // a second tap reads "Nothing to confirm" under a live-looking card.
             if line == "/yes" { clearChatButtons(callback) }
-            commandExecutor.run(line, surface: surface) { [weak self] reply in
+            routeCommand(line, surface: surface) { [weak self] reply in
                 guard !reply.text.isEmpty else { return }
                 self?.replyToChat(callback, reply.text,
                                   buttons: ChatCallbackRegistry.shared.buttons(for: reply.buttons))

@@ -901,6 +901,11 @@ class TabCoordinator {
                     // (The HTTP webhook was retired once the socket path was
                     // verified end-to-end.)
                     let controlDataSource = SeahelmControlDataSource(hookSink: handleEvent)
+                    // seahelm-core watches what the app shows and runs the command
+                    // language; see CoreLink.
+                    CoreLink.shared.panes = { [weak controlDataSource] in controlDataSource?.snapshotPanes().map(\.dict) ?? [] }
+                    CoreLink.shared.worktrees = { [weak self] in self?.allWorktrees.map(\.info.path) ?? [] }
+                    CoreLink.shared.start()
                     self.mailPaneRouter = MailPaneRouter(sessions: self.commandSessions, accountEmail: self.config.gmailMail?.accountEmail)
                     self.mailPaneRouter?.route = self.commandRoute
                     if let account = self.config.gmailMail?.accountEmail {

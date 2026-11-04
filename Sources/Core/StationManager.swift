@@ -17,7 +17,11 @@ class StationManager {
             return existing
         }
         let station = Station()
-        let paneSessionKey = backend != "local" ? SessionManager.persistentSessionName(for: info.path) : ""
+        // A session seahelm-core started here (`/new` from a chat) is this
+        // worktree's first pane, rather than an empty one beside its agent.
+        let paneSessionKey = backend != "local"
+            ? (CoreLink.shared.takeAdoptableSession(forWorktree: info.path) ?? SessionManager.persistentSessionName(for: info.path))
+            : ""
         if backend != "local" {
             station.paneSessionKey = paneSessionKey
             station.backend = backend
