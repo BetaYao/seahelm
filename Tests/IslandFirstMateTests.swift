@@ -96,6 +96,26 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(MessageEvent(dict: ["seq": 1, "pane_id": "fm", "kind": "note", "ts": 1.0, "text": text])?.kind, .note)
     }
 
+    /// Activity in the app's windows reaches the core at most once a minute.
+    func testActivityIsReportedAtMostOnceAMinute() {
+        var t = ActivityThrottle()
+        let start = Date()
+        XCTAssertTrue(t.shouldReport(at: start))
+        XCTAssertFalse(t.shouldReport(at: start.addingTimeInterval(30)))
+        XCTAssertFalse(t.shouldReport(at: start.addingTimeInterval(59.9)))
+        XCTAssertTrue(t.shouldReport(at: start.addingTimeInterval(60)))
+    }
+
+    /// The daily brief is one block, its lines kept.
+    func testTheBriefIsOneBlock() {
+        let text = "First Mate · daily brief · away 13 h\nDone: deleted 3 worktrees by habit — a · b · c\nWaiting on you (1 card): these 2 worktrees look done:"
+        let items = ConversationItem.items(from: [
+            MessageEvent(seq: 1, paneId: "fm", paneSessionKey: "k", kind: .brief, ts: Date(), text: text),
+        ])
+        XCTAssertEqual(items.map(\.kind), [.brief(text)])
+        XCTAssertEqual(MessageEvent(dict: ["seq": 1, "pane_id": "fm", "kind": "brief", "ts": 1.0, "text": text])?.kind, .brief)
+    }
+
     func testLongRepliesFoldToThreeLines() {
         XCTAssertFalse(OpenedSurfaceView.isLongReply("one\ntwo\nthree"))
         XCTAssertTrue(OpenedSurfaceView.isLongReply("one\ntwo\nthree\nfour"))

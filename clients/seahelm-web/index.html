@@ -462,6 +462,8 @@
   .tl-asst{margin:12px 0 10px;font-size:var(--fs-body);line-height:1.55;color:var(--text);word-break:break-word}
   .tl-notice{margin:6px 0;font-size:var(--fs-sub);color:var(--muted)}
 .tl-note{margin:6px 0;font-size:var(--fs-sub);color:var(--muted);font-style:italic}
+  .tl-brief{margin:10px 0;padding:8px 10px;border:1px solid var(--sep);border-radius:8px;font-size:var(--fs-sub);line-height:1.5;color:var(--text);word-break:break-word}
+  .tl-brief b{display:block;margin-bottom:2px;font-weight:600}
   .tl-thinking{margin:10px 0 8px;font-size:var(--fs-sub);line-height:1.55;color:var(--muted);word-break:break-word}
   .tl-thinking strong{color:inherit}
   .tl-decision{margin:8px 0;font-size:var(--fs-sub);line-height:1.5;color:var(--muted)}
@@ -1494,6 +1496,13 @@ function messageRowHTML(m){
     case 'note':
       // A line seahelm-core wrote itself (First Mate's sweep reports).
       return `<div class="tl-note">${esc(m.text || '')}</div>`;
+    case 'brief': {
+      // First Mate's daily brief (seahelm-core's, no turn): a title, then a
+      // line per section.
+      const [title, ...rest] = (m.text || '').split('\n');
+      return `<div class="tl-brief"><b>${esc(title)}</b>`
+        + rest.map(l => `<div>${esc(l)}</div>`).join('') + `</div>`;
+    }
     case 'thinking':
       return `<div class="tl-thinking md">${SeahelmMarkdown.render(m.text || '')}</div>`;
     default:

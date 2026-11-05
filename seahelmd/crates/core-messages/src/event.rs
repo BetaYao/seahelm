@@ -21,6 +21,9 @@ pub enum Kind {
     /// Clients draw it as one line of note; one that does not know the kind
     /// drops the row.
     Note,
+    /// First Mate's daily brief, composed by the core (no turn): several
+    /// lines, a title then one per section. Clients draw it as a block.
+    Brief,
 }
 
 impl Kind {
@@ -34,6 +37,7 @@ impl Kind {
             Kind::Notice => "notice",
             Kind::Thinking => "thinking",
             Kind::Note => "note",
+            Kind::Brief => "brief",
         }
     }
 
@@ -47,6 +51,7 @@ impl Kind {
             "notice" => Kind::Notice,
             "thinking" => Kind::Thinking,
             "note" => Kind::Note,
+            "brief" => Kind::Brief,
             _ => return None,
         })
     }
@@ -166,5 +171,9 @@ mod tests {
         let v = note.to_json();
         assert_eq!(v["kind"], "note");
         assert_eq!(Message::from_json(&v), Some(note));
+        let brief = Message::new("seahelm-first-mate", "seahelm-first-mate", Kind::Brief, 12.0).with_text("First Mate · daily brief\nDone: deleted 1 worktree by habit — a");
+        let v = brief.to_json();
+        assert_eq!(v["kind"], "brief");
+        assert_eq!(Message::from_json(&v), Some(brief));
     }
 }

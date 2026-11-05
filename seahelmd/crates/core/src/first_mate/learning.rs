@@ -11,16 +11,18 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use seahelm_core_registry::cards::{CardKind, Raise};
+use seahelm_core_registry::cards::CardKind;
 
+use super::budget::Class;
 use super::clock::Local;
 use super::engine::Entry;
 use super::habits::{self, Book, Change, Decision, OfferAnswer, Precedence, Store, GLOBAL};
 use super::inventory::{self, Answer as InventoryAnswer};
+use super::lang::Text;
 use super::observations::{self, norm, By};
 use super::rules::{Action, Level};
 use super::sweep::{self, Batch, BatchAnswer, Candidate, Deleter, Routed};
-use super::{pane, FirstMate, Msg};
+use super::{FirstMate, Msg};
 use crate::core::Core;
 
 /// How often the sweep looks whether a repo is due (it lists repos with git).
@@ -165,20 +167,25 @@ impl FirstMate {
         (books, self.habits.load(GLOBAL, today))
     }
 
-    fn save_book(&mut self, b: &Book, now: f64) {
+    pub(super) fn save_book(&mut self, b: &Book, now: f64) {
         if let Err(e) = self.habits.save(b, now) {
             eprintln!("seahelm-core: habits {}: {e}", b.key);
         }
     }
 
-    /// One line in First Mate's conversation, and the audit.
-    fn report(&mut self, kind: &str, text: &str, now: f64) {
-        self.core.first_mate_line(text);
-        self.log(Entry::new(now, kind, text));
+
+    /// A line in First Mate's conversation in the user's language
+    /// (`first_mate_language`); the audit keeps the English.
+    fn report_text(&mut self, kind: &str, t: &Text, now: f64) {
+        self.core.first_mate_line(t.get(self.config.language));
+        self.log(Entry::new(now, kind, t.en.clone()));
     }
 
-    fn report_change(&mut self, c: &Change, now: f64) {
-        self.report("habit", &c.line(), now);
+    /// A habit's level moved: a line now, and a note for the next brief.
+    pub(super) fn report_change(&mut self, c: &Change, now: f64) {
+        let t = c.text();
+        self.report_text("habit", &t, now);
+        self.budget.note(t);
     }
 
     // MARK: the sweep
@@ -211,7 +218,7 @@ impl FirstMate {
         let repos = self.all_repos();
         for repo in repos.clone() {
             let Ok(config) = self.config_for(&repo) else { continue };
-            if config.settings.quiet_hours.is_some_and(|q| q.contains(&local)) {
+            if self.quiet_now(config.settings.quiet_hours, now) {
                 continue;
             }
             if !forced && !self.sweep_state.due(&repo, &day) {
@@ -286,14 +293,15 @@ impl FirstMate {
         let today = Self::today(now);
         for b in self.habits.all(&today) {
             for (id, to, from) in b.pending_confirmations() {
-                if self.offers.pending(&b.key, &id) {
+                if self.offers.pending(&b.key, &id) || self.confirm_expired(&b.key, &id, to) {
                     continue;
                 }
                 let Some(h) = b.get(&id) else { continue };
                 let nonce = self.mint("c");
                 let offer = self.offers.raise_confirm(&b.key, &id, to, &nonce);
                 let message = habits::confirm_message(h, to, from, &self.habits.path(&b.key));
-                self.raise(&offer.payload, message, offer.options());
+                // The user's own edit: asked about at once, not counted.
+                self.put_card(CardKind::Approval, &offer.payload, message, offer.options(), Class::Answering, now);
                 self.log(Entry::new(now, "approval", format!("habit {id}: {} written by hand, held at {} until confirmed", to.as_str(), from.as_str())));
             }
         }
@@ -329,7 +337,7 @@ impl FirstMate {
             });
         }
         if let Some(line) = sweep::line_deleted(&report.deleted) {
-            self.core.first_mate_line(&line);
+            self.core.first_mate_line(line.get(self.config.language));
         }
         for (r, why) in &report.failed {
             let mut e = Entry::new(now, "skipped", format!("{} not deleted by habit {} — {why}", r.candidate.name(), r.decision.id));
@@ -343,36 +351,30 @@ impl FirstMate {
             return;
         }
         if let Some(line) = sweep::line_suggest(&report.suggest) {
-            self.report("event", &line, now);
+            self.report_text("event", &line, now);
+            // `suggest` is a line, never a card: it waits for the brief.
+            let names: Vec<String> = report.suggest.iter().map(|r| r.candidate.name()).collect();
+            self.budget.note_suggest(&names);
         }
         if !report.ask.is_empty() {
             // One batched card per sweep: an older one still open is replaced.
             for old in std::mem::take(&mut self.batches).into_keys() {
-                self.core.drop_card_payload(&old);
+                self.withdraw(&old);
             }
             for old in std::mem::take(&mut self.items).into_keys() {
-                self.core.drop_card_payload(&old);
+                self.withdraw(&old);
             }
             let nonce = self.mint("sweep");
             let batch = Batch::new(&nonce, report.ask);
             let (message, options) = batch.card();
-            self.raise(&batch.payload, message.clone(), options);
+            let payload = batch.payload.clone();
+            self.batches.insert(payload.clone(), batch);
             self.log(Entry::new(now, "approval", message.lines().next().unwrap_or_default().to_string()));
-            self.batches.insert(batch.payload.clone(), batch);
+            // Up now only while the user is there (and under the cap);
+            // otherwise it goes up with the brief.
+            self.put_card(CardKind::Approval, &payload, message, options, Class::Proactive, now);
         }
         self.sweep_state.save(&sweep::State::path(&self.habits.dir));
-    }
-
-    fn raise(&self, payload: &str, message: String, options: Vec<String>) {
-        self.core.raise_card(Raise {
-            kind: Some(CardKind::Approval),
-            worktree_path: self.dir.to_string_lossy().into(),
-            project: pane::PROJECT.into(),
-            message,
-            options,
-            payload: Some(payload.into()),
-            ..Raise::default()
-        });
     }
 
     // MARK: evidence and promotion
@@ -409,7 +411,7 @@ impl FirstMate {
                 let nonce = self.mint("n");
                 let offer = self.offers.raise(&key, &id, level, &nonce);
                 let message = habits::offer_message(h, level, b.level(h));
-                self.raise(&offer.payload, message, offer.options());
+                self.put_card(CardKind::Approval, &offer.payload, message, offer.options(), Class::Proactive, now);
                 self.log(Entry::new(now, "approval", format!("offered: habit {id} to {}", level.as_str())));
             }
         }
@@ -474,7 +476,11 @@ impl FirstMate {
             OfferAnswer::Declined { confirm: true, .. } => {
                 if let Some((written, granted)) = b.revert(&id) {
                     self.save_book(&b, now);
-                    self.report("habit", &format!("Habit {id} put back to {} in the file (it said {})", granted.as_str(), written.as_str()), now);
+                    let t = Text::new(
+                        format!("Habit {id} put back to {} in the file (it said {})", granted.as_str(), written.as_str()),
+                        format!("习惯 {id} 在文件里改回了 {}（原来写的是 {}）", granted.as_str(), written.as_str()),
+                    );
+                    self.report_text("habit", &t, now);
                 }
             }
             OfferAnswer::Declined { .. } => {
@@ -504,8 +510,9 @@ impl FirstMate {
                 for i in batch.open.clone() {
                     let p = batch.item_payload(i);
                     let (message, options) = batch.item_card(i);
-                    self.raise(&p, message, options);
-                    self.items.insert(p, (payload.to_string(), i));
+                    self.items.insert(p.clone(), (payload.to_string(), i));
+                    // The user asked to pick: up at once, not counted.
+                    self.put_card(CardKind::Approval, &p, message, options, Class::Answering, now);
                 }
             }
             BatchAnswer::Nothing => {
@@ -598,24 +605,22 @@ impl FirstMate {
                 e.level = Some("approved".into());
                 e.worktree_path = Some(r.candidate.path.clone());
                 self.log(e);
-                self.core.first_mate_line(&format!("Deleted {}. Branch kept.", r.candidate.name()));
+                let n = r.candidate.name();
+                self.core.first_mate_line(Text::new(format!("Deleted {n}. Branch kept."), format!("删了 {n}。分支保留。")).get(self.config.language));
             }
-            Err(why) => self.report("skipped", &format!("Did not delete {}: {why}", r.candidate.name()), now),
+            Err(why) => {
+                let n = r.candidate.name();
+                self.report_text("skipped", &Text::new(format!("Did not delete {n}: {why}"), format!("没有删 {n}：{why}")), now);
+            }
         }
     }
 
     /// A First Mate delete approval (a rule's, not a habit card) answered:
     /// evidence for the habit its measured facts match, if any.
     pub(super) fn count_delete_approval(&mut self, params: &Value, approved: bool, now: f64) -> Option<String> {
-        let facts: super::facts::Facts = serde_json::from_value(params.get("_facts_json")?.clone()).ok()?;
+        let (key, id) = self.delete_habit_of(params, now)?;
         let worktree = params.get("worktree_path").and_then(Value::as_str)?;
-        let (repo, _) = observations::worktree_info(worktree)?;
         let today = Self::today(now);
-        let prec = self.precedence(&repo).unwrap_or(self.default_prec());
-        let (books, global) = self.books_for(std::slice::from_ref(&repo), &today);
-        let mut list: Vec<&Book> = books.values().collect();
-        list.push(&global);
-        let Decision { key, id, .. } = habits::decide(&facts, &list, &prec)?;
         let mut b = self.habits.load(&key, &today);
         if approved {
             let branch = observations::worktree_info(worktree).map(|(_, b)| b).unwrap_or_default();
@@ -628,6 +633,20 @@ impl FirstMate {
             self.save_book(&b, now);
         }
         Some(format!("{key}/{id}"))
+    }
+
+    /// The habit a delete approval's measured facts match, if any.
+    pub(super) fn delete_habit_of(&mut self, params: &Value, now: f64) -> Option<(String, String)> {
+        let facts: super::facts::Facts = serde_json::from_value(params.get("_facts_json")?.clone()).ok()?;
+        let worktree = params.get("worktree_path").and_then(Value::as_str)?;
+        let (repo, _) = observations::worktree_info(worktree)?;
+        let today = Self::today(now);
+        let prec = self.precedence(&repo).unwrap_or(self.default_prec());
+        let (books, global) = self.books_for(std::slice::from_ref(&repo), &today);
+        let mut list: Vec<&Book> = books.values().collect();
+        list.push(&global);
+        let Decision { key, id, .. } = habits::decide(&facts, &list, &prec)?;
+        Some((key, id))
     }
 
     /// Every habit card First Mate has up.
@@ -704,16 +723,18 @@ impl FirstMate {
         if !self.running {
             return;
         }
-        self.report("event", &inventory::line_raised(measured, &groups), now);
+        self.report_text("event", &inventory::line_raised(measured, &groups), now);
         let nonce = self.mint("inv");
         let (cards, old) = self.inventory.raise(&nonce, groups);
         for p in old {
-            self.core.drop_card_payload(&p);
+            self.withdraw(&p);
         }
         let of = cards.len();
         for (i, c) in cards.iter().enumerate() {
             let (message, options) = c.render(i + 1, of);
-            self.raise(&c.payload, message, options);
+            // D6: the one inventory (or the user's own request for it): up
+            // at once, outside the cap.
+            self.put_card(CardKind::Approval, &c.payload, message, options, Class::Answering, now);
             self.log(Entry::new(now, "approval", format!("inventory: {} — {} worktree(s)", c.group.title(), c.members.len())));
         }
     }
@@ -764,7 +785,7 @@ impl FirstMate {
         if !written.is_empty() || superseded {
             self.save_book(&book, now);
         }
-        self.report("habit", &inventory::line_answered(&a.card, answer, &written), now);
+        self.report_text("habit", &inventory::line_answered(&a.card, answer, &written), now);
         for c in &changes {
             self.report_change(c, now);
         }
@@ -797,7 +818,7 @@ impl FirstMate {
             e.worktree_path = Some(c.path.clone());
             self.log(e);
         }
-        self.core.first_mate_line(&inventory::line_deleted(group, &report));
+        self.core.first_mate_line(inventory::line_deleted(group, &report).get(self.config.language));
     }
 }
 

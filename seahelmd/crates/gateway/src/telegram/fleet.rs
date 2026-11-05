@@ -112,6 +112,7 @@ impl Adapter {
                 "pane.notice" => self.notice(&ev).await,
                 "pane.registered" | "pane.closed" | "pane.rehomed" => lock(&self.panes).stale = true,
                 "autopilot.audit" => self.audit(&ev),
+                "first_mate.brief" => self.brief(&ev),
                 _ => {}
             }
         }
@@ -242,15 +243,28 @@ impl Adapter {
     }
 
     /// What First Mate did on its own is worth a line on the phone; reads
-    /// and deliveries are not.
+    /// and deliveries are not, and nor is what a habit did: that is the
+    /// daily brief's (docs/first-mate-autonomy.md, "Interruption budget").
     fn audit(&self, ev: &Value) {
         let entry = ev.get("entry").cloned().unwrap_or_default();
-        if entry.get("kind").and_then(Value::as_str) != Some("action") {
+        if !is_phone_worthy(&entry) {
             return;
         }
         let text = entry.get("text").and_then(Value::as_str).unwrap_or_default();
         if let Some(chat) = default_chat(&self.config()) {
             self.say(&chat, &format!("⎈ First Mate\n→ {text}"));
+        }
+    }
+
+    /// The daily brief, when the core picked Telegram for it (it only sends
+    /// this event then): to the default chat, as one message.
+    fn brief(&self, ev: &Value) {
+        let text = ev.get("text").and_then(Value::as_str).unwrap_or_default().trim();
+        if text.is_empty() {
+            return;
+        }
+        if let Some(chat) = default_chat(&self.config()) {
+            self.say(&chat, &format!("⎈ {text}"));
         }
     }
 
@@ -378,6 +392,12 @@ impl Adapter {
     }
 }
 
+/// An audit line that goes to the phone at once: First Mate's own actions,
+/// except a habit's (`rule: habit:<id>`), which wait for the brief.
+fn is_phone_worthy(entry: &Value) -> bool {
+    entry.get("kind").and_then(Value::as_str) == Some("action") && !entry.get("rule").and_then(Value::as_str).is_some_and(|r| r.starts_with("habit:"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,5 +414,14 @@ mod tests {
         assert_eq!(rows[0].1, Some(PaneMeta { handle: 4, project: "repo".into(), branch: "fix".into() }));
         assert_eq!(rows[1].1, None);
         assert_eq!(rows[0].0.pane_id, "A");
+    }
+
+    #[test]
+    fn a_habit_deletion_waits_for_the_brief() {
+        assert!(is_phone_worthy(&json!({"kind": "action", "text": "sent to #4", "level": "auto"})));
+        assert!(is_phone_worthy(&json!({"kind": "action", "text": "Deleted worktree x (approved, habit h)", "level": "approved"})));
+        assert!(!is_phone_worthy(&json!({"kind": "action", "text": "Deleted worktree x by habit h", "rule": "habit:h", "level": "auto"})));
+        assert!(!is_phone_worthy(&json!({"kind": "brief", "text": "First Mate · daily brief"})), "the brief comes as its own event, only when Telegram is its channel");
+        assert!(!is_phone_worthy(&json!({"kind": "held", "text": "x — held for the brief"})));
     }
 }

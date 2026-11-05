@@ -45,6 +45,7 @@ use serde_json::{json, Value};
 use serde_yaml::{Mapping, Value as Yaml};
 
 use super::facts::Facts;
+use super::lang::{Lang, Text};
 use super::observations::{self, Record};
 use super::rules::Level as RuleLevel;
 
@@ -64,7 +65,6 @@ pub mod tuning {
     /// First Mate deleting it on its own undoes that deletion.
     pub const UNDO_WINDOW_DAYS: f64 = 7.0;
     /// Unanswered expiries in a row that take a habit down a level.
-    #[allow(dead_code)]
     pub const EXPIRIES_TO_DEMOTE: u32 = 2;
     /// Branch names kept as examples.
     pub const EXAMPLES_CAP: usize = 8;
@@ -572,13 +572,21 @@ pub struct Change {
     pub id: String,
     pub from: HabitLevel,
     pub to: HabitLevel,
-    pub why: String,
+    pub why: Text,
 }
 
 impl Change {
     pub fn line(&self) -> String {
-        let verb = if self.to > self.from { "up" } else { "down" };
-        format!("Habit {} {verb} from {} to {}: {}", self.id, self.from.as_str(), self.to.as_str(), self.why)
+        self.text().en
+    }
+
+    /// The line in both languages, for First Mate's timeline and the brief.
+    pub fn text(&self) -> Text {
+        let up = self.to > self.from;
+        Text::new(
+            format!("Habit {} {} from {} to {}: {}", self.id, if up { "up" } else { "down" }, self.from.as_str(), self.to.as_str(), self.why.en),
+            format!("习惯 {} 从 {} {}到 {}：{}", self.id, self.from.as_str(), if up { "升" } else { "降" }, self.to.as_str(), self.why.get(Lang::Zh)),
+        )
     }
 }
 
@@ -696,7 +704,7 @@ impl Book {
     }
 
     /// Down one level, never up. Returns the change.
-    fn demote(&mut self, id: &str, why: &str) -> Option<Change> {
+    fn demote(&mut self, id: &str, why: Text) -> Option<Change> {
         let i = self.index(id)?;
         let from = self.level(&self.habits[i]);
         let to = from.down();
@@ -708,7 +716,7 @@ impl Book {
         self.caps.insert(id.to_string(), to);
         // A demotion overrules a raise still waiting for the user's confirmation.
         self.written.remove(id);
-        (to != from).then(|| Change { id: id.into(), from, to, why: why.into() })
+        (to != from).then(|| Change { id: id.into(), from, to, why })
     }
 
     /// A card about this habit approved (one decision, however many
@@ -729,7 +737,7 @@ impl Book {
     pub fn rejected(&mut self, id: &str) -> Option<Change> {
         let i = self.index(id)?;
         self.habits[i].evidence.rejected += 1;
-        self.demote(id, "the user said no on its card")
+        self.demote(id, Text::new("the user said no on its card", "你在它的卡片上选了不"))
     }
 
     /// A further no in a batch that already took the habit down: counted,
@@ -744,19 +752,18 @@ impl Book {
     pub fn undone(&mut self, id: &str, branch: &str) -> Option<Change> {
         let i = self.index(id)?;
         self.habits[i].evidence.undone += 1;
-        self.demote(id, &format!("the user checked {branch} out again after First Mate deleted it"))
+        self.demote(id, Text::new(format!("the user checked {branch} out again after First Mate deleted it"), format!("First Mate 删掉 {branch} 后你又把它检出了")))
     }
 
-    /// One of this habit's cards expired unanswered (phase 5 raises the
-    /// expiries; the hook is here). The second in a row takes it down.
-    #[allow(dead_code)]
+    /// One of this habit's cards expired unanswered (`brief::expire`):
+    /// counted as ignored; the second in a row takes it down.
     pub fn expired(&mut self, id: &str) -> Option<Change> {
         let i = self.index(id)?;
         let e = &mut self.habits[i].evidence;
         e.ignored += 1;
         e.expired_in_row += 1;
         if e.expired_in_row >= tuning::EXPIRIES_TO_DEMOTE {
-            return self.demote(id, "two of its cards went unanswered");
+            return self.demote(id, Text::new("two of its cards went unanswered", "它的卡片连续两次没人回"));
         }
         None
     }
@@ -803,7 +810,10 @@ impl Book {
                 id,
                 from: HabitLevel::Observe,
                 to: HabitLevel::Suggest,
-                why: format!("the user did it {}+ times, on {}+ days, in {}+ worktrees", tuning::N, tuning::MIN_DAYS, tuning::MIN_WORKTREES),
+                why: Text::new(
+                    format!("the user did it {}+ times, on {}+ days, in {}+ worktrees", tuning::N, tuning::MIN_DAYS, tuning::MIN_WORKTREES),
+                    format!("你在 {}+ 天、{}+ 个 worktree 里做过 {}+ 次", tuning::MIN_DAYS, tuning::MIN_WORKTREES, tuning::N),
+                ),
             });
         }
         changes
@@ -847,7 +857,7 @@ impl Book {
         h.evidence.streak = 0;
         h.evidence.fresh_from = h.sources.len();
         self.caps.insert(g.id.clone(), g.level);
-        Ok(Change { id: g.id, from, to: g.level, why: "the user said yes".into() })
+        Ok(Change { id: g.id, from, to: g.level, why: Text::new("the user said yes", "你同意了") })
     }
 
     /// The level a hand edit asks for, if the user is to be asked: what the
@@ -883,7 +893,7 @@ impl Book {
         h.evidence.fresh_from = h.sources.len();
         self.caps.insert(g.id.clone(), g.level);
         self.written.remove(&g.id);
-        Ok(Change { id: g.id, from, to: g.level, why: "the user confirmed the level written in the file".into() })
+        Ok(Change { id: g.id, from, to: g.level, why: Text::new("the user confirmed the level written in the file", "你确认了文件里写的档位") })
     }
 
     /// Write the habit an inventory answer names (`inventory`), granted by
@@ -927,7 +937,7 @@ impl Book {
         }
         self.caps.insert(h.id.clone(), to);
         self.written.remove(&h.id);
-        Ok((to != from).then(|| Change { id: h.id, from, to, why: "the user answered the inventory card".into() }))
+        Ok((to != from).then(|| Change { id: h.id, from, to, why: Text::new("the user answered the inventory card", "你回答了盘点卡") }))
     }
 
     /// Keep a habit in place, never matched again: an answer replaced it.
@@ -1063,6 +1073,11 @@ impl Offers {
 
     pub fn clear(&mut self) {
         self.open.clear();
+    }
+
+    /// Take an offer down unanswered (it expired): no grant, no decline.
+    pub fn withdraw(&mut self, payload: &str) -> Option<Offer> {
+        self.open.remove(payload)
     }
 
     /// The user's answer to a card (None: dismissed). Only the yes option
@@ -1267,10 +1282,16 @@ impl Store {
                     self.write_seal("{}");
                     seal::report(
                         &self.dir,
-                        format!(
-                            "The seal on First Mate's granted habit levels ({}) was altered, so the core can no longer tell which levels you granted. \
-                             Every habit is back to observe: First Mate only watches until you approve a level again on a card.",
-                            self.dir.join(SEAL).display()
+                        Text::new(
+                            format!(
+                                "The seal on First Mate's granted habit levels ({}) was altered, so the core can no longer tell which levels you granted. \
+                                 Every habit is back to observe: First Mate only watches until you approve a level again on a card.",
+                                self.dir.join(SEAL).display()
+                            ),
+                            format!(
+                                "First Mate 习惯授权档位的封印（{}）被改动过，core 已无法分辨哪些档位是你批准的。所有习惯退回 observe：在你再次在卡片上批准之前，First Mate 只观察。",
+                                self.dir.join(SEAL).display()
+                            ),
                         ),
                     );
                     return "{}".into();
@@ -1281,15 +1302,23 @@ impl Store {
             (Some(k), Some(d)) if k == d => d,
             (Some(k), on_disk) => {
                 let what = if on_disk.is_some() { "was changed by something other than the core" } else { "was deleted" };
+                let what_zh = if on_disk.is_some() { "被 core 以外的东西改动了" } else { "被删除了" };
                 let _ = std::fs::create_dir_all(&self.dir);
                 let restored = write_atomic(&path, &k).is_ok();
                 self.write_seal(&k);
                 seal::report(
                     &self.dir,
-                    format!(
-                        "First Mate's granted habit levels ({}) {what}; {}. Levels only go up through a card you answer.",
-                        path.display(),
-                        if restored { "put back to the core's version" } else { "could not be put back — the core keeps using its own version" }
+                    Text::new(
+                        format!(
+                            "First Mate's granted habit levels ({}) {what}; {}. Levels only go up through a card you answer.",
+                            path.display(),
+                            if restored { "put back to the core's version" } else { "could not be put back — the core keeps using its own version" }
+                        ),
+                        format!(
+                            "First Mate 的习惯授权档位（{}）{what_zh}；{}。档位只能通过你回答的卡片升高。",
+                            path.display(),
+                            if restored { "已恢复为 core 的版本" } else { "无法恢复，core 继续使用自己的版本" }
+                        ),
                     ),
                 );
                 k
@@ -1452,6 +1481,8 @@ mod seal {
 
     use sha2::{Digest, Sha256};
 
+    use super::Text;
+
     /// One check-and-restore at a time.
     pub static LOCK: Mutex<()> = Mutex::new(());
 
@@ -1460,8 +1491,8 @@ mod seal {
         K.get_or_init(Default::default)
     }
 
-    fn reports() -> &'static Mutex<Vec<(PathBuf, String)>> {
-        static R: OnceLock<Mutex<Vec<(PathBuf, String)>>> = OnceLock::new();
+    fn reports() -> &'static Mutex<Vec<(PathBuf, Text)>> {
+        static R: OnceLock<Mutex<Vec<(PathBuf, Text)>>> = OnceLock::new();
         R.get_or_init(Default::default)
     }
 
@@ -1483,13 +1514,13 @@ mod seal {
         Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
     }
 
-    pub fn report(dir: &Path, text: String) {
-        eprintln!("seahelm-core: security: {text}");
+    pub fn report(dir: &Path, text: Text) {
+        eprintln!("seahelm-core: security: {}", text.en);
         reports().lock().unwrap_or_else(|e| e.into_inner()).push((dir.to_path_buf(), text));
     }
 
     /// Reports for one habits directory (None: all of them).
-    pub fn take(dir: Option<&Path>) -> Vec<String> {
+    pub fn take(dir: Option<&Path>) -> Vec<Text> {
         let mut all = reports().lock().unwrap_or_else(|e| e.into_inner());
         let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut *all).into_iter().partition(|(d, _)| dir.is_none_or(|x| x == d));
         *all = rest;
@@ -1499,7 +1530,7 @@ mod seal {
 
 /// Changes to `.granted.json` the core caught and undid since last asked,
 /// for First Mate to tell the user.
-pub fn take_tamper_reports(dir: Option<&Path>) -> Vec<String> {
+pub fn take_tamper_reports(dir: Option<&Path>) -> Vec<Text> {
     seal::take(dir)
 }
 

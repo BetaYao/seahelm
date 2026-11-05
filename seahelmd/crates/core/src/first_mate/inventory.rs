@@ -43,6 +43,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::facts::Facts;
+use super::lang::Text;
 use super::habits::{self, Decision, Do, Evidence, Grant, Habit, HabitLevel, Origin, Status, When, GLOBAL};
 use super::sweep::{self, Candidate, Deleter, Routed};
 
@@ -82,6 +83,16 @@ impl Group {
             Group::Closed => "PR closed without merging, nothing to lose",
             Group::Idle => "no PR, idle 30+ days, nothing to lose",
             Group::AtRisk => "finished or idle, but has something to lose",
+        }
+    }
+
+    /// The title in Chinese, for the note rows (`lang`).
+    pub fn title_zh(self) -> &'static str {
+        match self {
+            Group::Merged => "PR 已合并，没有会丢的东西",
+            Group::Closed => "PR 已关闭未合并，没有会丢的东西",
+            Group::Idle => "没有 PR、闲置 30 天以上，没有会丢的东西",
+            Group::AtRisk => "已完成或闲置，但有会丢的东西",
         }
     }
 
@@ -330,6 +341,11 @@ impl Cards {
         self.open.clear();
     }
 
+    /// Take a card down unanswered (it expired): nothing is learned.
+    pub fn withdraw(&mut self, payload: &str) -> Option<Card> {
+        self.open.remove(payload)
+    }
+
     /// The user's answer. Only an option the card offered grants anything.
     pub fn answer(&mut self, payload: &str, option: Option<&str>, today: &str) -> Option<Answered> {
         let card = self.open.remove(payload)?;
@@ -453,43 +469,60 @@ impl Schedule {
 // MARK: lines and the preview
 
 /// The note row when the cards go up (or when there is nothing to ask).
-pub fn line_raised(measured: usize, groups: &[(Group, Vec<Candidate>)]) -> String {
+pub fn line_raised(measured: usize, groups: &[(Group, Vec<Candidate>)]) -> Text {
     if groups.is_empty() {
-        return format!("Inventory: measured {}; none looks finished, so there is nothing to ask.", plural(measured, "worktree"));
+        return Text::new(
+            format!("Inventory: measured {}; none looks finished, so there is nothing to ask.", plural(measured, "worktree")),
+            format!("盘点：量了 {measured} 个 worktree，没有看起来做完的，无需询问。"),
+        );
     }
     let parts: Vec<String> = groups.iter().map(|(g, m)| format!("{} {}", g.title(), m.len())).collect();
-    format!(
-        "Inventory: measured {} — {}. One card per group; nothing is deleted unless you say so.",
-        plural(measured, "worktree"),
-        parts.join(" · ")
+    let parts_zh: Vec<String> = groups.iter().map(|(g, m)| format!("{} {}", g.title_zh(), m.len())).collect();
+    Text::new(
+        format!("Inventory: measured {} — {}. One card per group; nothing is deleted unless you say so.", plural(measured, "worktree"), parts.join(" · ")),
+        format!("盘点：量了 {measured} 个 worktree — {}。每组一张卡；你不点头就什么都不删。", parts_zh.join(" · ")),
     )
 }
 
 /// The note row for an answer.
-pub fn line_answered(card: &Card, a: Answer, ids: &[String]) -> String {
-    let habit = match a {
-        Answer::Delete => "at ask",
-        Answer::Keep => "keep: not offered again",
-        Answer::AskEachTime => "at observe",
+pub fn line_answered(card: &Card, a: Answer, ids: &[String]) -> Text {
+    let (habit, habit_zh) = match a {
+        Answer::Delete => ("at ask", "档位 ask"),
+        Answer::Keep => ("keep: not offered again", "保留：不再提"),
+        Answer::AskEachTime => ("at observe", "档位 observe"),
     };
-    let mut s = if ids.is_empty() {
-        format!("Inventory · {}: {} — nothing measurable to write a habit for", card.group.title(), a.as_str())
+    let answer_zh = match a {
+        Answer::Delete => "删除",
+        Answer::Keep => "保留",
+        Answer::AskEachTime => "每次问我",
+    };
+    let (mut en, mut zh) = if ids.is_empty() {
+        (
+            format!("Inventory · {}: {} — nothing measurable to write a habit for", card.group.title(), a.as_str()),
+            format!("盘点 · {}：{answer_zh} — 没有可测的条件可写成习惯", card.group.title_zh()),
+        )
     } else {
-        format!("Inventory · {}: {} — habit {} {habit}", card.group.title(), a.as_str(), ids.join(", "))
+        (
+            format!("Inventory · {}: {} — habit {} {habit}", card.group.title(), a.as_str(), ids.join(", ")),
+            format!("盘点 · {}：{answer_zh} — 习惯 {} {habit_zh}", card.group.title_zh(), ids.join(", ")),
+        )
     };
     if a == Answer::Delete {
-        s += &format!("; deleting {}", plural(card.members.len(), "worktree"));
+        en += &format!("; deleting {}", plural(card.members.len(), "worktree"));
+        zh += &format!("；正在删除 {} 个 worktree", card.members.len());
     }
-    s + "."
+    Text::new(en + ".", zh + "。")
 }
 
-pub fn line_deleted(g: Group, r: &DeleteReport) -> String {
-    let mut s = format!("Inventory deleted {} ({}). Branches kept.", plural(r.deleted.len(), "worktree"), g.title());
+pub fn line_deleted(g: Group, r: &DeleteReport) -> Text {
+    let mut en = format!("Inventory deleted {} ({}). Branches kept.", plural(r.deleted.len(), "worktree"), g.title());
+    let mut zh = format!("盘点删了 {} 个 worktree（{}）。分支保留。", r.deleted.len(), g.title_zh());
     if !r.failed.is_empty() {
         let left: Vec<String> = r.failed.iter().map(|(c, why)| format!("{} ({why})", c.name())).collect();
-        s += &format!(" Left alone: {}.", left.join(" · "));
+        en += &format!(" Left alone: {}.", left.join(" · "));
+        zh += &format!(" 没动：{}。", left.join(" · "));
     }
-    s
+    Text::new(en, zh)
 }
 
 /// `habits.inventory {preview: true}`: the groups, raising nothing.
@@ -612,7 +645,7 @@ mod tests {
         let mut cards = Cards::default();
         let (raised, _) = cards.raise("n0", none.clone());
         assert!(raised.is_empty() && cards.payloads().is_empty(), "no card at all");
-        assert_eq!(line_raised(2, &none), "Inventory: measured 2 worktrees; none looks finished, so there is nothing to ask.");
+        assert_eq!(line_raised(2, &none).en, "Inventory: measured 2 worktrees; none looks finished, so there is nothing to ask.");
     }
 
     #[test]
@@ -707,7 +740,7 @@ mod tests {
         assert_eq!(names(&r.deleted), vec!["m1", "m2"]);
         assert_eq!(r.failed.len(), 2);
         assert!(r.failed.iter().any(|(c, why)| c.name() == "changed" && why.starts_with("changed since the card")));
-        assert_eq!(line_deleted(Group::Merged, &r).split(" Left alone").next().unwrap(), "Inventory deleted 2 worktrees (PR merged, nothing to lose). Branches kept.");
+        assert_eq!(line_deleted(Group::Merged, &r).en.split(" Left alone").next().unwrap(), "Inventory deleted 2 worktrees (PR merged, nothing to lose). Branches kept.");
     }
 
     #[test]
@@ -876,12 +909,14 @@ mod tests {
     #[test]
     fn lines_and_preview() {
         let g = group(mixed());
-        let line = line_raised(14, &g);
+        let line = line_raised(14, &g).en;
         assert!(line.starts_with("Inventory: measured 14 worktrees — PR merged, nothing to lose 2 · "), "{line}");
         let p = preview_json(14, &g);
         assert_eq!(p["groups"][0]["group"], "merged");
         assert_eq!(p["groups"][3]["options"], json!([KEEP, ASK_EACH_TIME]));
         let card = Card { payload: "p".into(), group: Group::Merged, members: vec![cand("m1", clean("merged"))] };
-        assert_eq!(line_answered(&card, Answer::Delete, &["inventory-merged".into()]), "Inventory · PR merged, nothing to lose: delete — habit inventory-merged at ask; deleting 1 worktree.");
+        let a = line_answered(&card, Answer::Delete, &["inventory-merged".into()]);
+        assert_eq!(a.en, "Inventory · PR merged, nothing to lose: delete — habit inventory-merged at ask; deleting 1 worktree.");
+        assert_eq!(a.zh, "盘点 · PR 已合并，没有会丢的东西：删除 — 习惯 inventory-merged 档位 ask；正在删除 1 个 worktree。");
     }
 }

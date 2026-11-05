@@ -3,9 +3,10 @@
 //! Measurements and colours are the AppKit originals' (MACOS-SPEC.md).
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::{
+    KeyDownEvent,
     actions, div, percentage, prelude::*, px, svg, App, ClickEvent, Context, Entity,
     FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathPromptOptions,
     Rgba, SharedString, Subscription, Transformation, Window, WindowControlArea,
@@ -102,6 +103,9 @@ pub struct Workspace {
     needs_focus: bool,
     /// Whether the window's activation is being reported to the core yet.
     watching_activation: bool,
+    /// When keys or the mouse in this window were last told to the core
+    /// (`client.activity`, at most once a minute; only that, never what).
+    activity_reported: Option<Instant>,
     sidebar_width: f32,
     sidebar_visible: bool,
     dragging_divider: bool,
@@ -156,6 +160,9 @@ pub struct Workspace {
     zoomed: Option<(String, LeafId)>,
 }
 
+
+/// `client.activity` at most this often.
+const ACTIVITY_EVERY: Duration = Duration::from_secs(60);
 impl Workspace {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let side_panel = cx.new(SidePanel::new);
@@ -173,6 +180,7 @@ impl Workspace {
             grouping: Grouping::default(),
             needs_focus: true,
             watching_activation: false,
+            activity_reported: None,
             sidebar_width: SIDEBAR_DEFAULT,
             sidebar_visible: true,
             dragging_divider: false,
@@ -870,6 +878,18 @@ impl Workspace {
             )
     }
 
+    /// Keys or the mouse in this window: the user is here. Times First
+    /// Mate's daily brief in the core.
+    fn note_activity(&mut self) {
+        if self.activity_reported.is_some_and(|t| t.elapsed() < ACTIVITY_EVERY) {
+            return;
+        }
+        self.activity_reported = Some(Instant::now());
+        std::thread::spawn(|| {
+            let _ = core_client::call("client.activity", serde_json::json!({"client": "gpui"}));
+        });
+    }
+
     fn report_visible(&self, active: bool, cx: &mut Context<Self>) {
         let path = self.selected.as_deref().and_then(|id| self.fleet.find(id)).map(|i| i.worktree_path.clone());
         cx.background_executor()
@@ -1370,7 +1390,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &FocusPaneRight, window, cx| w.focus_pane(Direction::Right, window, cx)))
             .on_action(cx.listener(|w, _: &FocusPaneUp, window, cx| w.focus_pane(Direction::Up, window, cx)))
             .on_action(cx.listener(|w, _: &FocusPaneDown, window, cx| w.focus_pane(Direction::Down, window, cx)))
-            .on_action(cx.listener(|w, _: &ZoomPane, _, cx| w.toggle_zoom(cx)));
+            .on_action(cx.listener(|w, _: &ZoomPane, _, cx| w.toggle_zoom(cx)))
+            .capture_key_down(cx.listener(|w, _: &KeyDownEvent, _, _| w.note_activity()))
+            .capture_any_mouse_down(cx.listener(|w, _: &MouseDownEvent, _, _| w.note_activity()));
         if self.dragging_divider || self.split_drag.as_ref().is_some_and(|d| d.axis == Axis::Horizontal) {
             root = root.cursor_col_resize();
         }

@@ -269,6 +269,8 @@ struct OpenedSurfaceView: View {
                 .font(.system(size: 10.5))
                 .foregroundStyle(.white.opacity(0.4))
                 .lineLimit(2)
+        case .brief(let text):
+            briefRow(text)
         case .decision(let options):
             decisionRow(options)
         case .event(let headline, let full):
@@ -342,6 +344,33 @@ struct OpenedSurfaceView: View {
             }
             Spacer(minLength: 0)
         }
+    }
+
+    /// The daily brief (seahelm-core's, no turn behind it): its title in
+    /// the accent, each section a line of its own.
+    @ViewBuilder
+    private func briefRow(_ text: String) -> some View {
+        let lines = text.components(separatedBy: "\n")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: "sun.horizon.fill").font(.system(size: 9)).foregroundStyle(IslandStyle.accent)
+                Text(lines.first ?? "")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1)
+            }
+            ForEach(Array(lines.dropFirst().enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.05)))
     }
 
     /// First Mate's input: Enter sends (an IME composition commits first — the
@@ -566,6 +595,8 @@ struct ConversationItem: Identifiable, Equatable {
         /// Tool calls with no reply after them yet: the turn is still going.
         case tools(String)
         case note(String)
+        /// First Mate's daily brief: a title, then a line per section.
+        case brief(String)
         /// Choices First Mate put to the user (its suggestion): drawn as
         /// buttons while the card is still waiting.
         case decision([String])
@@ -606,6 +637,8 @@ struct ConversationItem: Identifiable, Equatable {
                 out.append(ConversationItem(id: m.seq, kind: .thinking(text)))
             case .note where !text.isEmpty:
                 dropRun(); out.append(ConversationItem(id: m.seq, kind: .note(text)))
+            case .brief where !text.isEmpty:
+                dropRun(); out.append(ConversationItem(id: m.seq, kind: .brief(text)))
             // Notices ("Claude is waiting for your input") say what the title's
             // status already does, once per turn: left out.
             case .decision where !text.isEmpty:

@@ -8,6 +8,9 @@ enum MessageKind: String, Equatable {
     /// A line seahelm-core wrote into the timeline itself (First Mate's sweep
     /// reports): no turn behind it, drawn as one line of note.
     case note
+    /// First Mate's daily brief, composed by seahelm-core (no turn): a title
+    /// line and one line per section, drawn as a block.
+    case brief
 }
 
 struct MessageEvent: Equatable {

@@ -29,6 +29,7 @@ use seahelm_core_scan::Snapshot;
 use seahelm_core_types::{now, AgentStatus, AgentType, Authority, EventKind, EventSource, NormalizedEvent, Timestamp};
 use seahelmd::proto::Msg;
 
+use crate::first_mate::lang::Text;
 use crate::first_mate::{self, policy as fm_policy};
 use crate::pr::{self, PrStore};
 use crate::rpc::{self, Dispatch, Reply, RpcError, RpcResult};
@@ -63,6 +64,9 @@ pub struct Core {
     /// Client pids already written down as running inside a pane: once per
     /// process, not once per answer.
     audited_clients: Mutex<HashSet<u32>>,
+    /// When the user is there (`first_mate::presence`): the activity
+    /// profile behind the daily brief. Its own lock, never taken with `state`.
+    presence: Mutex<first_mate::presence::Tracker>,
 }
 
 struct State {
@@ -212,6 +216,7 @@ impl Core {
             handles: Mutex::new(handles),
             git_cache: Mutex::new(HashMap::new()),
             discovered: Mutex::new(Vec::new()),
+            presence: Mutex::new(first_mate::presence::Tracker::open(Some(audit_path.with_file_name(first_mate::presence::FILE_NAME)))),
             audit_path,
             audited_clients: Mutex::new(HashSet::new()),
         })
@@ -378,7 +383,10 @@ impl Core {
                 }
                 st.hook(p, now);
                 let moved = st.registry.seq() != before || st.messages.seq() != before_messages;
+                let prompts = if st.messages.seq() != before_messages { user_prompts(&st, before_messages, now) } else { Vec::new() };
+                let at_desk = st.app_active;
                 drop(st);
+                self.prompts_seen(&prompts, at_desk, now);
                 if moved {
                     self.changed.notify_all();
                 }
@@ -422,6 +430,12 @@ impl Core {
                 let client = str_param(&p, "client").unwrap_or_else(|| "default".into());
                 let shows: HashSet<String> = strings(&p, "worktrees").into_iter().collect();
                 let active = p.get("app_active").and_then(Value::as_bool).unwrap_or(true);
+                // The user did something at the desk: a client came to the
+                // front, or shows something else while in front. A client
+                // not heard from since the core started (a reconnect) is not
+                // a transition.
+                let moved = active && st.clients.get(&client).is_some_and(|(w, a)| !*a || *w != shows);
+                let desktop = !client.starts_with("web");
                 st.clients.insert(client, (shows.clone(), active));
                 st.app_active = st.clients.values().any(|(_, a)| *a);
                 st.visible = st.clients.values().filter(|(_, a)| *a).flat_map(|(w, _)| w.iter().cloned()).collect();
@@ -431,6 +445,20 @@ impl Core {
                         st.registry.mark_worktree_seen(&wt);
                     }
                 }
+                drop(st);
+                if moved {
+                    let channel = if desktop { first_mate::presence::Channel::Desktop } else { first_mate::presence::Channel::Web };
+                    self.presence_signal(now, Some(channel));
+                }
+                Ok(json!({}))
+            }
+            // The user is using a client right now (keys or the mouse in its
+            // window; never what was typed). The app sends it at most once a
+            // minute (`first_mate::presence`).
+            "client.activity" => {
+                let client = str_param(&p, "client").unwrap_or_else(|| "default".into());
+                let channel = if client.starts_with("web") { first_mate::presence::Channel::Web } else { first_mate::presence::Channel::Desktop };
+                self.presence_signal(now, Some(channel));
                 Ok(json!({}))
             }
             "pane.seen" => {
@@ -511,6 +539,8 @@ impl Core {
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "habits.list" => Ok(first_mate::learning::rpc(method, &p).unwrap_or_default()),
+            // When the user is there, as the brief's timing reads it (read-only).
+            "presence.state" => Ok(self.presence().to_json(now, crate::usage::local_offset(now))),
             // The inventory (docs/first-mate-autonomy.md, D6): `preview` only
             // measures and groups; otherwise First Mate raises one card per
             // group. Nothing is deleted or granted until the user answers one.
@@ -956,6 +986,13 @@ impl Core {
 
     /// The calls the core performs itself (`actions`).
     pub fn act(&self, method: &str, p: &Value) -> RpcResult {
+        if matches!(method, "pane.run" | "pane.send_text") {
+            // The prompt this makes in the pane is not the user's typing.
+            if let Some(key) = str_param(p, "pane_id").and_then(|h| self.resolve_pane(&h)) {
+                let text = str_param(p, "command").or_else(|| str_param(p, "text")).unwrap_or_default();
+                self.presence.lock().unwrap_or_else(|e| e.into_inner()).typed_into(&key, &text, now());
+            }
+        }
         match method {
             "pane.read" => crate::actions::pane_read(self, p),
             "pane.run" => crate::actions::pane_run(self, p),
@@ -1023,6 +1060,52 @@ impl Core {
         st.messages.append(vec![row]);
         drop(st);
         self.changed.notify_all();
+    }
+
+    /// The daily brief in First Mate's conversation: a `brief` row, its
+    /// lines kept (`first_mate::brief`).
+    pub fn first_mate_brief(&self, text: &str) {
+        let mut st = self.lock();
+        if st.registry.pane(fm_policy::SESSION).is_none() {
+            return;
+        }
+        let row = seahelm_core_messages::Message::new(fm_policy::SESSION, fm_policy::SESSION, seahelm_core_messages::Kind::Brief, now()).with_text(text.to_string());
+        st.messages.append(vec![row]);
+        drop(st);
+        self.changed.notify_all();
+    }
+
+    /// One moment the user did something (`first_mate::presence`).
+    pub fn presence_signal(&self, at: f64, channel: Option<first_mate::presence::Channel>) {
+        let offset = crate::usage::local_offset(at);
+        self.presence.lock().unwrap_or_else(|e| e.into_inner()).record(at, offset, channel);
+    }
+
+    /// Prompts that showed up in panes: the user's, unless something typed
+    /// into that pane a moment ago. At the desk when a desktop client is in
+    /// front; otherwise where is not known.
+    fn prompts_seen(&self, prompts: &[(String, String)], at_desk: bool, now: f64) {
+        if prompts.is_empty() {
+            return;
+        }
+        let mut t = self.presence.lock().unwrap_or_else(|e| e.into_inner());
+        if prompts.iter().all(|(pane, text)| t.is_echo(pane, text, now)) {
+            return;
+        }
+        let offset = crate::usage::local_offset(now);
+        t.record(now, offset, at_desk.then_some(first_mate::presence::Channel::Desktop));
+    }
+
+    /// What First Mate reads to time the brief: the profile, and whether a
+    /// desktop client is in front.
+    pub fn presence(&self) -> first_mate::presence::Snapshot {
+        let desktop_in_front = self.lock().clients.iter().any(|(name, (_, active))| *active && !name.starts_with("web"));
+        let profile = self.presence.lock().unwrap_or_else(|e| e.into_inner()).profile.clone();
+        first_mate::presence::Snapshot { profile, desktop_in_front }
+    }
+
+    pub fn has_card_payload(&self, payload: &str) -> bool {
+        self.lock().cards.list().iter().any(|c| c.payload.as_deref() == Some(payload))
     }
 
     /// First Mate's pane, registered under its own directory.
@@ -1306,6 +1389,9 @@ impl Core {
                 return Reply::Value(Err(e));
             }
         }
+        if let Some(channel) = presence_of(method, &params) {
+            self.presence_signal(now(), Some(channel));
+        }
         self.call_inner(method, params)
     }
 
@@ -1320,25 +1406,44 @@ impl Core {
                 // client shows without every answer adding a line.
                 let first = pid_n.is_none_or(|n| self.audited_clients.lock().unwrap_or_else(|e| e.into_inner()).insert(n));
                 if first {
-                    self.security(format!("{method} from {} (pid {pid}), which runs inside a pane: {why} (logged once per process)", client.as_str()), false);
+                    let en = format!("{method} from {} (pid {pid}), which runs inside a pane: {why} (logged once per process)", client.as_str());
+                    self.security(Text::new(en, ""), false);
                 }
             }
             Verdict::Client { .. } | Verdict::Outside => {}
             Verdict::InPane(why) | Verdict::Unknown(why) => {
                 if crate::peer::starts_inventory(method, p) {
-                    self.security(format!("Refused starting First Mate's inventory from pid {pid}: {why}. Only the user asks for it, through a seahelm client or their own terminal."), true);
+                    self.security(
+                        Text::new(
+                            format!("Refused starting First Mate's inventory from pid {pid}: {why}. Only the user asks for it, through a seahelm client or their own terminal."),
+                            format!("已拒绝 pid {pid} 发起 First Mate 盘点：{why}。只有你本人能通过 seahelm 客户端或自己的终端发起。"),
+                        ),
+                        true,
+                    );
                     return Err(RpcError::forbidden(format!(
                         "{method} refused: only the user starts the inventory, through a seahelm client; this caller is inside a seahelm pane or could not be identified ({why}). `preview: true` is read-only and allowed"
                     )));
                 }
                 if crate::peer::speaks_as_user(method) {
-                    self.security(format!("Refused {} from pid {pid}: {why}. Only the user speaks to First Mate as the user, through the app, the web or Telegram.", describe_speech(method)), true);
+                    self.security(
+                        Text::new(
+                            format!("Refused {} from pid {pid}: {why}. Only the user speaks to First Mate as the user, through the app, the web or Telegram.", describe_speech(method)),
+                            format!("已拒绝 pid {pid} 以你的名义对 First Mate 说话：{why}。只有你本人能通过 app、网页或 Telegram 这样做。"),
+                        ),
+                        true,
+                    );
                     return Err(RpcError::forbidden(format!(
                         "{method} refused: only the user speaks to First Mate as the user, through a seahelm client; this caller is inside a seahelm pane or could not be identified ({why})"
                     )));
                 }
                 let what = describe_guarded(method, p, &self.lock().cards);
-                self.security(format!("Refused {what} from pid {pid}: {why}. Only the user answers cards, through the app, the web or Telegram."), true);
+                self.security(
+                    Text::new(
+                        format!("Refused {what} from pid {pid}: {why}. Only the user answers cards, through the app, the web or Telegram."),
+                        format!("已拒绝 pid {pid} 的卡片操作（{what}）：{why}。只有你本人能通过 app、网页或 Telegram 回答卡片。"),
+                    ),
+                    true,
+                );
                 return Err(RpcError::forbidden(format!(
                     "{method} refused: only the user answers cards, through a seahelm client; this caller is inside a seahelm pane or could not be identified ({why})"
                 )));
@@ -1348,7 +1453,13 @@ impl Core {
             let payload = str_param(p, "payload").unwrap_or_default();
             let taken = !payload.is_empty() && self.lock().cards.list().iter().any(|c| c.payload.as_deref() == Some(payload.as_str()));
             if taken || CORE_PAYLOADS.iter().any(|pre| payload.starts_with(pre)) {
-                self.security(format!("Refused a raised card carrying payload {payload} (pid {pid}): that payload is the core's"), true);
+                self.security(
+                    Text::new(
+                        format!("Refused a raised card carrying payload {payload} (pid {pid}): that payload is the core's"),
+                        format!("已拒绝 pid {pid} 发起的一张卡片：它带的 payload {payload} 属于 core"),
+                    ),
+                    true,
+                );
                 return Err(RpcError::forbidden("cards.raise refused: that payload belongs to a card the core raised"));
             }
         }
@@ -1357,13 +1468,40 @@ impl Core {
 
     /// An audit line (and with `note`, a line in First Mate's conversation)
     /// about who was refused or what was put back.
-    pub fn security(&self, text: String, note: bool) {
-        eprintln!("seahelm-core: security: {text}");
+    pub fn security(&self, text: Text, note: bool) {
+        eprintln!("seahelm-core: security: {}", text.en);
         match self.first_mate.get() {
             Some(fm) => fm.send(first_mate::Msg::Security { text, note }),
-            None => first_mate::audit_directly(&self.audit_path, &text),
+            None => first_mate::audit_directly(&self.audit_path, &text.en),
         }
     }
+}
+
+/// A call that is the user doing something, and where: card answers,
+/// words to First Mate and command lines (only the user's clients get past
+/// the peer check), and typing into a pane from a chat. None otherwise.
+fn presence_of(method: &str, p: &Value) -> Option<first_mate::presence::Channel> {
+    let via = p.get("_meta").and_then(|m| m.get("via")).and_then(Value::as_str);
+    match method {
+        "cards.answer" | "cards.dismiss" | "autopilot.answer" | "autopilot.say" | "command.run" => Some(first_mate::presence::Channel::from_via(via)),
+        // From the desk, typing into a pane goes to seahelmd, not here; a
+        // call that says where it came from is a chat or the web.
+        "pane.run" | "pane.send_text" | "pane.send_keys" if via.is_some() => Some(first_mate::presence::Channel::from_via(via)),
+        _ => None,
+    }
+}
+
+/// Prompts just appended (after `after`, recent, not First Mate's, not
+/// seahelm's own `[seahelm …]` lines), as (pane, text).
+fn user_prompts(st: &State, after: u64, now: Timestamp) -> Vec<(String, String)> {
+    let Some(r) = st.messages.replay(after) else { return Vec::new() };
+    r.messages
+        .iter()
+        .filter(|m| m.kind == seahelm_core_messages::Kind::User && m.pane_session_key != fm_policy::SESSION)
+        .filter(|m| (now - m.ts).abs() <= 120.0)
+        .map(|m| (m.pane_session_key.clone(), m.text.clone().unwrap_or_default()))
+        .filter(|(_, t)| !t.trim_start().starts_with("[seahelm"))
+        .collect()
 }
 
 /// What a refused call would have said, for the refusal line. The words
@@ -2250,5 +2388,91 @@ mod peer_gate_tests {
         }
         // Reading is anyone's.
         assert!(rpc::call(&sock, "cards.list", json!({})).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod presence_tests {
+    use super::*;
+    use crate::first_mate::presence::Channel;
+    use crate::peer::{Client, Verdict};
+
+    fn app() -> Verdict {
+        Verdict::Client { client: Client::MacApp, in_pane: None }
+    }
+
+    fn visible(core: &Arc<Core>, client: &str, worktrees: &[&str], active: bool) {
+        let _ = core.clone().call("client.visible", json!({"client": client, "worktrees": worktrees, "app_active": active}));
+    }
+
+    #[test]
+    fn a_client_coming_to_the_front_is_the_user_but_a_reconnect_is_not() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        // First report since the core started (a reconnect after a restart): no signal.
+        visible(&core, "macos", &["/w/a"], true);
+        assert_eq!(core.presence().profile.last_seen, 0.0);
+        assert!(core.presence().desktop_in_front);
+        // The same again: nothing moved.
+        visible(&core, "macos", &["/w/a"], true);
+        assert_eq!(core.presence().profile.last_seen, 0.0);
+        // Another worktree selected while in front: the user.
+        visible(&core, "macos", &["/w/b"], true);
+        let p = core.presence();
+        assert!(p.profile.last_seen > 0.0);
+        assert!(p.profile.seen_on(Channel::Desktop) > 0.0);
+        assert!(p.profile.last_arrival.is_some(), "the first signal ever is an arrival");
+        // Leaving, then coming back: also the user. Leaving alone is not.
+        visible(&core, "macos", &["/w/b"], false);
+        assert!(!core.presence().desktop_in_front);
+        // A web client in front is not a desktop.
+        visible(&core, "web", &[], true);
+        assert!(!core.presence().desktop_in_front);
+        // The profile is on disk beside the audit log.
+        assert!(tmp.path().join(crate::first_mate::presence::FILE_NAME).exists());
+    }
+
+    #[test]
+    fn activity_in_a_client_window_is_the_user() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let _ = core.clone().call("client.activity", json!({"client": "macos"}));
+        assert!(core.presence().profile.seen_on(Channel::Desktop) > 0.0);
+        assert!(core.presence().active(seahelm_core_types::now()));
+    }
+
+    #[test]
+    fn answers_and_words_carry_their_channel() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let _ = core.clone().call_checked("cards.dismiss", json!({"id": "nope", "_meta": {"via": "telegram:@me"}}), Some(1), app);
+        assert!(core.presence().profile.seen_on(Channel::Telegram) > 0.0);
+        assert_eq!(core.presence().profile.seen_on(Channel::Web), 0.0);
+        let _ = core.clone().call_checked("pane.send_keys", json!({"pane_id": "x", "keys": ["escape"], "_meta": {"via": "web:Safari"}}), Some(1), app);
+        assert!(core.presence().profile.seen_on(Channel::Web) > 0.0);
+        // Reads are not the user doing anything.
+        let before = core.presence().profile.last_seen;
+        let _ = core.clone().call_checked("cards.list", json!({}), Some(1), app);
+        let _ = core.clone().call_checked("pane.run", json!({"pane_id": "x", "command": "ls"}), Some(1), app);
+        assert_eq!(core.presence().profile.last_seen, before, "a pane.run that says nothing of where is an agent or the desk's own path");
+    }
+
+    #[test]
+    fn a_prompt_right_after_something_typed_it_is_not_the_user() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let now = seahelm_core_types::now();
+        let prompt = |pane: &str, text: &str| vec![(pane.to_string(), text.to_string())];
+        core.presence.lock().unwrap().typed_into("seahelm-a", "fix the CI", now);
+        core.prompts_seen(&prompt("seahelm-a", "fix the CI"), true, now + 5.0);
+        assert_eq!(core.presence().profile.last_seen, 0.0, "First Mate's or an agent's own prompt");
+        core.prompts_seen(&prompt("seahelm-a", "fix the CI"), true, now + 600.0);
+        assert_eq!(core.presence().profile.last_seen, 0.0, "submitted late by a busy agent: still not the user");
+        core.prompts_seen(&prompt("seahelm-b", "what about this?"), false, now + 6.0);
+        let p = core.presence().profile;
+        assert_eq!(p.last_seen, now + 6.0);
+        assert_eq!(p.seen_on(Channel::Desktop), 0.0, "no client in front: where is unknown");
+        core.prompts_seen(&prompt("seahelm-b", "and this"), true, now + 7.0);
+        assert_eq!(core.presence().profile.seen_on(Channel::Desktop), now + 7.0);
     }
 }
