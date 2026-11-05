@@ -33,6 +33,10 @@ up**, so that is the first vertical slice.
 | D4 | The built-in rules (`fix-ci`, `cleanup-merged`, `triage-issues`) stay. They are *general rules* that ship with seahelm and apply to every project; learned habits are the user's own and sit beside them. | 2026-11-05 |
 | D5 | First Mate may learn from the user's conversations with agents in panes (their prompts, from the core's message timelines), accepting that First Mate reading them sends them to the model's API. | 2026-11-05 |
 | D6 | One "inventory" card when First Mate is first turned on is acceptable, to give the learning a cold start. | 2026-11-05 |
+| D7 | Everything First Mate learns stays on this machine: habits and project memory alike. Nothing is written into a repo. | 2026-11-05 |
+| D8 | The brief has no fixed time: First Mate learns when (and where) the user picks things up and sends it then. | 2026-11-05 |
+| D9 | First Mate tunes its own thresholds (N, M, card expiry, daily cap) from how the user responds, within hard bounds the core keeps. | 2026-11-05 |
+| D10 | A link that identifies its project (a GitHub issue/PR URL; later a Jira key once mapped) counts as the user naming the project: First Mate starts on it without a card. | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -163,7 +167,25 @@ observe ──(N matching user actions)──▶ suggest ──(user says yes)�
   of that habit expiring unanswered twice.
 - A promotion card is offered at most once per habit per level; declined means
   it waits for fresh evidence (say another N) before asking again.
-- Thresholds start at N = 3, M = 5 and are settings (open question Q5).
+- Thresholds start at N = 3, M = 5 and tune themselves (D9, below).
+
+### Self-tuning (D9)
+
+The thresholds decide when First Mate *asks*, never when it *acts*, so moving
+them cannot loosen anything without the user's yes (D1 holds). The core adjusts
+them from the observation log, within bounds it enforces:
+
+| Knob | Start | Bounds | Moves down when… | Moves up when… |
+|------|-------|--------|------------------|----------------|
+| N (actions before a habit is suggested) | 3 | 2–10 | suggestions are accepted | suggestions are declined |
+| M (approvals before `auto` is offered) | 5 | 3–20 | promotion offers are accepted | they are declined, or a promoted habit is later demoted |
+| Card expiry | 3 days | 1–7 days | the user answers cards fast | the user answers late but does answer |
+| Daily proactive card cap | 3 | 1–5 | cards expire unanswered | every card is answered |
+
+Each change is an audit line, and the brief mentions it once ("I'll ask less
+often about clean-ups: you've said yes to the last six"). First Mate may also
+propose edits to its own judgement habits and brief layout through
+`habit propose`, the same card path as any other habit.
 
 ### Where habits sit against rules
 
@@ -218,8 +240,9 @@ Interrupting is the expensive thing, so it is rationed:
 - **Three channels by cost.** Silent (audit log only), *report* (one line in
   First Mate's conversation, collected into the brief), *ask* (a card). An
   `auto` habit reports; it never raises a card.
-- **The daily brief** — one message at a set time, in First Mate's
-  conversation and through seahelm-gateway to Telegram: what I did since the
+- **The daily brief** — one message a day, sent when the user is likely to
+  pick it up (D8, below), in First Mate's conversation and/or through
+  seahelm-gateway to Telegram: what I did since the
   last brief, one batched card for what is waiting ("these 4 worktrees can
   go"), task suggestions, research results. Proactive things (tasks, research,
   `suggest`-level habits) go here and nowhere else.
@@ -230,6 +253,27 @@ Interrupting is the expensive thing, so it is rationed:
   the next brief. Cards answering something the user just asked for do not
   count.
 - Quiet hours (`first_mate.quiet_hours`) stay.
+
+### When the brief goes out (D8)
+
+No clock time. The core already knows when the user is at the desk
+(`client.visible` → `app_active`, per client), when they type to agents (user
+prompts in the message timelines), and when they answer on Telegram (card
+answers carry their channel). From that it keeps an activity profile per
+weekday, and:
+
+- sends the brief **on arrival**: the first time the user becomes active after
+  a long gap (default 4 h, tuned), so it is the first thing they see rather
+  than something waiting since 9:00;
+- picks the channel by where they are: the island if a desktop client is in
+  front, Telegram if they have been answering there and no client is;
+- if they have not arrived by their usual start time + an hour (learned from
+  the profile), sends it to Telegram once, so a day away still gets one;
+- never inside quiet hours, and never twice a day. An urgent item (an `ask`
+  card the user's own request is waiting on) does not wait for the brief.
+
+Where they open it (and whether they act on it) is evidence for the next day's
+choice.
 
 ## Scenario 1 — worktree clean-up (first slice)
 
@@ -271,10 +315,14 @@ current milestone, priorities, don'ts, definition of done, plus learned notes
 ("run the tests before committing", "PR summaries in Chinese"). Sources: the
 user's "remember …" to First Mate, and `learn.review` reading the user's
 repeated prompts to agents (D5). First Mate reads it before acting on that
-project, and it goes into the brief of every agent First Mate starts there. A
-note that should hold for every agent, not only those First Mate starts, is
-offered once as a card to move into the repo's `CLAUDE.md` / `AGENTS.md` (a
-commit the user approves).
+project, and it goes into the brief of every agent First Mate starts there.
+
+Everything stays local (D7), yet every agent should see it, not only those
+First Mate starts. The core already answers every agent's SessionStart hook in
+a seahelm pane with added context (`core-hooks/src/suggest.rs`, the suggestion
+guidance); it appends the project's memory there too, so Claude Code, Codex and
+Cursor agents all start with it without anything being committed. Size-capped,
+and only the notes the user has not turned off.
 
 The one-line description of each project (the first line of its memory, or
 the repo README's first paragraph until there is one) is what scenario 2 uses
@@ -297,6 +345,34 @@ the user's own request still raises a `start_agent` card.
   same words becomes a proposed alias (a habit, promoted like any other).
 - Habits and budgets still apply (`max_concurrent_agents`,
   `pause_above_usage`).
+
+### Worked example: the user sends an issue link (D10)
+
+The user sends First Mate `https://github.com/BetaYao/seahelm/issues/123`.
+
+1. **Project.** The core maps `BetaYao/seahelm` to a local repo by its git
+   remotes. That is a measured match, as good as the user naming the project, so
+   the user mandate applies. No match (not cloned, or not tracked by seahelm):
+   one card, "clone it to … / add it as a project?".
+2. **Already in hand?** The core looks for a worktree, branch or PR naming
+   `#123` (branch name, PR body `Closes #123`, a First Mate brief that cited
+   it). Found: First Mate says where ("in `fix/123-login-500`, pane #7, idle")
+   and offers to go there. Nothing is created.
+3. **Worth starting?** First Mate reads the issue (`gh issue view 123`). Closed,
+   a question, or a discussion rather than a task: it says so and stops.
+4. **Start.** `worktree.create` with a branch named the way this user names
+   branches (a learned habit: prefix by label, issue number, short slug), and a
+   brief made of the issue, the project's memory, and the user's learned
+   conventions ("plan before coding on features", "`Closes #n` in the PR").
+   No card. The report is one line: "Started `fix/123-login-500` in seahelm,
+   pane #9".
+5. **Learning.** What the user does next is the evidence: renaming the branch,
+   telling the agent "plan first, don't code yet", moving it to another project.
+   Each becomes a candidate habit (branch naming, per-label kickoff style).
+
+A Jira link works the same once its project key is mapped to a repo. The first
+time, First Mate asks which repo; the answer is an alias habit, promoted like any
+other.
 
 ## Scenario 3 — pulling tasks
 
@@ -349,17 +425,14 @@ Phases 1–5 solve the worktree pile-up end to end; 6 onward widen the loop.
 
 ## Open questions
 
-- **Q1. Project memory location.** Proposal: learned notes and habits local
-  (personal, noisy); only what the user approves moves into the repo
-  (`CLAUDE.md` / `.seahelm/goals.md`). Or should goals live in the repo from
-  the start?
-- **Q2. The brief.** What time, and where: Telegram, the island, or both?
+Q1 (memory location), Q2 (brief timing), Q5 (thresholds) and Q6 (the
+`start_agent` mandate) are settled by D7–D10.
+
 - **Q3. Jira.** Cloud (email + API token) or Server/DC (PAT)? Where the
   credential is kept (Keychain vs the gateway, which already holds secrets).
 - **Q4. Research.** Where the research repo lives, and whether reports also go
   out in full or only as the brief's summary.
-- **Q5. Thresholds.** N (observations before a habit is suggested), M (approvals
-  before `auto` is offered), card expiry, the daily card cap.
-- **Q6. The user mandate for `start_agent`** (scenario 2): is "the message names
-  the project" the right test, or should every start still be one tap until a
-  habit says otherwise?
+- **Q7. A plain-language request with no link** ("fix the login 500"): the
+  mandate needs the project named or an alias. Should First Mate's own routing,
+  once it has been right M times in a row for that kind of request, be
+  promotable to `auto` like any habit?
