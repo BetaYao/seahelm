@@ -40,6 +40,7 @@ up**, so that is the first vertical slice.
 | D11 | The user's `autopilot_autonomy` default for an action caps habits by its value: `deny` stops every habit (even one the user approved), `ask` caps a habit the user never approved and is replaced by an approved habit's level. | 2026-11-05 |
 | D12 | A habit level raised by hand in its YAML file, above what the core granted, is neither applied nor silently undone: the core raises a confirmation card (the habit, the granted level, the written level, the evidence). Yes records the written level as granted; no writes the granted level back into the file. Until the user answers, the granted level applies. | 2026-11-05 |
 | D13 | One approval of a batched card counts as one approval of each habit on it, however many worktrees it covered: M approvals means M taps, not M worktrees. | 2026-11-05 |
+| D14 | Only the user answers cards or speaks to First Mate as the user. The core checks who is on the other end of the socket (the kernel's peer pid, not what the call says about itself), refuses a caller inside a seahelm pane, and seals `.granted.json`. Not a sandbox: see "Who may answer a card". | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -174,6 +175,66 @@ observe ──(N matching user actions)──▶ suggest ──(user says yes)�
 - A promotion card is offered at most once per habit per level; declined means
   it waits for fresh evidence (say another N) before asking again.
 - Thresholds start at N = 3, M = 5 and tune themselves (D9, below).
+
+### Who may answer a card (D14)
+
+D1 rests on "the user said yes", and a yes is an answer to a card. Until
+this check, `cards.answer` and `cards.dismiss` took a call from anyone on
+`core.sock`; the only guard was `_meta.caller`, which the caller writes
+itself. An agent in any pane — or First Mate, talking to the socket without
+its CLI shim — could answer an approval or a `habit.promote` card, and
+First Mate has a shell that can rewrite `habits/.granted.json`.
+
+**Threat model.** Everything here runs as one uid, and there is no sandbox
+yet: a process set on getting round this always can (copy a client's
+executable name, detach from its session and scrub its environment, write
+both the grants and their seal). The goal is smaller and holds: no agent and
+no First Mate answers a card or raises a level *by accident or by a
+straightforward call*, and anything the core refuses or undoes is written
+where the user sees it.
+
+**Peer check** (`seahelmd/crates/core/src/peer.rs`). For `cards.answer`,
+`cards.dismiss`, `cards.clear`, `cards.raise` and `autopilot.answer` — and for `autopilot.say`
+and `command.run`, which speak to First Mate in the user's voice (that sets
+`user_spoke` and lets First Mate act at the user's default levels; prose in
+`command.run` reaches First Mate when the conversation is bound to it) — the core
+takes the connection's peer pid from the kernel (`LOCAL_PEERPID` on macOS,
+`SO_PEERCRED` on Linux, `GetNamedPipeClientProcessId` on Windows), reads that
+process's ancestry and its exec-time environment (`KERN_PROCARGS2`,
+`/proc/<pid>/environ`), and decides:
+
+- a **client** — the macOS app (`….app/Contents/MacOS/Seahelm`), the GPUI
+  client (`seahelm-gpui`), seahelm-gateway (web, Telegram) — answers, wherever
+  it was launched from. The app relaunched from a pane by `run.sh`, and the
+  gateway it starts, carry the pane's variables; they still answer, and the
+  core writes an audit line saying so (once per process), so a binary merely
+  named like a client shows up there. Recognising clients by path is the
+  weak point; once there is a signed release, it becomes a code-signature
+  check.
+- a process **inside a pane** — `SEAHELM_PANE_ID` or `SEAHELMD_SESSION` in its
+  environment, or a `seahelmd __serve` session process among its ancestors —
+  is refused: an RPC error (`-32003`) naming why, an audit line, and a note in
+  First Mate's timeline.
+- a process **outside every pane** (the user's own terminal) answers.
+- a caller the core **cannot read** is refused.
+
+In-process calls (First Mate's own approvals running) are the core's and
+are not checked. A card raised over the socket may not carry a payload the
+core mints (`habit.…`, `autopilot-…`, `proposal-…`) or one an existing card
+carries, so a look-alike card cannot carry the user's yes to First Mate. The
+app's own control socket no longer answers cards at all (`autopilot.answer`,
+`question.answer` and `decision.dismiss` are gone from it): an agent could
+reach it, and the app would have passed the answer on as itself. The
+`seahelm` CLI only lists cards.
+
+**Grants seal** (`habits.rs`). The core keeps the text it last wrote to
+`.granted.json`, in memory and in `.granted.seal.json` with its SHA-256.
+Every read compares; a file the core did not write (or a deleted one) is put
+back to the core's version and the user gets a note saying so. A seal that
+does not match its own digest is not believed: every grant starts over from
+`observe` (lowering needs no one's yes), and one note tells the user so. Grants found before the seal
+existed are adopted once. `.history/` is not sealed: it only feeds `undo`,
+which can only lower a grant.
 
 ### Self-tuning (D9)
 

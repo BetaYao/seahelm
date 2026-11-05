@@ -25,6 +25,7 @@ mod first_mate;
 mod install;
 mod keys;
 mod pane_title;
+mod peer;
 mod poller;
 mod pr;
 mod rpc;

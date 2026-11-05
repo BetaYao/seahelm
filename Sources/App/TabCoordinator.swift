@@ -807,30 +807,8 @@ class TabCoordinator {
                         }
                     }
                     controlDataSource.firstMateStateHandler = { FirstMateLink.remoteState() ?? ["enabled": false] }
-                    controlDataSource.firstMateAnswerHandler = { card, option in
-                        if case .success = CoreSocketClient.call("autopilot.answer", ["card": card, "option": option]) { return true }
-                        return false
-                    }
-                    controlDataSource.dismissDecisionHandler = { [weak self] paneId in
-                        // Station id or the stable session key — the queue keys off the
-                        // former, remote callers usually hold the latter.
-                        guard let self else { return false }
-                        let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
-                        guard let card = self.cards.cards.first(where: { $0.kind == .suggestion && $0.terminalID == stationId })
-                        else { return false }
-                        self.cards.dismiss(card)
-                        return true
-                    }
                     controlDataSource.paneSeenHandler = { [weak self] paneId in
                         self?.markPaneSeen(paneId: paneId) ?? false
-                    }
-                    controlDataSource.answerQuestionHandler = { [weak self] paneId, index in
-                        guard let self else { return nil }
-                        let stationId = StationRegistry.shared.station(forSessionName: paneId)?.id ?? paneId
-                        guard let card = self.cards.question(terminalID: stationId) else { return nil }
-                        guard index < card.labels.count else { return ["answered": false] }
-                        self.cards.answer(card, label: card.labels[index])
-                        return ["answered": true]
                     }
                     controlDataSource.liveLayoutsHandler = { [weak self] in
                         self?.terminalCoordinator.liveLayouts() ?? [:]

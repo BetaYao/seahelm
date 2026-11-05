@@ -111,6 +111,10 @@ pub enum Msg {
     Swept { report: sweep::Report },
     /// A deletion the user approved on a habit card finished.
     HabitDeleted { routed: sweep::Routed, result: Result<(), String> },
+    /// The core refused a caller or caught a change it did not make
+    /// (`peer.rs`, `.granted.json`): an audit line, and with `note` a line
+    /// in the conversation too.
+    Security { text: String, note: bool },
 }
 
 /// How the core reaches First Mate.
@@ -145,6 +149,12 @@ impl Handle {
     pub fn say(&self, text: String) -> bool {
         self.ask(|reply| Msg::Say { text, reply }, false)
     }
+}
+
+/// An audit line written while First Mate is not running (its log is
+/// still where the user looks).
+pub fn audit_directly(path: &Path, text: &str) {
+    Audit::open(path.to_path_buf()).append(&Entry::new(seahelm_core_types::now(), "security", text));
 }
 
 pub fn refused(message: impl Into<String>) -> RpcError {
@@ -322,12 +332,25 @@ impl FirstMate {
             }
             Msg::Swept { report } => self.swept(report, now),
             Msg::HabitDeleted { routed, result } => self.habit_deleted(routed, result, now),
+            Msg::Security { text, note } => {
+                if note {
+                    self.core.first_mate_line(&text);
+                }
+                self.log(Entry::new(now, "security", text));
+            }
         }
     }
 
     // MARK: lifecycle
 
     fn tick(&mut self, now: f64) {
+        // Reading the grants checks their seal; a change the core did not
+        // make was put back, and the user hears it here.
+        self.habits.check_grants();
+        for text in habits::take_tamper_reports(Some(&self.habits.dir)) {
+            self.core.first_mate_line(&text);
+            self.log(Entry::new(now, "security", text));
+        }
         let config = UserConfig::load();
         if config.defaults != self.config.defaults {
             self.configs.clear();

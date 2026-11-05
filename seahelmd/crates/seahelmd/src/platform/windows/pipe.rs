@@ -46,7 +46,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeServerProcessId,
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
     PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
     PIPE_WAIT, WaitNamedPipeW,
 };
@@ -240,6 +240,15 @@ impl Stream {
     pub fn server_process_id(&self) -> io::Result<u32> {
         let mut pid = 0u32;
         if unsafe { GetNamedPipeServerProcessId(self.shared.handle.0, &mut pid) } == 0 {
+            return Err(last_error());
+        }
+        Ok(pid)
+    }
+
+    /// The process that connected, as the pipe reports it (server side).
+    pub fn client_process_id(&self) -> io::Result<u32> {
+        let mut pid = 0u32;
+        if unsafe { GetNamedPipeClientProcessId(self.shared.handle.0, &mut pid) } == 0 {
             return Err(last_error());
         }
         Ok(pid)

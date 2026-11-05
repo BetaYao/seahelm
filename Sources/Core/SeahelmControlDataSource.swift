@@ -37,16 +37,11 @@ final class SeahelmControlDataSource: ControlDataSource {
     /// Owner-set, main thread: start a worktree (repo, agent, prompt) and call
     /// back with its path, or nil when it could not be created.
     var createWorktreeHandler: ((String, AgentType, String, @escaping (String?) -> Void) -> Void)?
-    /// Decline a pane's pending suggestion (main thread — it is UI state).
-    var dismissDecisionHandler: ((String) -> Bool)?
     /// First Mate's gated calls (main thread — the policy reads UI state).
     /// A worktree's Delete, by path (main thread).
     /// Delete a worktree with no one at the Mac; calls back with what happened.
     var deleteWorktreeHandler: ((String, @escaping (Result<[String: Any], ControlCreateError>) -> Void) -> Void)?
     var firstMateStateHandler: (() -> [String: Any]?)?
-    var firstMateAnswerHandler: ((String, String) -> Bool)?
-    /// Answer a pane's open question card (main thread — it is UI state).
-    var answerQuestionHandler: ((String, Int) -> [String: Any]?)?
     /// A remote client showed a pane (main thread — it redraws the fleet).
     var paneSeenHandler: ((String) -> Bool)?
 
@@ -542,12 +537,6 @@ extension SeahelmControlDataSource {
         return state
     }
 
-    func answerFirstMateCard(card: String, option: String) -> Bool {
-        guard let h = firstMateAnswerHandler else { return false }
-        var ok = false
-        runOnMain { ok = h(card, option) }
-        return ok
-    }
 
 
 
@@ -565,24 +554,10 @@ extension SeahelmControlDataSource {
         return result
     }
 
-    func dismissDecision(paneId: String) -> Bool {
-        guard let h = dismissDecisionHandler else { return false }
-        var ok = false
-        runOnMain { ok = h(paneId) }
-        return ok
-    }
-
     func markPaneSeen(paneId: String) -> Bool {
         guard let h = paneSeenHandler else { return false }
         var ok = false
         runOnMain { ok = h(paneId) }
         return ok
-    }
-
-    func answerQuestion(paneId: String, index: Int) -> [String: Any]? {
-        guard let h = answerQuestionHandler else { return nil }
-        var result: [String: Any]?
-        runOnMain { result = h(paneId, index) }
-        return result
     }
 }
