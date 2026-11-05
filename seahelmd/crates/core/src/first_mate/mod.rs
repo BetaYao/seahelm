@@ -23,6 +23,8 @@ pub mod habits;
 pub mod inventory;
 pub mod lang;
 pub mod learning;
+pub mod memory;
+pub mod routing;
 pub mod observations;
 mod generalisation;
 pub mod tuning;
@@ -204,6 +206,7 @@ struct Approval {
 }
 
 struct Proposal {
+    route_text: String,
     summary: String,
     options: Vec<ProposalOption>,
 }
@@ -236,6 +239,9 @@ struct FirstMate {
     awaiting_since: Option<Instant>,
     active_rules: Vec<(Rule, Config)>,
     user_spoke: bool,
+    route_text: String,
+    route_used: bool,
+    memory_pending: HashMap<String, (String, String)>,
     approvals: HashMap<String, Approval>,
     habit_proposals: HashMap<String, generalisation::PendingHabit>,
     reported_invalid: HashSet<String>,
@@ -315,6 +321,9 @@ impl FirstMate {
             awaiting_since: None,
             active_rules: Vec::new(),
             user_spoke: false,
+            route_text: String::new(),
+            route_used: false,
+            memory_pending: HashMap::new(),
             approvals: HashMap::new(),
             card_options: HashMap::new(),
             reported_invalid: HashSet::new(),
@@ -474,6 +483,7 @@ impl FirstMate {
         self.maybe_inventory(now);
         self.maybe_sweep(now);
         self.check_hand_edits(now);
+        self.check_memory_edits(now);
         self.expire_cards(now);
         self.poll_tasks(now);
         self.maybe_brief(now);
@@ -724,7 +734,7 @@ impl FirstMate {
         if ready.is_empty() {
             return;
         }
-        let text = ready.iter().map(|d| d.prompt.as_str()).collect::<Vec<_>>().join("\n\n---\n\n");
+        let text = ready.iter().map(|d| format!("{}\n\n[seahelm project memory]\n{}", d.prompt, memory::Store::local().context(&d.event.repo))).collect::<Vec<_>>().join("\n\n---\n\n");
         for d in &ready {
             if let Ok(c) = self.config_for(&d.event.repo) {
                 self.active_rules.push((d.rule.clone(), c));
@@ -760,7 +770,9 @@ impl FirstMate {
             return false;
         }
         self.user_spoke = true;
-        self.tell(t);
+        self.route_text = t.into();
+        self.route_used = false;
+        self.tell(&format!("{}\n\n[seahelm projects] {}", t, self.project_list()));
         self.log(Entry::new(now, "message", t));
         true
     }
@@ -800,6 +812,9 @@ impl FirstMate {
                 deny(self, None, format!("{summary} — {why}"));
                 return Gate::Deny(why);
             }
+        }
+        if action == Action::StartAgent {
+            if let Some(g) = self.route_gate(params, now) { return g; }
         }
         let mut level = self.level(action);
         if let Some(id) = params.get("habit").and_then(Value::as_str) {
@@ -873,6 +888,7 @@ impl FirstMate {
         if method == "worktree.create" {
             if let Some(p) = result.get("worktree_path").and_then(Value::as_str) {
                 self.started.insert(p.to_string());
+                self.core.first_mate_line(lang::route_started(p).get(self.config.language));
             }
         }
     }
@@ -896,6 +912,14 @@ impl FirstMate {
             if self.level(action) == Level::Deny {
                 return Err(refused(format!("option {}: {} is set to deny", i + 1, action.as_str())));
             }
+            if action == Action::StartAgent {
+                let repo = o.pointer("/params/repo_path").and_then(Value::as_str).unwrap_or_default();
+                if Path::new(repo).join(rules::RELATIVE_PATH).exists() {
+                    if self.config_for(repo).map(|c| c.autonomy(action, None) == Level::Deny).unwrap_or(true) {
+                        return Err(refused(lang::route_unknown().get(self.config.language)));
+                    }
+                }
+            }
             options.push(ProposalOption { key: format!("choice:{i}"), label: label.into(), action, method: method.into(), params: o.get("params").cloned().unwrap_or(json!({})) });
         }
         if options.is_empty() || options.len() > 5 {
@@ -905,9 +929,9 @@ impl FirstMate {
         let mut labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
         labels.push(NOT_NOW.into());
         let class = if self.user_spoke { budget::Class::Answering } else { budget::Class::Proactive };
-        self.put_card(CardKind::Proposal, &id, format!("First Mate suggests: {summary}"), labels, class, now);
+        self.put_card(CardKind::Proposal, &id, format!("{}{summary}", self.config.language.pick("First Mate suggests: ", "First Mate 建议：")), labels, class, now);
         self.log(Entry::new(now, "approval", format!("proposed: {summary}")));
-        self.proposals.insert(id.clone(), Proposal { summary: summary.into(), options });
+        self.proposals.insert(id.clone(), Proposal { route_text: if self.user_spoke { self.route_text.clone() } else { String::new() }, summary: summary.into(), options });
         Ok(json!({"queued": "proposal", "card": id, "message": "Shown to the user; you will be told what they picked."}))
     }
 
@@ -933,6 +957,14 @@ impl FirstMate {
         }
         self.card_options.remove(payload);
         self.expiry.forget(payload);
+        if let Some((repo, digest)) = self.memory_pending.get(payload).cloned() {
+            if option == Some("approve") {
+                if let Err(e) = memory::rpc(&self.core, "memory.confirm", &json!({"repo":repo,"digest":digest})) {
+                    self.core.first_mate_line(lang::memory_failure(&e.message).get(self.config.language));
+                }
+            }
+            return;
+        }
         if let Some(pending) = self.habit_proposals.remove(payload) {
             self.observe_habit_answer("habit.propose", payload, option, via.clone(), format!("propose habit {}", pending.habit.id), format!("{}/{}", pending.key, pending.habit.id), String::new());
             if option == Some("approve") {
@@ -983,6 +1015,13 @@ impl FirstMate {
             self.log(e);
             self.tell(&format!("[seahelm] The user picked \"{}\" but {} is set to deny; nothing ran.", o.label, o.action.as_str()));
             return;
+        }
+        if o.action == Action::StartAgent {
+            if let Some(why) = self.budget_refusal(&o.params) {
+                self.core.first_mate_line(lang::memory_failure(&why).get(self.config.language));
+                return;
+            }
+            self.route_pick(o.params["repo_path"].as_str().unwrap_or_default(), &p.route_text, payload, now);
         }
         self.execute(o.action, o.method, o.params, o.label, "picked", payload);
     }

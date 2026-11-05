@@ -361,7 +361,12 @@ impl Core {
             "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "started_at": STARTED_AT.get().copied(),
                                      "cli": CLI_DIALECT})),
             "hook" | "suggest" => {
-                let stdout = hook_stdout(method, &p);
+                let stdout = hook_stdout(method, &p).map(|output| {
+                    let memory = str_param(&p, "seahelm_pane_id").and_then(|pane| self.resolve_pane(&pane)).and_then(|pane| self.pane_row(&pane))
+                        .and_then(|row| row["worktree_path"].as_str().map(first_mate::routing::main_repo))
+                        .map(|repo| first_mate::memory::Store::local().context(&repo)).unwrap_or_default();
+                    hooks::suggest::append_context(&output, &memory)
+                });
                 // The prose the agent wrote since its last hook, read from its
                 // transcript without the lock, and put on the timeline before
                 // this hook's own rows: above the tool call it introduces.
@@ -543,6 +548,7 @@ impl Core {
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" => first_mate::task_sources::rpc(method, &p),
+            "memory.note" | "memory.show" | "memory.undo" | "memory.confirm" => first_mate::memory::rpc(&self, method, &p),
             "habits.list" => Ok(first_mate::learning::rpc(method, &p).unwrap_or_default()),
             // When the user is there, as the brief's timing reads it (read-only).
             "presence.state" => Ok(self.presence().to_json(now, crate::usage::local_offset(now))),
@@ -1290,6 +1296,8 @@ impl Core {
         out
     }
 
+    pub fn known_prs(&self) -> Vec<Value> { self.prs.list() }
+
     pub fn raise_card(&self, r: Raise) -> Option<String> {
         let mut st = self.lock();
         let id = st.cards.raise(r, now());
@@ -1432,7 +1440,9 @@ impl Core {
     /// verdict is only worked out for those (it reads the process table).
     fn call_checked(self: Arc<Self>, method: &str, params: Value, pid: Option<u32>, verdict: impl FnOnce() -> crate::peer::Verdict) -> Reply {
         if crate::peer::guarded_call(method, &params) {
-            if let Err(e) = self.admit(&verdict(), pid, method, &params) {
+            let verdict = verdict();
+            let mate_note = method == "memory.note" && pid.is_some_and(|pid| crate::peer::gather(pid).chain.iter().any(|p| crate::peer::session_of(p).as_deref() == Some(fm_policy::SESSION)));
+            if let Err(e) = if mate_note { Ok(()) } else { self.admit(&verdict, pid, method, &params) } {
                 return Reply::Value(Err(e));
             }
         }
@@ -2267,6 +2277,16 @@ mod peer_gate_tests {
         for method in ["task-source.add","task-source.list","task-source.remove","task-source.test"] {
             assert_eq!(value(core.clone().call_checked(method,json!({}),Some(1),agent)).unwrap_err().code,-32003);
             assert_eq!(value(core.clone().call_checked(method,json!({}),None,||Verdict::Unknown("unreadable".into()))).unwrap_err().code,-32003);
+        }
+    }
+
+    #[test]
+    fn memory_writes_and_confirmations_use_the_kernel_peer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        for method in ["memory.note", "memory.undo", "memory.confirm"] {
+            let e = value(core.clone().call_checked(method, json!({"repo":"/nonexistent", "_meta":{"caller":fm_policy::SESSION}}), None, agent)).unwrap_err();
+            assert_eq!(e.code, rpc::FORBIDDEN, "{method}");
         }
     }
 

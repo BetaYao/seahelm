@@ -276,7 +276,7 @@ impl FirstMate {
     /// Every repo the core knows: those of the worktrees clients list, and
     /// the repo set the core keeps for discovering worktrees itself
     /// (`discovery`, phase 3a), so a repo only the core found is swept too.
-    fn all_repos(&self) -> Vec<String> {
+    pub(super) fn all_repos(&self) -> Vec<String> {
         let mut out = self.core.repos();
         let set = crate::discovery::RepoSet::open(crate::rpc::config_dir().join(crate::discovery::FILE_NAME));
         for r in set.repos() {

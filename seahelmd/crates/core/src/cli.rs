@@ -22,6 +22,9 @@ const USAGE: &str = "usage: seahelm <command>
   habit propose --json '<habit>'
   worktree delete <worktree-path> [--habit <id>]
   propose --json '<{\"summary\": …, \"options\": [{\"label\", \"action\", \"params\"}]}>'
+  memory note <repo> <text…>
+  memory show|undo <repo>
+  memory confirm <repo> <digest>
   cards";
 
 /// Exit status: 0 done, 1 refused or failed, 2 usage.
@@ -78,6 +81,15 @@ fn go(args: &[String]) -> Result<(), Fail> {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     let short = Duration::from_secs(15);
     match words.as_slice() {
+        ["memory", "note", repo, text @ ..] if !text.is_empty() => {
+            print(&call("memory.note", json!({"repo": repo, "text": text.join(" ")}), short)?); Ok(())
+        }
+        ["memory", "show", repo] | ["memory", "undo", repo] => {
+            print(&call(&format!("memory.{}", words[1]), json!({"repo": repo}), short)?); Ok(())
+        }
+        ["memory", "confirm", repo, digest] => {
+            print(&call("memory.confirm", json!({"repo": repo, "digest": digest}), short)?); Ok(())
+        }
         ["pane", "list", ..] => {
             let v = call("pane.list", json!({}), short)?;
             println!("PANE\tSTATUS\tAGENT\tWORKTREE");
