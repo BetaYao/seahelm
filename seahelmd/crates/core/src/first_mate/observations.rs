@@ -197,6 +197,13 @@ impl Log {
     }
 }
 
+/// Every record in the log at `path`, oldest first, without trimming or
+/// writing: for readers on other threads (the habits), so they never race
+/// the observer's appends.
+pub fn read_records(path: &Path) -> Vec<Record> {
+    std::fs::read_to_string(path).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
+}
+
 fn id_number(id: &str) -> u64 {
     id.strip_prefix("obs-").and_then(|n| n.parse().ok()).unwrap_or(0)
 }
@@ -416,7 +423,19 @@ pub enum Msg {
     /// A pane's agent started `git worktree add/remove` on `path`.
     AgentCommand { verb: Verb, path: String, pane: String },
     /// One of First Mate's cards was answered (`option` None: dismissed).
-    CardAnswered { card_kind: &'static str, card: String, option: Option<String>, via: Option<String>, summary: String, action: Option<String>, worktree: String, repo: String },
+    /// `habit`: the habit it was about (`<key>/<id>`), for habit cards and
+    /// delete approvals a habit matched.
+    CardAnswered {
+        card_kind: &'static str,
+        card: String,
+        option: Option<String>,
+        via: Option<String>,
+        summary: String,
+        action: Option<String>,
+        worktree: String,
+        repo: String,
+        habit: Option<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -528,7 +547,7 @@ impl Observer {
                 fields.insert("pane".into(), json!(pane));
                 self.claims.claim(&path, verb, By::Agent, now, fields);
             }
-            Msg::CardAnswered { card_kind, card, option, via, summary, action, worktree, repo } => {
+            Msg::CardAnswered { card_kind, card, option, via, summary, action, worktree, repo, habit } => {
                 let mut r = Record::new(kind::CARD_ANSWERED, By::User)
                     .with("card_kind", json!(card_kind))
                     .with("card", json!(card))
@@ -536,6 +555,9 @@ impl Observer {
                     .with("summary", json!(summary));
                 if let Some(a) = action {
                     r = r.with("action", json!(a));
+                }
+                if let Some(h) = habit {
+                    r = r.with("habit", json!(h));
                 }
                 // Where the user answered: the island, the web, Telegram… when the
                 // client said so.
@@ -600,7 +622,7 @@ fn is_checkout(path: &str) -> bool {
 
 /// A linked worktree's repo (its main checkout) and branch; None for the
 /// main checkout itself and anything that is not a checkout.
-fn worktree_info(path: &str) -> Option<(String, String)> {
+pub fn worktree_info(path: &str) -> Option<(String, String)> {
     let wt = Path::new(path);
     let common = facts::git(wt, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
     let repo = Path::new(common.trim()).parent()?.to_string_lossy().into_owned();
@@ -863,11 +885,12 @@ mod tests {
                 action: Some("delete_worktree".into()),
                 worktree: "/r/x".into(),
                 repo: String::new(),
+                habit: Some("_global/delete-merged-clean".into()),
             },
             NOW,
         );
         o.handle(
-            Msg::CardAnswered { card_kind: "proposal", card: "proposal-2".into(), option: None, via: None, summary: "s".into(), action: None, worktree: String::new(), repo: String::new() },
+            Msg::CardAnswered { card_kind: "proposal", card: "proposal-2".into(), option: None, via: None, summary: "s".into(), action: None, worktree: String::new(), repo: String::new(), habit: None },
             NOW,
         );
         let rs = records(tmp.path());
@@ -876,6 +899,8 @@ mod tests {
         assert_eq!(rs[0].fields["option"], "Approve");
         assert_eq!(rs[0].fields["via"], "telegram");
         assert_eq!(rs[0].fields["action"], "delete_worktree");
+        assert_eq!(rs[0].fields["habit"], "_global/delete-merged-clean");
+        assert!(!rs[1].fields.contains_key("habit"));
         assert_eq!(rs[1].fields["option"], Value::Null);
     }
 
@@ -883,7 +908,7 @@ mod tests {
     fn the_directory_is_made_at_start_so_a_new_user_is_recorded() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join(".config/seahelm/first-mate");
-        let answer = || Msg::CardAnswered { card_kind: "approval", card: "c".into(), option: None, via: None, summary: String::new(), action: None, worktree: String::new(), repo: String::new() };
+        let answer = || Msg::CardAnswered { card_kind: "approval", card: "c".into(), option: None, via: None, summary: String::new(), action: None, worktree: String::new(), repo: String::new(), habit: None };
 
         // Without the directory (creating it failed) nothing is written.
         let mut o = observer(&dir);

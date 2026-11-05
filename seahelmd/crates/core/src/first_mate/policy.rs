@@ -25,7 +25,8 @@ pub fn classify(method: &str) -> Class {
         "autopilot.propose" | "core.ping" | "ping" | "pane.list" | "session.snapshot" | "pane.read" | "pane.explain"
         | "agent.explain" | "worktree.list" | "fleet.status" | "pr.list" | "pane.wait_agent_status" | "wait.agent_status"
         | "pane.wait_for_output" | "wait.output"
-        | "usage.summary" | "cards.list" | "autopilot.state" | "message.snapshot" | "message.history" => Class::Open,
+        | "usage.summary" | "cards.list" | "autopilot.state" | "message.snapshot" | "message.history"
+        | "habits.list" => Class::Open,
         "pane.run" | "pane.send_text" | "pane.send_keys" => Class::Gated(Action::MessagePane),
         "worktree.create" => Class::Gated(Action::StartAgent),
         "worktree.delete" => Class::Gated(Action::DeleteWorktree),

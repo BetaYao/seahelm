@@ -17,10 +17,13 @@ pub mod clock;
 pub mod cron;
 pub mod engine;
 pub mod facts;
+pub mod habits;
+pub mod learning;
 pub mod observations;
 pub mod pane;
 pub mod policy;
 pub mod rules;
+pub mod sweep;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -104,6 +107,10 @@ pub enum Msg {
     DidRun { method: String, result: Value },
     /// An approved or picked call finished.
     Ran { action: Action, what: String, level: &'static str, result: Result<Value, String> },
+    /// The daily sweep measured, matched and deleted what it may on its own.
+    Swept { report: sweep::Report },
+    /// A deletion the user approved on a habit card finished.
+    HabitDeleted { routed: sweep::Routed, result: Result<(), String> },
 }
 
 /// How the core reaches First Mate.
@@ -188,6 +195,19 @@ struct FirstMate {
     last_minute: Option<i64>,
     latest: Option<(String, String)>,
     next_id: u64,
+    /// The habits (`habits`), and the cards about them.
+    habits: habits::Store,
+    offers: habits::Offers,
+    /// Open sweep cards by payload, and per-item cards → (batch, index).
+    batches: HashMap<String, sweep::Batch>,
+    items: HashMap<String, (String, usize)>,
+    sweep_state: sweep::State,
+    /// A sweep's thread is measuring since then.
+    sweep_running: Option<Instant>,
+    /// When `maybe_sweep` last looked at the repos (it runs git).
+    sweep_checked: Option<Instant>,
+    /// First Mate was just turned on: sweep without waiting for a new day.
+    sweep_forced: bool,
 }
 
 /// Start First Mate's thread. It does nothing until the config gives it
@@ -220,6 +240,14 @@ pub fn spawn(core: Arc<Core>) -> Handle {
         last_minute: None,
         latest,
         next_id: 0,
+        sweep_state: sweep::State::load(&sweep::State::path(&habits::Store::default_dir())),
+        habits: habits::Store::new(habits::Store::default_dir()),
+        offers: habits::Offers::default(),
+        batches: HashMap::new(),
+        items: HashMap::new(),
+        sweep_running: None,
+        sweep_checked: None,
+        sweep_forced: false,
     };
     let _ = std::thread::Builder::new().name("seahelm-core-first-mate".into()).spawn(move || fm.run(rx));
     Handle(tx)
@@ -289,6 +317,8 @@ impl FirstMate {
                 let verb = if level == "picked" { format!("picked \"{what}\"") } else { format!("approved: {what}") };
                 self.tell(&format!("[seahelm] The user {verb}\nResult: {outcome}"));
             }
+            Msg::Swept { report } => self.swept(report, now),
+            Msg::HabitDeleted { routed, result } => self.habit_deleted(routed, result, now),
         }
     }
 
@@ -316,6 +346,7 @@ impl FirstMate {
         self.ensure_session();
         self.observe_prs(now);
         self.check_schedules(now);
+        self.maybe_sweep(now);
         if self.awaiting_since.is_some_and(|t| t.elapsed() > Duration::from_secs(120)) {
             // The prompt never started a turn (lost on the way): try again.
             self.awaiting_since = None;
@@ -332,6 +363,11 @@ impl FirstMate {
         }
         self.lease = Some(file);
         self.running = true;
+        let now = seahelm_core_types::now();
+        if let Err(e) = self.habits.ensure_seed(&Local::at(now).day_key(), now) {
+            eprintln!("seahelm-core: habits: {e}");
+        }
+        self.sweep_forced = self.sweep_state.sweep_on_start(now);
         eprintln!("seahelm-core: running First Mate");
     }
 
@@ -342,6 +378,7 @@ impl FirstMate {
         }
         self.approvals.clear();
         self.proposals.clear();
+        self.drop_habit_cards();
         self.active_rules.clear();
         self.queue.clear();
         self.awaiting_since = None;
@@ -712,7 +749,18 @@ impl FirstMate {
 
     /// The user answered one of First Mate's cards.
     fn answered(&mut self, payload: &str, option: Option<&str>, via: Option<String>, now: f64) {
-        self.observe_answer(payload, option, via);
+        if self.answered_habit(payload, option, via.clone(), now) {
+            return;
+        }
+        // A delete approval is evidence for the habit its facts match.
+        let habit = match self.approvals.get(payload) {
+            Some(a) if a.action == Action::DeleteWorktree => {
+                let params = a.params.clone();
+                self.count_delete_approval(&params, option == Some(APPROVE), now)
+            }
+            _ => None,
+        };
+        self.observe_answer(payload, option, via, habit);
         if let Some(a) = self.approvals.remove(payload) {
             if option != Some(APPROVE) {
                 let mut e = Entry::new(now, "denied", format!("rejected: {}", a.summary));
@@ -742,7 +790,7 @@ impl FirstMate {
     }
 
     /// The answer as evidence (`observations`): which card, what was picked, where.
-    fn observe_answer(&self, payload: &str, option: Option<&str>, via: Option<String>) {
+    fn observe_answer(&self, payload: &str, option: Option<&str>, via: Option<String>, habit: Option<String>) {
         let s = |p: &Value, k: &str| p.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
         let msg = if let Some(a) = self.approvals.get(payload) {
             observations::Msg::CardAnswered {
@@ -754,6 +802,7 @@ impl FirstMate {
                 action: Some(a.action.as_str().into()),
                 worktree: s(&a.params, "worktree_path"),
                 repo: s(&a.params, "repo_path"),
+                habit,
             }
         } else if let Some(p) = self.proposals.get(payload) {
             let picked = p.options.iter().find(|o| Some(o.label.as_str()) == option);
@@ -766,6 +815,7 @@ impl FirstMate {
                 action: picked.map(|o| o.action.as_str().into()),
                 worktree: picked.map(|o| s(&o.params, "worktree_path")).unwrap_or_default(),
                 repo: picked.map(|o| s(&o.params, "repo_path")).unwrap_or_default(),
+                habit: None,
             }
         } else {
             return;
@@ -809,7 +859,7 @@ impl FirstMate {
                 _ => ("starting", "quiet"),
             }
         };
-        let pending = self.approvals.len() + self.proposals.len();
+        let pending = self.approvals.len() + self.proposals.len() + self.habit_payloads().len();
         let tone = if pending > 0 { "wants_you" } else { tone };
         let detail = match (&self.latest, self.queue.len()) {
             (_, q) if q > 0 => format!("{q} queued"),
@@ -818,7 +868,7 @@ impl FirstMate {
         };
         let cards: Vec<Value> = self
             .core
-            .cards_with_payloads(|p| self.approvals.contains_key(p) || self.proposals.contains_key(p))
+            .cards_with_payloads(|p| self.approvals.contains_key(p) || self.proposals.contains_key(p) || self.is_habit_card(p))
             .into_iter()
             .map(|c| {
                 json!({"card": c["payload"], "id": c["id"], "kind": c["kind"], "message": c["message"], "options": c["options"]})

@@ -273,6 +273,8 @@ impl Core {
                         if let Some(path) = p.get("worktree_path").and_then(Value::as_str) {
                             let f = self.measure_worktree(path, None);
                             params["_facts"] = json!(f.summary());
+                            // For the habits: the answer is evidence for the one these facts match.
+                            params["_facts_json"] = serde_json::to_value(&f).unwrap_or(Value::Null);
                         }
                     }
                     match fm.gate(action, method, params) {
@@ -477,6 +479,8 @@ impl Core {
             "cards.list" => Ok(json!({"cards": self.lock().cards.to_json()})),
             "pane.read" | "pane.run" | "pane.send_text" | "pane.send_keys" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
+            // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
+            "habits.list" => Ok(first_mate::learning::rpc(method, &p).unwrap_or_default()),
             "autopilot.state" => Ok(match self.first_mate.get() {
                 Some(fm) => fm.state(),
                 None => json!({"enabled": false, "owner": "core"}),
@@ -962,6 +966,22 @@ impl Core {
         if st.registry.pane(pane).is_some() {
             st.unregister(pane);
         }
+    }
+
+    /// One line in First Mate's conversation, written by the core rather
+    /// than typed into its session (so it starts no turn): a one-option
+    /// decision row, which the island draws as a note. ` · ` would read as
+    /// a list of buttons there, so it is turned into `, `.
+    pub fn first_mate_line(&self, text: &str) {
+        let text = text.replace(" · ", ", ").replace('\n', " ");
+        let mut st = self.lock();
+        if st.registry.pane(fm_policy::SESSION).is_none() {
+            return;
+        }
+        let row = seahelm_core_messages::Message::new(fm_policy::SESSION, fm_policy::SESSION, seahelm_core_messages::Kind::Decision, now()).with_text(text);
+        st.messages.append(vec![row]);
+        drop(st);
+        self.changed.notify_all();
     }
 
     /// First Mate's pane, registered under its own directory.
