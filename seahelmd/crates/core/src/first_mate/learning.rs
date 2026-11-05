@@ -681,6 +681,12 @@ impl FirstMate {
     /// The first time First Mate is turned on: take the inventory (once;
     /// the flag is written when it has measured).
     pub(super) fn maybe_inventory(&mut self, _now: f64) {
+        // Not before discovery has scanned: right after the core starts it
+        // knows no worktrees yet, and an inventory of none is marked done and
+        // never asked again (the first live run measured 0 of 13).
+        if !self.core.fleet_known() {
+            return;
+        }
         if self.inventory_schedule.start_if_due(self.config.paused) {
             self.start_inventory();
         }

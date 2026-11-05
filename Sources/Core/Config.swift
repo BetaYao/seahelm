@@ -315,10 +315,31 @@ struct Config: Codable {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             Config.keepPreGatewayCopy()
-            try encoder.encode(toWrite).write(to: Config.configPath, options: .atomic)
+            let data = Config.keepingForeignKeys(try encoder.encode(toWrite), existing: try? Data(contentsOf: Config.configPath))
+            try data.write(to: Config.configPath, options: .atomic)
         } catch {
             NSLog("Failed to save config: \(error)")
         }
+    }
+
+    /// Keys this app does not model but other programs write into the same
+    /// file — seahelm-core's (`first_mate_language`, `first_mate_quiet_hours`,
+    /// …) and the GPUI client's — survive a save: without this, the app's
+    /// next save silently dropped them. The keys the gateway imported
+    /// (`droppedForeignKeys`) are still dropped on purpose.
+    static let droppedForeignKeys: Set<String> = ["mqtt", "host_gateway", "telegram"]
+
+    static func keepingForeignKeys(_ encoded: Data, existing: Data?) -> Data {
+        guard let existing,
+              let old = try? JSONSerialization.jsonObject(with: existing) as? [String: Any],
+              var new = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any] else { return encoded }
+        var added = false
+        for (key, value) in old where new[key] == nil && !droppedForeignKeys.contains(key) {
+            new[key] = value
+            added = true
+        }
+        guard added, let merged = try? JSONSerialization.data(withJSONObject: new, options: [.prettyPrinted, .sortedKeys]) else { return encoded }
+        return merged
     }
 
     /// The keys seahelm-gateway imports on its first start (`mqtt`,
@@ -353,8 +374,8 @@ struct Config: Codable {
                 try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                let data = try encoder.encode(configCopy)
                 Config.keepPreGatewayCopy()
+                let data = Config.keepingForeignKeys(try encoder.encode(configCopy), existing: try? Data(contentsOf: Config.configPath))
                 try data.write(to: Config.configPath, options: .atomic)
             } catch {
                 NSLog("Failed to save config: \(error)")

@@ -58,6 +58,9 @@ pub struct Core {
     pub(crate) git_cache: Mutex<HashMap<String, (String, String, Instant)>>,
     /// The worktrees the core found itself (`discovery::spawn`), canonical.
     discovered: Mutex<Vec<String>>,
+    /// Discovery has finished a scan: the fleet is known, not just what a
+    /// client happened to list in the first seconds after start.
+    fleet_known: std::sync::atomic::AtomicBool,
     /// First Mate's audit log, written to directly when First Mate is not
     /// running (a refused card answer is logged either way).
     audit_path: PathBuf,
@@ -216,6 +219,7 @@ impl Core {
             handles: Mutex::new(handles),
             git_cache: Mutex::new(HashMap::new()),
             discovered: Mutex::new(Vec::new()),
+            fleet_known: std::sync::atomic::AtomicBool::new(false),
             presence: Mutex::new(first_mate::presence::Tracker::open(Some(audit_path.with_file_name(first_mate::presence::FILE_NAME)))),
             audit_path,
             audited_clients: Mutex::new(HashSet::new()),
@@ -1222,6 +1226,14 @@ impl Core {
     /// The discovery thread's latest scan.
     pub fn set_discovered(&self, worktrees: Vec<String>) {
         *self.discovered.lock().unwrap_or_else(|e| e.into_inner()) = worktrees;
+        self.fleet_known.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Whether discovery has scanned once since start. Before that the core
+    /// knows only what a client listed in its first seconds, and anything
+    /// that judges the whole fleet (the inventory) would judge an empty one.
+    pub fn fleet_known(&self) -> bool {
+        self.fleet_known.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Every known worktree with its PR, as last fetched.
