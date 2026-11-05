@@ -279,8 +279,11 @@ fn creation_branch(task: &str, p: &Value, existing: &[String], allow_hint: bool)
 
 fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcResult {
     let repo = PathBuf::from(s(p, "repo_path"));
-    let task = s(p, "prompt");
-    if repo.as_os_str().is_empty() || task.is_empty() {
+    let mut task = s(p, "prompt");
+    let main_repo = crate::first_mate::routing::main_repo(&s(p,"repo_path"));
+    let pointer = core.memory_store().pointer(&main_repo);
+    if !pointer.is_empty() { task.push_str(&format!("\n\n{pointer}")); }
+    if repo.as_os_str().is_empty() || s(p, "prompt").is_empty() {
         return Err(RpcError::invalid_params("repo_path and prompt are required"));
     }
     let agent = match s(p, "agent_type").as_str() {
@@ -297,7 +300,19 @@ fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcRes
         .filter(|b| !b.is_empty() && !b.contains("HEAD"))
         .collect();
     let base = ["main", "master"].into_iter().find(|b| branches.iter().any(|x| x == b)).map(str::to_string).or_else(|| branches.first().cloned()).unwrap_or_else(|| "main".into());
-    let branch = creation_branch(&task, p, &branches, allow_hint);
+    let issue = if allow_hint && !s(p,"branch_hint").is_empty() { None } else {
+        crate::first_mate::routing::linked_issue(&s(p,"prompt"), &crate::first_mate::routing::remotes(&main_repo))
+    };
+    let branch_template=core.memory_store().value(&main_repo,"branch naming");
+    if let Some((_, n)) = &issue {
+        if let Some(existing) = branches.iter().find(|b| crate::first_mate::routing::issue_branch_matches(b, *n,branch_template.as_deref())) {
+            return Ok(json!({"existing": existing, "issue": n, "created": false}));
+        }
+    }
+    let branch = if let Some((_, n)) = issue {
+        issue_branch(n, &s(p, "prompt"), branch_template.as_deref())
+    } else { creation_branch(&s(p, "prompt"), p, &branches, allow_hint) };
+    if git(&repo, &["check-ref-format", "--branch", &branch]).is_none() { return Err(RpcError::invalid_params("invalid branch naming convention")); }
     let name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
     let path = repo.parent().unwrap_or(&repo).join(format!("{name}-worktrees")).join(&branch);
     if path.exists() {
@@ -595,4 +610,32 @@ pub fn pane_close(core: &Core, p: &Value) -> RpcResult {
     let _ = seahelmd::client::request(&pane, &Msg::Kill);
     core.close_pane(&pane);
     Ok(json!({"closed": true, "pane_session_key": pane}))
+}
+
+/// A user-learned template from project memory, otherwise the issue default.
+fn issue_branch(n: u64, task: &str, template: Option<&str>) -> String {
+    let slug = branch_name(task, &[]).trim_start_matches("task/").to_string();
+    template.unwrap_or("fix/{n}-{slug}").replace("{n}", &n.to_string()).replace("{slug}", &slug)
+}
+#[cfg(test)]
+mod issue_branch_tests {
+    use super::*;
+    #[test]
+    fn learned_branch_template_dedupes_before_creating_or_launching() {
+        let tmp=tempfile::tempdir().unwrap(); let repo=tmp.path().join("repo"); std::fs::create_dir(&repo).unwrap();
+        for args in [vec!["init","-b","main"],vec!["-c","user.name=Test","-c","user.email=test@example.invalid","commit","--allow-empty","-m","init"],vec!["remote","add","origin","https://github.com/o/r.git"],vec!["branch","bug/42-login"]] {
+            assert!(std::process::Command::new("git").arg("-C").arg(&repo).args(args).output().unwrap().status.success());
+        }
+        let core=Core::for_test(tmp.path());
+        let root=crate::first_mate::routing::main_repo(repo.to_str().unwrap());
+        core.memory_store().note(&root,"branch naming: bug/{n}-{slug}","user").unwrap();
+        let result=worktree_create(&core,&json!({"repo_path":repo,"prompt":"https://github.com/o/r/issues/42 login"})).unwrap();
+        assert_eq!(result["created"],false); assert_eq!(result["existing"],"bug/42-login");
+        assert!(core.live_worktrees().is_empty());
+    }
+
+    #[test] fn issue_branch_uses_the_learned_template_or_default() {
+        assert_eq!(issue_branch(42, "login crashes", None), "fix/42-login-crashes");
+        assert_eq!(issue_branch(42, "login crashes", Some("bug/{n}/{slug}")), "bug/42/login-crashes");
+    }
 }

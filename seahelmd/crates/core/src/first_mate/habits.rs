@@ -135,6 +135,7 @@ impl HabitLevel {
 /// The measured facts a `when` may name (docs: "Vocabulary of measured facts").
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Fact {
+    RequestWords,
     Pr,
     DaysSinceMerge,
     Uncommitted,
@@ -149,7 +150,8 @@ pub enum Fact {
 }
 
 impl Fact {
-    pub const ALL: [Fact; 10] = [
+    pub const ALL: [Fact; 11] = [
+        Fact::RequestWords,
         Fact::Pr,
         Fact::DaysSinceMerge,
         Fact::Uncommitted,
@@ -166,6 +168,7 @@ impl Fact {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Fact::RequestWords => "request_words",
             Fact::Pr => "pr",
             Fact::DaysSinceMerge => "days_since_merge",
             Fact::Uncommitted => "uncommitted",
@@ -206,6 +209,7 @@ pub enum Op {
 /// One fact's condition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cond {
+    Text(String),
     /// `0`, `">=1"`, `"<3"`.
     Num(Op, u32),
     /// `merged`, `"merged|closed"`, `[merged, closed]`.
@@ -217,6 +221,7 @@ impl Cond {
     fn parse(fact: Fact, v: &Yaml) -> Result<Cond, String> {
         let name = fact.as_str();
         match fact {
+            Fact::RequestWords => v.as_str().filter(|s| !s.is_empty()).map(|s| Cond::Text(s.into())).ok_or_else(|| "request_words must be nonempty text".into()),
             Fact::Pr => {
                 let states: Vec<String> = match v {
                     Yaml::String(s) => s.split('|').map(|x| x.trim().to_string()).collect(),
@@ -253,6 +258,7 @@ impl Cond {
 
     fn to_yaml(&self) -> Yaml {
         match self {
+            Cond::Text(s) => Yaml::String(s.clone()),
             Cond::Num(Op::Eq, n) => Yaml::Number((*n as u64).into()),
             Cond::Num(op, n) => {
                 let p = match op {
@@ -365,7 +371,7 @@ impl When {
                     Fact::Unpushed => f.unpushed,
                     Fact::IdleDays => f.idle_days,
                     Fact::BusyPanes => Some(f.busy_panes),
-                    Fact::Pr | Fact::IdenticalToBase | Fact::AtRisk => None,
+                    Fact::RequestWords | Fact::Pr | Fact::IdenticalToBase | Fact::AtRisk => None,
                 };
                 n.is_some_and(|n| cond.holds(n))
             }
@@ -381,8 +387,13 @@ impl When {
     }
 
     /// The fact names that admit risk, for messages.
+    pub fn route_words(&self) -> Option<&str> {
+        match self.0.get(&Fact::RequestWords) { Some(Cond::Text(s)) if self.0.len() == 1 => Some(s), _ => None }
+    }
+
     pub fn risky_facts(&self) -> Vec<&'static str> {
         if self.1.is_some() { return vec!["judgement"]; }
+        if self.route_words().is_some() { return Vec::new(); }
         match self.0.get(&Fact::AtRisk) {
             Some(Cond::Bool(true)) => return vec![Fact::AtRisk.as_str()],
             Some(Cond::Bool(false)) => return self.admits(&[Fact::BusyPanes]),
@@ -420,6 +431,7 @@ pub fn nothing_to_lose(f: &Facts) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Do {
+    Route,
     DeleteWorktree,
     /// A group the user wants left alone: a match keeps every other habit
     /// off the worktree.
@@ -640,6 +652,10 @@ impl Book {
                     continue;
                 }
             };
+            if (h.act == Do::Route) != h.when.route_words().is_some() {
+                b.invalid.push((entry, at("routing habits require only request_words; other actions cannot use it".into())));
+                continue;
+            }
             if !valid_id(&h.id) {
                 b.invalid.push((entry, at(format!("id `{}` must be lowercase letters, digits, `-`, `_` or `.`", h.id))));
                 continue;
@@ -838,9 +854,9 @@ impl Book {
         let by_id: HashMap<&str, &Record> = records.iter().map(|r| (r.id.as_str(), r)).collect();
         self.habits
             .iter()
-            .filter(|h| h.active() && h.act == Do::DeleteWorktree)
+            .filter(|h| h.active() && matches!(h.act, Do::DeleteWorktree | Do::Route))
             .filter_map(|h| match self.level(h) {
-                HabitLevel::Suggest if gates_pass_n(h.fresh_sources(), &by_id, n.clamp(2,10)) => Some((h.id.clone(), HabitLevel::Ask)),
+                HabitLevel::Suggest if (h.act == Do::Route && route_evidence(h.fresh_sources(), n)) || gates_pass_n(h.fresh_sources(), &by_id, n.clamp(2,10)) => Some((h.id.clone(), HabitLevel::Ask)),
                 HabitLevel::Ask if h.evidence.streak >= m.clamp(3,20) && !h.when.admits_risk() => Some((h.id.clone(), HabitLevel::Auto)),
                 _ => None,
             })
@@ -960,6 +976,32 @@ impl Book {
         Ok((to != from).then(|| Change { id: h.id, from, to, why: Text::new("the user answered the inventory card", "你回答了盘点卡") }))
     }
 
+    /// A user's routing choice is evidence; grants still use Offers and D1.
+    pub fn route_pick(&mut self, words: &str, today: &str, source: &str) {
+        self.route_pick_with_n(words,today,source,tuning::N);
+    }
+
+    pub fn route_pick_with_n(&mut self, words: &str, today: &str, source: &str, n: usize) {
+        let id = route_id(words);
+        if self.get(&id).is_none() {
+            let mut h = Habit::seed(today);
+            h.id = id.clone(); h.about = format!("project.route:{words}"); h.act = Do::Route;
+            h.when = When(BTreeMap::from([(Fact::RequestWords, Cond::Text(words.into()))]), None);
+            h.level = HabitLevel::Observe; h.origin = Origin::Learned;
+            self.habits.push(h);
+        }
+        let i = self.index(&id).unwrap();
+        let h = &mut self.habits[i];
+        let source = format!("{today}|{source}");
+        if h.sources.contains(&source) { return; }
+        h.sources.push(source); h.evidence.manual += 1;
+        if h.level == HabitLevel::Ask { h.evidence.streak += 1; }
+        if h.level == HabitLevel::Observe && route_evidence(h.fresh_sources(), n) {
+            h.level = HabitLevel::Suggest; self.caps.insert(id, HabitLevel::Suggest);
+            h.evidence.fresh_from = h.sources.len();
+        }
+    }
+
     /// Keep a habit in place, never matched again: an answer replaced it.
     /// Returns whether it was active.
     pub fn supersede(&mut self, id: &str) -> bool {
@@ -1018,6 +1060,11 @@ pub struct Grant {
 }
 
 impl Grant {
+    /// A separate card explicitly confirmed this short project name.
+    pub(super) fn from_alias_card(key: &str, id: &str) -> Grant {
+        Grant { key:key.into(), id:id.into(), level:HabitLevel::Ask, confirm:false, _only_from_a_card:() }
+    }
+
     /// The user's answer on an inventory card (`inventory::Cards::answer`,
     /// the only caller): the answer is the consent (D6), so the habit it
     /// writes is granted the level that answer names — at most `ask`.
@@ -1228,6 +1275,7 @@ pub fn decide(facts: &Facts, books: &[&Book], prec: &Precedence) -> Option<Decis
     for b in books {
         for h in b.habits.iter().filter(|h| h.active() && h.when.matches(facts)) {
             match h.act {
+                Do::Route => continue,
                 Do::Keep => return None,
                 Do::DeleteWorktree => {
                     let level = prec.effective(b, h);
@@ -2227,4 +2275,52 @@ mod tests {
         assert!(b.habits[0].when.matches(&clean_merged()));
     }
 
+}
+
+/// Stable identity independent of the core's current working directory.
+pub fn route_id(words: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("route-{:x}", Sha256::digest(words.as_bytes()))[..38].into()
+}
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+    #[test]
+    fn routing_evidence_uses_the_tuned_threshold() {
+        let mut book=Book::empty("repo"); let id=route_id("fix login");
+        book.route_pick_with_n("fix login","2026-11-04","card-1",2);
+        book.route_pick_with_n("fix login","2026-11-05","card-2",2);
+        assert_eq!(book.level(book.get(&id).unwrap()),HabitLevel::Suggest);
+        book.route_pick_with_n("fix login","2026-11-06","card-3",2);
+        book.route_pick_with_n("fix login","2026-11-07","card-4",2);
+        assert_eq!(book.offers_with_thresholds(&[],2,5),vec![(id.clone(),HabitLevel::Ask)]);
+        assert!(book.offers_with_thresholds(&[],3,5).is_empty());
+    }
+
+    #[test]
+    fn route_learning_never_grants_ask_or_auto_without_a_card() {
+        let mut b = Book::empty("repo"); let id = route_id("fix login");
+        for i in 0..tuning::N { b.route_pick("fix login", if i == 0 { "2026-11-04" } else { "2026-11-05" }, &format!("pick-{i}")); }
+        assert_eq!(b.level(b.get(&id).unwrap()), HabitLevel::Suggest);
+        for i in tuning::N..2*tuning::N { b.route_pick("fix login", if i == tuning::N { "2026-11-05" } else { "2026-11-06" }, &format!("pick-{i}")); }
+        assert_eq!(b.offers_due(&[]), vec![(id.clone(), HabitLevel::Ask)]);
+        let mut offers = Offers::default();
+        let offer = offers.raise("repo", &id, HabitLevel::Ask, "one");
+        let Some(OfferAnswer::Accepted(g)) = offers.answer(&offer.payload, Some(&yes_label(HabitLevel::Ask))) else { panic!() };
+        b.promote(g, "2026-11-06").unwrap();
+        for i in 0..tuning::M { b.route_pick("fix login", "2026-11-07", &format!("approval-{i}")); }
+        assert_eq!(b.level(b.get(&id).unwrap()), HabitLevel::Ask);
+        assert_eq!(b.offers_due(&[]), vec![(id.clone(), HabitLevel::Auto)]);
+        assert!(decide(&Facts::default(), &[&b], &Precedence { repo_cap: None, user_default: RuleLevel::Auto }).is_none());
+        let offer = offers.raise("repo", &id, HabitLevel::Auto, "two");
+        let Some(OfferAnswer::Accepted(g)) = offers.answer(&offer.payload, Some(&yes_label(HabitLevel::Auto))) else { panic!() };
+        b.promote(g, "2026-11-07").unwrap();
+        assert_eq!(b.level(b.get(&id).unwrap()), HabitLevel::Auto);
+        b.rejected(&id); assert_eq!(b.level(b.get(&id).unwrap()), HabitLevel::Ask);
+    }
+}
+
+fn route_evidence(sources: &[String], n: usize) -> bool {
+    let days: std::collections::HashSet<_> = sources.iter().filter_map(|s| s.split_once('|').map(|(d, _)| d)).collect();
+    sources.len() >= n.clamp(2,10) && days.len() >= tuning::MIN_DAYS
 }

@@ -139,6 +139,7 @@ pub fn habit_action(action: super::habits::Do, lang: Lang) -> &'static str {
     match action {
         super::habits::Do::DeleteWorktree => lang.pick("delete a worktree", "删除 worktree"),
         super::habits::Do::Keep => lang.pick("keep a worktree", "保留 worktree"),
+        super::habits::Do::Route => lang.pick("route a request to a project", "为请求选择项目"),
     }
 }
 
@@ -154,3 +155,28 @@ impl CardOption {
         Self { key: if key == label { format!("choice:{index}") } else { key }, label: card_label(label, lang) }
     }
 }
+
+pub fn remembered(text: &str) -> Text { Text::new(format!("Noted: {text}"), format!("记下了：{text}")) }
+pub fn memory_external(repo: &str) -> Text { Text::new(format!("Project memory changed outside the core: {repo}. Review and confirm the exact revision before it is injected."), format!("项目记忆在核心外被修改：{repo}。请审阅并确认此版本后再注入。")) }
+pub fn route_started(path: &str) -> Text { Text::new(format!("Started: {path}"), format!("已启动：{path}")) }
+pub fn route_choose() -> Text { Text::new("Choose a project for this request", "为这个请求选择项目") }
+
+pub fn route_once() -> Text { Text::new("Another project start this turn needs your approval.", "本轮再次启动项目需要你的确认。") }
+pub fn issue_existing(n: u64, place: &str) -> Text { Text::new(format!("Issue #{n} is already in hand: {place}"), format!("议题 #{n} 已在处理中：{place}")) }
+
+pub fn route_unknown() -> Text { Text::new("Project is unknown or its rules cannot be read.", "项目未知或项目规则无法读取。") }
+
+pub fn memory_failure(detail: &str) -> Text { Text::new(format!("Could not complete the request: {detail}"), format!("未能完成请求：{detail}")) }
+
+pub fn memory_full(total: usize) -> Text { Text::new(format!("Project memory uses {total}/2000 characters; over capacity. Only complete priority entries and newest notes are injected."),format!("项目记忆 {total}/2000 字，已超出容量；仅注入完整的优先条目和最新笔记。")) }
+pub fn memory_refused(method: &str) -> Text { Text::new(format!("{method} refused: memory notes require the user or the kernel-identified First Mate session; undo and confirmation require the user."),format!("已拒绝 {method}：记忆写入仅限你本人或内核识别的 First Mate 会话，撤销及确认外部编辑仅限你本人。")) }
+pub fn alias_offer(alias: &str, repo: &str) -> Text { Text::new(format!("Use “{alias}” as a short project name for {repo}?"),format!("将“{alias}”作为 {repo} 的项目简称吗？")) }
+
+pub fn memory_display(verb: &str, shown: &serde_json::Value) -> Text {
+    let body = shown["text"].as_str().unwrap_or_default();
+    let total = shown["total"].as_u64().unwrap_or(0);
+    Text::new(format!("Memory {verb}: {total}/2000 characters\n{body}\n{}",shown["warning"].as_str().unwrap_or_default()),format!("项目记忆 {verb}：{total}/2000 字\n{body}\n{}",shown["warning"].as_str().unwrap_or_default()))
+}
+
+pub fn memory_undone(repo: &str) -> Text { Text::new(format!("Restored the previous project memory: {repo}"),format!("已恢复项目记忆的上一版本：{repo}")) }
+pub fn route_confirm() -> Text { Text::new("This project's rules require approval before starting an agent.","此项目的规则要求启动代理前由你确认。") }

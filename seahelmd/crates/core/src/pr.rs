@@ -89,6 +89,7 @@ impl Review {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrStatus {
+    pub body: String,
     pub number: u64,
     pub url: String,
     pub state: State,
@@ -130,6 +131,13 @@ impl PrStatus {
         v
     }
 
+    /// PR prose is internal routing data, never part of the polled status wire shape.
+    fn routing_json(&self) -> Value {
+        let mut value=self.to_json();
+        value["body"]=json!(self.body);
+        value
+    }
+
     /// One sentence for a tooltip or a screen reader.
     pub fn summary(&self) -> String {
         let mut parts = vec![format!("PR #{}", self.number), self.state.as_str().to_string()];
@@ -164,7 +172,7 @@ pub const QUERY: &str = "query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {
     pullRequests(first: 30, orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes {
-        number url state isDraft headRefName headRefOid mergedAt reviewDecision
+        number url body state isDraft headRefName headRefOid mergedAt reviewDecision
         headRepositoryOwner { login }
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       }
@@ -186,7 +194,7 @@ pub fn branch_query(n: usize) -> String {
             format!(
                 "    b{i}: pullRequests(headRefName: $b{i}, states: [OPEN, MERGED, CLOSED], first: 5, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
       nodes {{
-        number url state isDraft headRefName headRefOid mergedAt reviewDecision
+        number url body state isDraft headRefName headRefOid mergedAt reviewDecision
         headRepositoryOwner {{ login }}
         commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ state }} }} }} }}
       }}
@@ -252,7 +260,7 @@ fn parse_node(node: &Value, owner: &str) -> Option<(String, PrStatus)> {
         .and_then(Value::as_str);
     Some((
         branch.to_string(),
-        PrStatus {
+        PrStatus { body: node.get("body").and_then(Value::as_str).unwrap_or_default().into(),
             number,
             url: url.to_string(),
             state,
@@ -515,6 +523,22 @@ impl PrStore {
                 Some(json!({"worktree_path": wt, "repo": repo, "branch": branch, "pr": pr.to_json()}))
             })
             .collect()
+    }
+
+    /// All cached PRs, including ones with no listed worktree. Routing must
+    /// identify them by repository/PR number, never by an assumed pane path.
+    pub fn routing_list(&self) -> Vec<Value> {
+        let inner=self.lock();
+        let mut rows=std::collections::BTreeMap::new();
+        for (repo,entry) in &inner.repos {
+            for (branch,pr) in &entry.by_branch {
+                rows.insert((repo.clone(),pr.number),json!({"repo":repo,"branch":branch,"pr":pr.routing_json()}));
+            }
+        }
+        for ((repo,branch),entry) in &inner.branch_prs {
+            if let Some(pr)=&entry.pr { rows.entry((repo.clone(),pr.number)).or_insert_with(||json!({"repo":repo,"branch":branch,"pr":pr.routing_json()})); }
+        }
+        rows.into_values().collect()
     }
 
     /// One tick: resolve new worktrees' remotes, refresh every branch, fetch
@@ -806,7 +830,7 @@ mod tests {
         );
         assert_eq!(
             by["feat/a"],
-            PrStatus {
+            PrStatus { body: String::new(),
                 number: 12,
                 url: "https://github.com/acme/app/pull/12".into(),
                 state: State::Open,
@@ -870,12 +894,12 @@ mod tests {
 
     #[test]
     fn wire_drops_checks_and_review_once_the_pr_is_done() {
-        let merged = PrStatus { number: 1, url: "u".into(), state: State::Merged, checks: Some(Checks::Failing), review: Some(Review::Approved), head_oid: None, merged_at: None };
+        let merged = PrStatus { body: String::new(), number: 1, url: "u".into(), state: State::Merged, checks: Some(Checks::Failing), review: Some(Review::Approved), head_oid: None, merged_at: None };
         let w = merged.to_json();
         assert!(w.get("checks").is_none());
         assert!(w.get("review").is_none());
         assert_eq!(w["state"], "merged");
-        let open = PrStatus { number: 2, url: "u".into(), state: State::Open, checks: Some(Checks::Failing), review: None, head_oid: None, merged_at: None };
+        let open = PrStatus { body: String::new(), number: 2, url: "u".into(), state: State::Open, checks: Some(Checks::Failing), review: None, head_oid: None, merged_at: None };
         assert_eq!(open.to_json()["checks"], "failing");
         assert_eq!(open.summary(), "PR #2 · open · checks failing");
     }
@@ -949,7 +973,7 @@ mod tests {
     }
 
     fn done(n: u64, state: State) -> PrStatus {
-        PrStatus { number: n, url: "u".into(), state, checks: None, review: None, head_oid: Some(format!("oid{n}")), merged_at: None }
+        PrStatus { body: String::new(), number: n, url: "u".into(), state, checks: None, review: None, head_oid: Some(format!("oid{n}")), merged_at: None }
     }
 
     /// A store over worktrees `/wt/<branch>` each on `<branch>`, with an
@@ -1050,7 +1074,7 @@ mod tests {
     }
 
     fn pr(n: u64) -> PrStatus {
-        PrStatus { number: n, url: "u".into(), state: State::Open, checks: Some(Checks::Passing), review: None, head_oid: None, merged_at: None }
+        PrStatus { body: String::new(), number: n, url: "u".into(), state: State::Open, checks: Some(Checks::Passing), review: None, head_oid: None, merged_at: None }
     }
 
     #[test]
@@ -1130,5 +1154,32 @@ mod tests {
     fn curl_config_values_are_quoted() {
         assert_eq!(curl_quote(r#"a"b\c"#), r#""a\"b\\c""#);
         assert_eq!(curl_quote("x\ny"), r#""x\ny""#);
+    }
+}
+
+#[cfg(test)]
+mod routing_cache_tests {
+    use super::*;
+    #[test]
+    fn routing_has_closing_bodies_even_without_a_worktree() {
+        let response=json!({"data":{"repository":{"pullRequests":{"nodes":[{
+            "number":99,"url":"https://github.com/o/r/pull/99","state":"MERGED","headRefName":"fix-login","headRepositoryOwner":{"login":"o"},"body":"Resolves #42"
+        }]}}}});
+        let parsed=parse_statuses(&response,"o"); assert_eq!(parsed["fix-login"].body,"Resolves #42");
+        let store=PrStore::new(Box::new(Live));
+        store.lock().repos.insert("o/r".into(),RepoEntry{by_branch:parsed,at:Instant::now(),ok:true});
+        assert!(store.list().is_empty());
+        {
+            let mut inner=store.lock();
+            inner.branches.insert("/scratch/repo".into(),"fix-login".into());
+            inner.remotes.insert("/scratch/repo".into(),Some("o/r".into()));
+        }
+        let polled=store.list(); assert_eq!(polled.len(),1);
+        assert!(polled[0]["pr"].get("body").is_none());
+        assert!(store.status("/scratch/repo").unwrap().to_json().get("body").is_none());
+        let rows=store.routing_list(); assert_eq!(rows.len(),1); assert!(rows[0].get("worktree_path").is_none());
+        assert_eq!(rows[0]["pr"]["body"],"Resolves #42");
+        assert!(crate::first_mate::routing::duplicate_issue("o/r",42,"","",&rows,None).unwrap().contains("PR #99"));
+        assert!(QUERY.contains("body")); assert!(branch_query(1).contains("body"));
     }
 }

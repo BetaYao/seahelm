@@ -106,7 +106,7 @@ fn from_gh(path: &Path, branch: &str) -> Option<Option<PrStatus>> {
     list.sort_by(|a, b| b.get("updatedAt").and_then(Value::as_str).cmp(&a.get("updatedAt").and_then(Value::as_str)));
     let Some(n) = list.first() else { return Some(None) };
     let draft = n.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
-    Some(Some(PrStatus {
+    Some(Some(PrStatus { body: String::new(),
         number: n.get("number").and_then(Value::as_u64)?,
         url: n.get("url").and_then(Value::as_str).unwrap_or_default().to_string(),
         state: pr::parse_state(n.get("state").and_then(Value::as_str), draft)?,
@@ -122,7 +122,7 @@ fn from_gh(path: &Path, branch: &str) -> Option<Option<PrStatus>> {
 fn from_core(list: &Value, path: &str) -> Option<PrStatus> {
     let item = list.get("prs")?.as_array()?.iter().find(|i| i.get("worktree_path").and_then(Value::as_str) == Some(path))?;
     let p = item.get("pr")?;
-    Some(PrStatus {
+    Some(PrStatus { body: String::new(),
         number: p.get("number")?.as_u64()?,
         url: p.get("url").and_then(Value::as_str).unwrap_or_default().to_string(),
         state: match p.get("state")?.as_str()? {

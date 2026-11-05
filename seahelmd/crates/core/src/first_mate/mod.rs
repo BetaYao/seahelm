@@ -23,6 +23,8 @@ pub mod habits;
 pub mod inventory;
 pub mod lang;
 pub mod learning;
+pub mod memory;
+pub mod routing;
 pub mod observations;
 mod generalisation;
 pub mod tuning;
@@ -123,6 +125,8 @@ pub enum Msg {
     /// A card First Mate raised was answered (None: dismissed), and where
     /// (`_meta.via`), when the client said.
     Answered { payload: String, option: Option<String>, via: Option<String> },
+    /// A failed create releases its routing reservation.
+    CreateFailed,
     /// A gated call went through.
     DidRun { method: String, result: Value },
     /// An approved or picked call finished.
@@ -204,12 +208,14 @@ struct Approval {
 }
 
 struct Proposal {
+    route_text: String,
     summary: String,
     options: Vec<ProposalOption>,
 }
 
 struct ProposalOption {
     key: String,
+    alias: Option<String>,
     label: String,
     action: Action,
     method: String,
@@ -236,6 +242,14 @@ struct FirstMate {
     awaiting_since: Option<Instant>,
     active_rules: Vec<(Rule, Config)>,
     user_spoke: bool,
+    route_text: String,
+    route_used: bool,
+    route_pending: bool,
+    memory: memory::Store,
+    alias_pending: HashMap<String, (String, String, String)>,
+    #[cfg(test)]
+    test_repos: Option<Vec<String>>,
+    memory_pending: HashMap<String, (String, String)>,
     approvals: HashMap<String, Approval>,
     habit_proposals: HashMap<String, generalisation::PendingHabit>,
     reported_invalid: HashSet<String>,
@@ -300,7 +314,7 @@ impl FirstMate {
             tasks_running: false,
             task_cards: HashMap::new(),
             task_in_flight: std::collections::BTreeSet::new(),
-            core,
+            core: core.clone(),
             tx,
             ledger: Ledger::open(dir.join("state.json")),
             audit,
@@ -315,6 +329,14 @@ impl FirstMate {
             awaiting_since: None,
             active_rules: Vec::new(),
             user_spoke: false,
+            route_text: String::new(),
+            route_used: false,
+            route_pending: false,
+            memory: core.memory_store(),
+            alias_pending: HashMap::new(),
+            #[cfg(test)]
+            test_repos: None,
+            memory_pending: HashMap::new(),
             approvals: HashMap::new(),
             card_options: HashMap::new(),
             reported_invalid: HashSet::new(),
@@ -396,6 +418,7 @@ impl FirstMate {
                 self.deliver_if_ready(now);
             }
             Msg::Answered { payload, option, via } => self.answered(&payload, option.as_deref(), via, now),
+            Msg::CreateFailed => self.route_pending = false,
             Msg::DidRun { method, result } => self.did_run(&method, &result),
             Msg::Ran { action, what, level, params, result } => {
                 if let Some(task) = params.get("_task").and_then(|v| serde_json::from_value(v.clone()).ok()) {
@@ -474,6 +497,7 @@ impl FirstMate {
         self.maybe_inventory(now);
         self.maybe_sweep(now);
         self.check_hand_edits(now);
+        self.check_memory_edits(now);
         self.expire_cards(now);
         self.poll_tasks(now);
         self.maybe_brief(now);
@@ -504,7 +528,7 @@ impl FirstMate {
     }
 
     fn stop(&mut self) {
-        let ids: Vec<String> = self.approvals.keys().chain(self.proposals.keys()).chain(self.habit_proposals.keys()).cloned().collect();
+        let ids: Vec<String> = self.approvals.keys().chain(self.proposals.keys()).chain(self.habit_proposals.keys()).chain(self.memory_pending.keys()).chain(self.alias_pending.keys()).cloned().collect();
         for id in ids {
             self.core.drop_card_payload(&id);
         }
@@ -514,6 +538,8 @@ impl FirstMate {
         self.proposals.clear();
         self.habit_proposals.clear();
         self.card_options.clear();
+        self.memory_pending.clear();
+        self.alias_pending.clear();
         self.drop_habit_cards();
         for h in std::mem::take(&mut self.held) {
             self.core.drop_card_payload(&h.payload);
@@ -724,7 +750,7 @@ impl FirstMate {
         if ready.is_empty() {
             return;
         }
-        let text = ready.iter().map(|d| d.prompt.as_str()).collect::<Vec<_>>().join("\n\n---\n\n");
+        let text = ready.iter().map(|d| { let memory = self.memory.context(&d.event.repo); if memory.is_empty() { d.prompt.clone() } else { format!("{}\n\n[seahelm project memory]\n{}",d.prompt,memory) } }).collect::<Vec<_>>().join("\n\n---\n\n");
         for d in &ready {
             if let Ok(c) = self.config_for(&d.event.repo) {
                 self.active_rules.push((d.rule.clone(), c));
@@ -760,7 +786,10 @@ impl FirstMate {
             return false;
         }
         self.user_spoke = true;
-        self.tell(t);
+        self.route_text = t.into();
+        self.route_used = false;
+        self.route_pending = false;
+        self.tell(&format!("{}\n\n[seahelm projects] {}", t, self.project_list()));
         self.log(Entry::new(now, "message", t));
         true
     }
@@ -800,6 +829,9 @@ impl FirstMate {
                 deny(self, None, format!("{summary} — {why}"));
                 return Gate::Deny(why);
             }
+        }
+        if action == Action::StartAgent {
+            if let Some(g) = self.route_gate(params, now) { return g; }
         }
         let mut level = self.level(action);
         if let Some(id) = params.get("habit").and_then(Value::as_str) {
@@ -871,8 +903,11 @@ impl FirstMate {
 
     fn did_run(&mut self, method: &str, result: &Value) {
         if method == "worktree.create" {
+            self.route_pending = false;
             if let Some(p) = result.get("worktree_path").and_then(Value::as_str) {
+                self.route_used = true;
                 self.started.insert(p.to_string());
+                self.core.first_mate_line(lang::route_started(p).get(self.config.language));
             }
         }
     }
@@ -896,7 +931,15 @@ impl FirstMate {
             if self.level(action) == Level::Deny {
                 return Err(refused(format!("option {}: {} is set to deny", i + 1, action.as_str())));
             }
-            options.push(ProposalOption { key: format!("choice:{i}"), label: label.into(), action, method: method.into(), params: o.get("params").cloned().unwrap_or(json!({})) });
+            if action == Action::StartAgent {
+                let repo = o.pointer("/params/repo_path").and_then(Value::as_str).unwrap_or_default();
+                if Path::new(repo).join(rules::RELATIVE_PATH).exists() {
+                    if self.config_for(repo).map(|c| c.autonomy(action, None) == Level::Deny).unwrap_or(true) {
+                        return Err(refused(lang::route_unknown().get(self.config.language)));
+                    }
+                }
+            }
+            options.push(ProposalOption { key: format!("choice:{i}"), alias: o.get("alias").and_then(Value::as_str).map(str::to_string), label: label.into(), action, method: method.into(), params: o.get("params").cloned().unwrap_or(json!({})) });
         }
         if options.is_empty() || options.len() > 5 {
             return Err(RpcError::invalid_params("between one and five options"));
@@ -905,9 +948,9 @@ impl FirstMate {
         let mut labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
         labels.push(NOT_NOW.into());
         let class = if self.user_spoke { budget::Class::Answering } else { budget::Class::Proactive };
-        self.put_card(CardKind::Proposal, &id, format!("First Mate suggests: {summary}"), labels, class, now);
+        self.put_card(CardKind::Proposal, &id, format!("{}{summary}", self.config.language.pick("First Mate suggests: ", "First Mate 建议：")), labels, class, now);
         self.log(Entry::new(now, "approval", format!("proposed: {summary}")));
-        self.proposals.insert(id.clone(), Proposal { summary: summary.into(), options });
+        self.proposals.insert(id.clone(), Proposal { route_text: if self.user_spoke { self.route_text.clone() } else { String::new() }, summary: summary.into(), options });
         Ok(json!({"queued": "proposal", "card": id, "message": "Shown to the user; you will be told what they picked."}))
     }
 
@@ -933,6 +976,12 @@ impl FirstMate {
         }
         self.card_options.remove(payload);
         self.expiry.forget(payload);
+        if let Some((repo, digest)) = self.memory_pending.remove(payload) {
+            let result = memory::answer_edit(&self.memory,&repo,&digest,option == Some("approve"));
+            if let Err(e) = result { self.core.first_mate_line(lang::memory_failure(&e).get(self.config.language)); }
+            return;
+        }
+        if self.answer_alias(payload, option, now) { return; }
         if let Some(pending) = self.habit_proposals.remove(payload) {
             self.observe_habit_answer("habit.propose", payload, option, via.clone(), format!("propose habit {}", pending.habit.id), format!("{}/{}", pending.key, pending.habit.id), String::new());
             if option == Some("approve") {
@@ -983,6 +1032,15 @@ impl FirstMate {
             self.log(e);
             self.tell(&format!("[seahelm] The user picked \"{}\" but {} is set to deny; nothing ran.", o.label, o.action.as_str()));
             return;
+        }
+        if o.action == Action::StartAgent {
+            if let Some(why) = self.budget_refusal(&o.params) {
+                self.core.first_mate_line(lang::memory_failure(&why).get(self.config.language));
+                return;
+            }
+            let repo=o.params["repo_path"].as_str().unwrap_or_default();
+            self.route_pick(repo, &p.route_text, payload, now);
+            if let Some(alias)=o.alias.as_deref() { self.offer_alias(repo,alias,payload,now); }
         }
         self.execute(o.action, o.method, o.params, o.label, "picked", payload);
     }

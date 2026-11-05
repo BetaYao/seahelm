@@ -64,7 +64,8 @@ impl Cli {
                 self.call("core.ping", json!({}), 40.0, &[]);
                 println!("pong");
             }
-            "memory" => pretty(&self.call("app.memory", json!({}), 40.0, &[])),
+            "memory" if a.is_empty() => pretty(&self.call("app.memory", json!({}), 40.0, &[])),
+            "memory" => self.project_memory(a),
             "session" if first(a) == Some("snapshot") => {
                 pretty(&self.call("session.snapshot", json!({}), 40.0, &[])["panes"].take_or_array())
             }
@@ -94,6 +95,19 @@ impl Cli {
             "pane" => self.pane(a),
             other => die(&format!("unknown command: {other}"), 2),
         }
+    }
+
+    fn project_memory(&self, a: &[String]) {
+        let Some((verb, rest)) = a.split_first() else { unreachable!() };
+        let Some(repo) = rest.first() else { die("usage: seahelm memory note|show|undo|confirm <repo> [text|digest]", 2) };
+        let mut params = json!({"repo": absolute(repo)});
+        match verb.as_str() {
+            "show" | "undo" if rest.len() == 1 => {}
+            "note" if rest.len() > 1 => params["text"] = json!(rest[1..].join(" ")),
+            "confirm" if rest.len() == 2 => params["digest"] = json!(rest[1]),
+            _ => die("usage: seahelm memory note|show|undo|confirm <repo> [text|digest]", 2),
+        }
+        pretty(&self.call(&format!("memory.{verb}"), params, 40.0, &[]));
     }
 
     fn layout(&self, a: &[String]) {
@@ -466,6 +480,7 @@ fn route(method: &str) -> &'static [Side] {
         "worktree.create" | "worktree.delete" | "pane.close" => &[Side::App, Side::Core],
         // First Mate's habits live in the core alone.
         "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" | "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
+        "memory.note" | "memory.show" | "memory.undo" | "memory.confirm" => &[Side::Core],
         _ => &[Side::App],
     }
 }
@@ -695,6 +710,7 @@ mod tests {
         }
         assert_eq!(route("habits.list"), [Side::Core], "habits live in the core alone");
         assert_eq!(route("habits.inventory"), [Side::Core]);
+        for method in ["memory.note", "memory.show", "memory.undo", "memory.confirm"] { assert_eq!(route(method), [Side::Core]); }
         // Only the side drawing the panes can do these.
         for m in ["pane.split", "pane.focus", "pane.zoom", "pane.move", "pane.fork", "pane.exec", "layout.apply"] {
             assert_eq!(route(m), [Side::App], "{m}");

@@ -299,7 +299,7 @@ mod tests {
     use super::*;
 
     fn pr(number: u64, state: State, checks: Option<Checks>) -> PrStatus {
-        PrStatus { number, url: format!("https://github.com/o/r/pull/{number}"), state, checks, review: None, head_oid: None, merged_at: None }
+        PrStatus { body: String::new(), number, url: format!("https://github.com/o/r/pull/{number}"), state, checks, review: None, head_oid: None, merged_at: None }
     }
 
     fn obs(wt: &str, p: Option<PrStatus>) -> Observation {

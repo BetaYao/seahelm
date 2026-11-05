@@ -227,7 +227,7 @@ pub fn guarded(method: &str) -> bool {
 /// inventory (`habits.inventory` without `preview`), which puts cards in
 /// front of the user in First Mate's name. The read-only preview is not.
 pub fn guarded_call(method: &str, params: &serde_json::Value) -> bool {
-    method.starts_with("task-source.") || guarded(method) || starts_inventory(method, params)
+    method.starts_with("task-source.") || guarded(method) || starts_inventory(method, params) || matches!(method, "memory.note" | "memory.undo" | "memory.confirm")
 }
 
 pub fn starts_inventory(method: &str, params: &serde_json::Value) -> bool {
@@ -414,4 +414,9 @@ mod tests {
             println!("{pid} {exe}\n    → {:?}", classify(&f));
         }
     }
+}
+
+/// Only the kernel-observed First Mate session gets the note exception; undo belongs to the user.
+pub fn first_mate_memory(method: &str, pid: Option<u32>) -> bool {
+    method == "memory.note" && pid.is_some_and(|pid| gather(pid).chain.iter().any(|p| session_of(p).as_deref() == Some(crate::first_mate::policy::SESSION)))
 }

@@ -130,3 +130,29 @@ mod tests {
         assert!(!has_running_background_task(data.as_object().unwrap()));
     }
 }
+
+/// Add a trusted project snapshot while preserving each agent's hook shape.
+pub fn append_context(output: &str, memory: &str) -> String {
+    if memory.is_empty() { return output.into(); }
+    let Ok(mut v) = serde_json::from_str::<Value>(output) else { return output.into() };
+    let key = if v.get("hookSpecificOutput").is_some() { "/hookSpecificOutput/additionalContext" } else { "/additional_context" };
+    if let Some(context) = v.pointer_mut(key) {
+        *context = Value::String(format!("{}\n\n[seahelm project memory]\n{}", context.as_str().unwrap_or_default(), memory));
+    }
+    v.to_string()
+}
+
+#[cfg(test)]
+mod memory_tests {
+    use super::*;
+    #[test] fn trusted_memory_reaches_all_supported_hook_shapes() {
+        for source in ["claude-code", "codex", "cursor"] {
+            let original = session_start_output(source).unwrap();
+            let output = append_context(&original, "goal: ship phase 7");
+            let v: Value = serde_json::from_str(&output).unwrap();
+            let text = v.pointer("/hookSpecificOutput/additionalContext").or_else(|| v.get("additional_context")).unwrap().as_str().unwrap();
+            assert!(text.contains(GUIDANCE)); assert!(text.contains("goal: ship phase 7"));
+            assert_eq!(append_context(&original, ""), original);
+        }
+    }
+}

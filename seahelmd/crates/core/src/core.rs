@@ -344,6 +344,9 @@ impl Core {
             };
             self.note_performed(method, &params, r, by, gated.then_some("auto"), None, pane.as_deref());
         }
+        if gated && method == "worktree.create" && matches!(&reply, Reply::Value(Err(_))) {
+            if let Some(fm) = self.first_mate.get() { fm.send(first_mate::Msg::CreateFailed); }
+        }
         if gated {
             if let (Some(fm), Reply::Value(Ok(r))) = (self.first_mate.get(), &reply) {
                 fm.send(first_mate::Msg::DidRun { method: method.into(), result: r.clone() });
@@ -361,7 +364,13 @@ impl Core {
             "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "started_at": STARTED_AT.get().copied(),
                                      "cli": CLI_DIALECT})),
             "hook" | "suggest" => {
-                let stdout = hook_stdout(method, &p);
+                let stdout = hook_stdout(method, &p).map(|output| {
+                    let memory = str_param(&p, "seahelm_pane_id").and_then(|pane| self.resolve_pane(&pane)).and_then(|pane| self.pane_row(&pane))
+                        .and_then(|row| row["worktree_path"].as_str().map(first_mate::routing::main_repo))
+                        .or_else(|| str_param(&p,"cwd").map(|cwd| first_mate::routing::main_repo(&cwd)))
+                        .map(|repo| self.memory_store().context(&repo)).unwrap_or_default();
+                    hooks::suggest::append_context(&output, &memory)
+                });
                 // The prose the agent wrote since its last hook, read from its
                 // transcript without the lock, and put on the timeline before
                 // this hook's own rows: above the tool call it introduces.
@@ -543,6 +552,7 @@ impl Core {
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" => first_mate::task_sources::rpc(method, &p),
+            "memory.note" | "memory.show" | "memory.undo" | "memory.confirm" => first_mate::memory::rpc(&self, method, &p),
             "habits.list" => Ok(first_mate::learning::rpc(method, &p).unwrap_or_default()),
             // When the user is there, as the brief's timing reads it (read-only).
             "presence.state" => Ok(self.presence().to_json(now, crate::usage::local_offset(now))),
@@ -1290,6 +1300,12 @@ impl Core {
         out
     }
 
+    pub fn memory_store(&self) -> first_mate::memory::Store {
+        first_mate::memory::Store { dir: self.audit_path.parent().unwrap_or(std::path::Path::new(".")).join("memory") }
+    }
+
+    pub fn known_prs(&self) -> Vec<Value> { self.prs.routing_list() }
+
     pub fn raise_card(&self, r: Raise) -> Option<String> {
         let mut st = self.lock();
         let id = st.cards.raise(r, now());
@@ -1432,7 +1448,9 @@ impl Core {
     /// verdict is only worked out for those (it reads the process table).
     fn call_checked(self: Arc<Self>, method: &str, params: Value, pid: Option<u32>, verdict: impl FnOnce() -> crate::peer::Verdict) -> Reply {
         if crate::peer::guarded_call(method, &params) {
-            if let Err(e) = self.admit(&verdict(), pid, method, &params) {
+            let verdict = verdict();
+            let mate_note = crate::peer::first_mate_memory(method, pid);
+            if let Err(e) = if mate_note { Ok(()) } else { self.admit(&verdict, pid, method, &params) } {
                 return Reply::Value(Err(e));
             }
         }
@@ -1462,6 +1480,11 @@ impl Core {
                 if method.starts_with("task-source.") {
                     self.security(Text::new("Refused task source access from a pane or unidentified caller", "已拒绝窗格内进程或身份未知的调用方访问任务来源"), true);
                     return Err(RpcError::forbidden(first_mate::UserConfig::load().language.pick("Only the user may manage task sources", "只有你本人能管理任务来源")));
+                }
+                if method.starts_with("memory.") {
+                    let text = first_mate::lang::memory_refused(method);
+                    self.security(text.clone(), true);
+                    return Err(RpcError::forbidden(text.get(first_mate::UserConfig::load().language)));
                 }
                 if crate::peer::starts_inventory(method, p) {
                     self.security(
@@ -2218,6 +2241,27 @@ mod hook_stdout_tests {
     }
 
     #[test]
+    fn unregistered_session_start_uses_cwd_memory_and_empty_memory_has_no_header() {
+        let tmp=tempfile::tempdir().unwrap(); let repo=tmp.path().join("repo"); std::fs::create_dir(&repo).unwrap();
+        assert!(std::process::Command::new("git").arg("-C").arg(&repo).args(["init","-b","main"]).output().unwrap().status.success());
+        let core=Core::for_test(tmp.path());
+        let main=first_mate::routing::main_repo(repo.to_str().unwrap());
+        core.memory_store().note(&main,"goal: hook-only secret phrase","user").unwrap();
+        for source in ["claude-code","codex","cursor"] {
+            let p=json!({"hook_event_name":"SessionStart","seahelm_pane_id":"not-registered","seahelm_source":source,"cwd":repo});
+            let Reply::Value(Ok(reply))=core.clone().dispatch("hook",p,now()) else { panic!() };
+            let context=reply["stdout"].as_str().unwrap();
+            assert!(context.contains("hook-only secret phrase")); assert_eq!(context.matches("[seahelm project memory]").count(),1);
+        }
+        let empty=tmp.path().join("empty"); std::fs::create_dir(&empty).unwrap();
+        let Reply::Value(Ok(reply))=core.clone().dispatch("hook",json!({"hook_event_name":"SessionStart","seahelm_pane_id":"also-unregistered","seahelm_source":"codex","cwd":empty}),now()) else {panic!()};
+        assert!(!reply["stdout"].as_str().unwrap().contains("[seahelm project memory]"));
+        let pointer=core.memory_store().pointer(&main);
+        assert!(!pointer.contains("hook-only secret phrase")); assert!(pointer.contains("SessionStart"));
+        assert!(core.memory_store().pointer("/nonexistent/empty").is_empty());
+    }
+
+    #[test]
     fn nothing_is_printed_otherwise() {
         // Outside seahelm: the hooks are global, the guidance is not.
         assert_eq!(hook_stdout("hook", &json!({"hook_event_name": "SessionStart", "seahelm_source": "claude-code"})), None);
@@ -2261,12 +2305,60 @@ mod peer_gate_tests {
         std::fs::read_to_string(dir.join("audit.jsonl")).unwrap_or_default()
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn real_pid_first_mate_can_note_but_cannot_undo_or_confirm() {
+        use std::io::{Write, BufRead};
+        use std::process::{Command, Stdio};
+        struct ChildGuard(std::process::Child);
+        impl Drop for ChildGuard { fn drop(&mut self) { let _=self.0.kill(); let _=self.0.wait(); } }
+        let tmp=tempfile::tempdir().unwrap();
+        // This is a blocking test stub, not a seahelmd/core process or live session.
+        let exe=tmp.path().join("seahelmd");
+        let mut cc=Command::new("cc").args(["-x","c","-o"]).arg(&exe).arg("-").stdin(Stdio::piped()).spawn().unwrap();
+        cc.stdin.take().unwrap().write_all(b"#include <stdio.h>\nint main(void){puts(\"ready\");fflush(stdout);getchar();return 0;}\n").unwrap();
+        assert!(cc.wait().unwrap().success());
+        let mut child=ChildGuard(Command::new(&exe).args(["__serve",fm_policy::SESSION,"--"]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap());
+        let mut ready=String::new(); std::io::BufReader::new(child.0.stdout.take().unwrap()).read_line(&mut ready).unwrap(); assert_eq!(ready.trim(),"ready");
+        let pid=child.0.id();
+        assert!(crate::peer::first_mate_memory("memory.note",Some(pid)));
+        assert!(!crate::peer::first_mate_memory("memory.undo",Some(pid)));
+        assert!(!crate::peer::first_mate_memory("memory.confirm",Some(pid)));
+        let core=Core::for_test(tmp.path());
+        let repo=tmp.path().join("repo");
+        for text in ["goal: old","don'ts: never deploy"] {
+            let p=json!({"repo":repo,"text":text,"_meta":{"caller":fm_policy::SESSION}});
+            assert!(value(core.clone().call_checked("memory.note",p,Some(pid),agent)).is_ok());
+        }
+        let err=value(core.clone().call_checked("memory.undo",json!({"repo":repo,"_meta":{"caller":fm_policy::SESSION}}),Some(pid),agent)).unwrap_err();
+        assert_eq!(err.code,rpc::FORBIDDEN);
+        assert!(core.memory_store().context(repo.to_str().unwrap()).contains("never deploy"));
+        // An outside terminal's request still restores the previous revision.
+        assert!(value(core.clone().call_checked("memory.undo",json!({"repo":repo}),Some(std::process::id()),|| Verdict::Outside)).is_ok());
+        assert!(core.memory_store().context(repo.to_str().unwrap()).contains("old"));
+        assert!(!core.memory_store().context(repo.to_str().unwrap()).contains("never deploy"));
+        let err=value(core.clone().call_checked("memory.confirm",json!({"repo":repo,"digest":"forged","_meta":{"caller":fm_policy::SESSION}}),Some(pid),agent)).unwrap_err();
+        assert_eq!(err.code,rpc::FORBIDDEN); assert!(err.message.contains("undo and confirmation require the user") || err.message.contains("撤销及确认外部编辑仅限"));
+        let err=value(core.clone().call_checked("memory.note",json!({"repo":repo,"text":"evil","_meta":{"caller":fm_policy::SESSION}}),Some(std::process::id()),agent)).unwrap_err();
+        assert_eq!(err.code,rpc::FORBIDDEN); assert!(!err.message.contains("answers cards"));
+    }
+
     #[test]
     fn task_source_commands_refuse_agents_and_unidentified_peers() {
         let tmp=tempfile::tempdir().unwrap();let core=Core::for_test(tmp.path());
         for method in ["task-source.add","task-source.list","task-source.remove","task-source.test"] {
             assert_eq!(value(core.clone().call_checked(method,json!({}),Some(1),agent)).unwrap_err().code,-32003);
             assert_eq!(value(core.clone().call_checked(method,json!({}),None,||Verdict::Unknown("unreadable".into()))).unwrap_err().code,-32003);
+        }
+    }
+
+    #[test]
+    fn memory_writes_and_confirmations_use_the_kernel_peer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        for method in ["memory.note", "memory.undo", "memory.confirm"] {
+            let e = value(core.clone().call_checked(method, json!({"repo":"/nonexistent", "_meta":{"caller":fm_policy::SESSION}}), None, agent)).unwrap_err();
+            assert_eq!(e.code, rpc::FORBIDDEN, "{method}");
         }
     }
 

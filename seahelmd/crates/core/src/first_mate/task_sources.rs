@@ -73,7 +73,7 @@ impl Task {
         )
     }
     fn params(&self) -> Value {
-        // Phase 7 hook: append only core-confirmed project memory here when available.
+        // The core action adds a memory pointer; SessionStart supplies its trusted content.
         // Choose a delimiter that none of the external fields can close.
         let data =
             json!({"key":self.key,"title":self.title,"url":self.url,"body":self.body}).to_string();
