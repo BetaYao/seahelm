@@ -891,7 +891,10 @@ impl FirstMate {
         let picked = tasks
             .iter()
             .enumerate()
-            .find(|(i, t)| Some(format!("{}. {}", i + 1, t.label()).as_str()) == option)
+            .find(|(i, t)| {
+                option == Some(format!("choice:{i}").as_str())
+                    || Some(format!("{}. {}", i + 1, t.label()).as_str()) == option
+            })
             .map(|(_, t)| t.clone());
         if let Some(t) = picked {
             let params = t.params();
@@ -1327,6 +1330,33 @@ mod tests {
         loaded.accept(vec![t.clone()], &[]);
         t.assigned = true;
         assert_eq!(loaded.accept(vec![t], &[]).len(), 1);
+    }
+    #[test]
+    fn phase_six_canonical_task_choice_remains_a_pick() {
+        for lang in [super::super::lang::Lang::En, super::super::lang::Lang::Zh] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut fm = fixture(dir.path());
+            fm.config.language = lang;
+            let now = seahelm_core_types::now();
+            fm.core
+                .presence_signal(now, Some(super::super::presence::Channel::Desktop));
+            fm.task_brief(now);
+            let id = fm.task_cards.keys().next().unwrap().clone();
+            assert_eq!(fm.card_options[&id][0].key, "choice:0");
+            let label = fm.card_options[&id][0].label.clone();
+            // A paused pick writes a refusal and retains the task; a pass would complete it.
+            fm.config.paused = true;
+            fm.answered(&id, Some(&label), None, now);
+            assert_eq!(fm.tasks.ranked().len(), 1);
+            assert!(fm.tasks.offered.is_empty());
+            assert!(
+                notes(&fm).contains(if lang == super::super::lang::Lang::En {
+                    "Task not started"
+                } else {
+                    "任务未开始"
+                })
+            );
+        }
     }
     #[test]
     fn expiration_is_not_a_user_pass() {
