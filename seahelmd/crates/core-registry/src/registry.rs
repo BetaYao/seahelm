@@ -341,6 +341,21 @@ impl Registry {
     /// Deliberately not `unregister` + `register`: that drops every timer and
     /// rebuilds the entry at `Unknown`, so a pane that merely moved came back
     /// looking freshly opened.
+    /// A pane's branch and project as its client now reports them, in the
+    /// worktree it already has (a `git switch` there). False when nothing
+    /// changed or the pane is unknown.
+    pub fn set_branch(&mut self, pane: &str, branch: &str, project: &str) -> bool {
+        let Some(info) = self.panes.get_mut(pane) else { return false };
+        if info.branch == branch && (project.is_empty() || info.project == project) {
+            return false;
+        }
+        info.branch = branch.to_string();
+        if !project.is_empty() {
+            info.project = project.to_string();
+        }
+        true
+    }
+
     pub fn rehome(&mut self, pane: &str, worktree: &str, branch: &str, project: &str) -> bool {
         let Some(old) = self.panes.get(pane) else {
             return false;

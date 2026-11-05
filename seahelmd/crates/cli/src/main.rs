@@ -1,9 +1,20 @@
-//! `seahelm`: the macOS app's command line, for agents and people inside a
-//! pane (the `seahelm` skill). It speaks newline-delimited JSON-RPC to the
-//! app's control socket (`$SEAHELM_SOCKET_PATH`, else
-//! `~/.config/seahelm/seahelm.sock`). The app installs it as
-//! `~/.local/bin/seahelm` (`SeahelmCliInstaller`); it replaces the Python
-//! script that used to be written there.
+//! `seahelm`: the command line for agents and people inside a pane (the
+//! `seahelm` skill). It speaks newline-delimited JSON-RPC to two sockets,
+//! by the split in docs/target-architecture.html ("two kinds of control"):
+//!
+//! - **seahelm-core** (`$SEAHELM_CORE_SOCKET`, else
+//!   `~/.config/seahelm/core.sock`, a named pipe on Windows) answers what
+//!   works with every client closed: listing, reading, typing into and
+//!   waiting on panes, and the event stream.
+//! - **the macOS app** (`$SEAHELM_SOCKET_PATH`, else
+//!   `~/.config/seahelm/seahelm.sock`) answers what only the side drawing
+//!   the panes can do: split, focus, zoom, move, fork, layouts, `exec`.
+//!
+//! A core verb goes to the app when the core cannot be reached, or does not
+//! know the pane yet (one split a moment ago); worktree create/delete and
+//! close go to the app first and to the core without one. A call that
+//! reached either side is never sent again. The app installs this as
+//! `~/.local/bin/seahelm` (`SeahelmCliInstaller`).
 //!
 //! Every call carries `_meta.caller` (`$SEAHELM_PANE_ID`) and, after a global
 //! `--note "…"`, `_meta.note`: the pane acted on shows who is acting. Errors
@@ -39,7 +50,7 @@ impl Cli {
     fn run(&self, group: &str, a: &[String]) {
         match group {
             "ping" => {
-                self.call("ping", json!({}), 40.0, &[]);
+                self.call("core.ping", json!({}), 40.0, &[]);
                 println!("pong");
             }
             "memory" => pretty(&self.call("app.memory", json!({}), 40.0, &[])),
@@ -259,8 +270,14 @@ impl Cli {
         if !types.is_empty() {
             params.insert("types".into(), json!(types));
         }
-        let stream = connect(None).unwrap_or_else(|e| die(&format!("socket error: {e}"), 2));
-        send(&stream, "events.subscribe", Value::Object(params)).unwrap_or_else(|e| die(&format!("socket error: {e}"), 2));
+        // The core's events; the app relays the same ones, seq and all.
+        let (mut stream, side) = [Side::Core, Side::App]
+            .into_iter()
+            .filter(|side| *side == Side::App || core_speaks_cli())
+            .find_map(|side| connect(side, None).ok().map(|s| (s, side)))
+            .unwrap_or_else(|| die("socket error: neither seahelm-core nor the app answers (is seahelm running?)", 2));
+        send(&mut stream, side.method("events.subscribe"), Value::Object(params))
+            .unwrap_or_else(|e| die(&format!("socket error: {e}"), 2));
         use std::io::{BufRead, BufReader, Write};
         let mut out = std::io::stdout();
         for line in BufReader::new(stream).lines() {
@@ -274,7 +291,9 @@ impl Cli {
     }
 
     /// One request, one reply line: the `result`, or exit on an `error`
-    /// (with the code `exit_codes` maps its RPC code to, else 2).
+    /// (with the code `exit_codes` maps its RPC code to, else 2). Sent to
+    /// each side `route` names in turn while one cannot be reached or does
+    /// not know the pane; never again once a side took it.
     fn call(&self, method: &str, mut params: Value, timeout: f64, exit_codes: &[(i64, i32)]) -> Value {
         if let Ok(me) = std::env::var("SEAHELM_PANE_ID") {
             if !me.is_empty() {
@@ -285,63 +304,173 @@ impl Cli {
                 params["_meta"] = meta;
             }
         }
-        let reply = request(method, params, timeout)
-            .unwrap_or_else(|e| die(&format!("socket error: {e} (is seahelm running?)"), 2));
-        let obj: Value = serde_json::from_str(&reply).unwrap_or_else(|_| die("bad response", 2));
-        if let Some(err) = obj.get("error") {
-            let code = err["code"].as_i64().unwrap_or(0);
-            let exit_code = exit_codes.iter().find(|(c, _)| *c == code).map(|(_, e)| *e).unwrap_or(2);
-            die(err["message"].as_str().unwrap_or("error"), exit_code);
+        let sides = route(method);
+        let mut unreachable = Vec::new();
+        // A core from before this CLI (still running after an update) does
+        // not speak its dialect: leave it out.
+        let too_old = sides.contains(&Side::App) && sides.contains(&Side::Core) && !core_speaks_cli();
+        let mut not_found: Option<Value> = None;
+        for (i, side) in sides.iter().enumerate() {
+            if *side == Side::Core && too_old {
+                unreachable.push("seahelm-core: older than this CLI".to_string());
+                continue;
+            }
+            let line = match request(*side, side.method(method), &params, timeout) {
+                Ok(line) => line,
+                Err(Sent::Unreachable(e)) => {
+                    unreachable.push(format!("{}: {e}", side.name()));
+                    continue;
+                }
+                Err(Sent::Failed(e)) => die(&format!("socket error: {e} ({})", side.name()), 2),
+            };
+            let obj: Value = serde_json::from_str(&line).unwrap_or_else(|_| die("bad response", 2));
+            if let Some(err) = obj.get("error") {
+                let code = err["code"].as_i64().unwrap_or(0);
+                if code == PANE_NOT_FOUND && i + 1 < sides.len() {
+                    not_found.get_or_insert_with(|| err.clone());
+                    continue;
+                }
+                let exit_code = exit_codes.iter().find(|(c, _)| *c == code).map(|(_, e)| *e).unwrap_or(2);
+                die(err["message"].as_str().unwrap_or("error"), exit_code);
+            }
+            return obj.get("result").cloned().unwrap_or_else(|| json!({}));
         }
-        obj.get("result").cloned().unwrap_or_else(|| json!({}))
+        if let Some(err) = not_found {
+            die(err["message"].as_str().unwrap_or("pane not found"), 2);
+        }
+        if sides == [Side::App] {
+            die(&format!("{method} needs the Seahelm app, which is not answering ({})", unreachable.join("; ")), 2);
+        }
+        die(&format!("socket error: {} (is seahelm running?)", unreachable.join("; ")), 2)
     }
 }
 
-// MARK: - the socket
+/// What this CLI needs of the core (`core.ping`'s `cli`).
+const CLI_DIALECT: u64 = 1;
 
-#[cfg(unix)]
-fn socket_path() -> std::path::PathBuf {
-    match std::env::var("SEAHELM_SOCKET_PATH") {
-        Ok(p) if !p.is_empty() => p.into(),
-        _ => std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config/seahelm/seahelm.sock"),
+/// Whether the core answers and speaks this CLI's dialect. Unreachable is
+/// "no": the caller then finds out about the app on its own.
+fn core_speaks_cli() -> bool {
+    let Ok(line) = request(Side::Core, "core.ping", &json!({}), 5.0) else { return false };
+    serde_json::from_str::<Value>(&line)
+        .ok()
+        .and_then(|v| v.pointer("/result/cli").and_then(Value::as_u64))
+        .is_some_and(|d| d >= CLI_DIALECT)
+}
+
+/// The app's (and the core's) "no such pane": the core has not heard of a
+/// pane the app split a moment ago, so the app is asked next.
+const PANE_NOT_FOUND: i64 = -32004;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Side {
+    Core,
+    App,
+}
+
+impl Side {
+    fn name(self) -> &'static str {
+        match self {
+            Side::Core => "seahelm-core",
+            Side::App => "the app",
+        }
+    }
+
+    /// The method's name on this side: the only one that differs is ping.
+    fn method(self, method: &str) -> &str {
+        match (self, method) {
+            (Side::App, "core.ping") => "ping",
+            _ => method,
+        }
     }
 }
 
-#[cfg(unix)]
-type Stream = std::os::unix::net::UnixStream;
+/// Who answers a method, in the order asked. Business verbs are the
+/// core's; worktrees and closing a pane are the app's while it runs (it
+/// asks before losing work and tidies its layout); the rest is the
+/// interface's, which only the app draws.
+fn route(method: &str) -> &'static [Side] {
+    match method {
+        "core.ping" | "session.snapshot" | "pane.list" | "pane.read" | "pane.run" | "pane.send_text"
+        | "pane.send_keys" | "pane.explain" | "wait.output" | "wait.agent_status" | "events.subscribe" => {
+            &[Side::Core, Side::App]
+        }
+        "worktree.create" | "worktree.delete" | "pane.close" => &[Side::App, Side::Core],
+        _ => &[Side::App],
+    }
+}
+
+// MARK: - the sockets
+
+fn home() -> std::path::PathBuf {
+    std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(Into::into).unwrap_or_default()
+}
+
+fn env_path(name: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os(name).filter(|p| !p.is_empty()).map(Into::into)
+}
+
+fn socket_path(side: Side) -> std::path::PathBuf {
+    match side {
+        Side::App => env_path("SEAHELM_SOCKET_PATH").unwrap_or_else(|| home().join(".config/seahelm/seahelm.sock")),
+        Side::Core => env_path("SEAHELM_CORE_SOCKET").unwrap_or_else(|| {
+            if cfg!(windows) {
+                let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| "default".into());
+                format!(r"\\.\pipe\seahelm-core-{user}").into()
+            } else {
+                home().join(".config/seahelm/core.sock")
+            }
+        }),
+    }
+}
+
+trait Conn: std::io::Read + std::io::Write {}
+impl<T: std::io::Read + std::io::Write> Conn for T {}
 
 #[cfg(unix)]
-fn connect(timeout: Option<f64>) -> std::io::Result<Stream> {
-    let s = Stream::connect(socket_path())?;
+fn connect(side: Side, timeout: Option<f64>) -> std::io::Result<Box<dyn Conn>> {
+    let s = std::os::unix::net::UnixStream::connect(socket_path(side))?;
     if let Some(t) = timeout {
         let d = Some(std::time::Duration::from_secs_f64(t));
         s.set_read_timeout(d)?;
         s.set_write_timeout(d)?;
     }
-    Ok(s)
+    Ok(Box::new(s))
 }
 
+/// The core's named pipe opens like a file. The app is macOS only.
 #[cfg(not(unix))]
-type Stream = std::fs::File;
-
-#[cfg(not(unix))]
-fn connect(_timeout: Option<f64>) -> std::io::Result<Stream> {
-    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "the macOS app's control socket is Unix-only"))
+fn connect(side: Side, _timeout: Option<f64>) -> std::io::Result<Box<dyn Conn>> {
+    if side == Side::App {
+        return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "the macOS app's control socket is Unix-only"));
+    }
+    Ok(Box::new(std::fs::OpenOptions::new().read(true).write(true).open(socket_path(side))?))
 }
 
-fn send(mut stream: &Stream, method: &str, params: Value) -> std::io::Result<()> {
-    use std::io::Write;
+fn send(stream: &mut Box<dyn Conn>, method: &str, params: Value) -> std::io::Result<()> {
     let mut line = serde_json::to_vec(&json!({"id": "cli", "method": method, "params": params}))?;
     line.push(b'\n');
-    stream.write_all(&line)
+    stream.write_all(&line)?;
+    stream.flush()
 }
 
-fn request(method: &str, params: Value, timeout: f64) -> std::io::Result<String> {
+/// How far a request got.
+enum Sent {
+    /// Nobody to send it to: safe to ask the other side.
+    Unreachable(std::io::Error),
+    /// Sent, then no reply: it may have run, so it is not sent again.
+    Failed(std::io::Error),
+}
+
+fn request(side: Side, method: &str, params: &Value, timeout: f64) -> Result<String, Sent> {
     use std::io::{BufRead, BufReader};
-    let stream = connect(Some(timeout))?;
-    send(&stream, method, params)?;
+    let mut stream = connect(side, Some(timeout)).map_err(Sent::Unreachable)?;
+    send(&mut stream, method, params.clone()).map_err(Sent::Failed)?;
     let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line)?;
+    BufReader::new(stream).read_line(&mut line).map_err(Sent::Failed)?;
+    if line.trim().is_empty() {
+        return Err(Sent::Failed(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "no reply")));
+    }
     Ok(line)
 }
 
@@ -430,7 +559,28 @@ mod tests {
         assert_eq!(opt(&a, "--missing"), None);
     }
 
-    // The CLI drives the macOS app; its paths are Unix paths.
+    #[test]
+    fn business_verbs_go_to_the_core_first() {
+        for m in ["pane.list", "pane.read", "pane.run", "pane.send_keys", "wait.output", "wait.agent_status", "events.subscribe"] {
+            assert_eq!(route(m), [Side::Core, Side::App], "{m}");
+        }
+        for m in ["worktree.create", "worktree.delete", "pane.close"] {
+            assert_eq!(route(m), [Side::App, Side::Core], "{m}");
+        }
+        // Only the side drawing the panes can do these.
+        for m in ["pane.split", "pane.focus", "pane.zoom", "pane.move", "pane.fork", "pane.exec", "layout.apply"] {
+            assert_eq!(route(m), [Side::App], "{m}");
+        }
+    }
+
+    #[test]
+    fn ping_is_named_per_side() {
+        assert_eq!(Side::Core.method("core.ping"), "core.ping");
+        assert_eq!(Side::App.method("core.ping"), "ping");
+        assert_eq!(Side::App.method("pane.read"), "pane.read");
+    }
+
+    // The paths below are Unix paths.
     #[cfg(unix)]
     #[test]
     fn paths_are_made_absolute() {

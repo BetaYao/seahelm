@@ -118,6 +118,17 @@ struct PaneScan {
     program_seq: u64,
 }
 
+/// What `core.ping` says about the `seahelm` CLI's verbs: bumped when the
+/// CLI starts to rely on something new here.
+pub const CLI_DIALECT: u64 = 1;
+
+/// Calls that act on the pane `pane_id` names, and so announce their caller
+/// (`ControlRouter.presenceMethods`).
+const PRESENCE_METHODS: &[&str] = &[
+    "pane.read", "pane.send_text", "pane.run", "pane.send_keys",
+    "pane.wait_for_output", "wait.output", "pane.wait_agent_status", "wait.agent_status",
+];
+
 impl Core {
     pub fn start() -> Result<Arc<Self>> {
         let (manifests, errors) = match ManifestStore::default_user_dir() {
@@ -272,6 +283,7 @@ impl Core {
         } else if method == "autopilot.propose" {
             return Reply::Value(Err(first_mate::refused("only First Mate proposes")));
         }
+        self.note_presence(method, &p);
         let reply = self.clone().dispatch(method, p, now);
         if gated {
             if let (Some(fm), Reply::Value(Ok(r))) = (self.first_mate.get(), &reply) {
@@ -283,7 +295,12 @@ impl Core {
 
     fn dispatch(self: Arc<Self>, method: &str, p: Value, now: Timestamp) -> Reply {
         let result: RpcResult = match method {
-            "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "started_at": STARTED_AT.get().copied()})),
+            // `cli`: this core answers the `seahelm` CLI's verbs in the app's
+            // dialect (`pane.read` sources, `KeyChord` keys, `wait.output`,
+            // `-32004`, `pane.presence`). A CLI newer than a core still running
+            // from before an update sees no `cli` and asks the app instead.
+            "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "started_at": STARTED_AT.get().copied(),
+                                     "cli": CLI_DIALECT})),
             "hook" | "suggest" => {
                 let stdout = hook_stdout(method, &p);
                 // The prose the agent wrote since its last hook, read from its
@@ -437,6 +454,7 @@ impl Core {
                 Ok(json!({"forgot": forgot}))
             }
             "pane.wait_agent_status" | "wait.agent_status" => self.wait_status(&p),
+            "pane.wait_for_output" | "wait.output" => crate::actions::wait_output(&self, &p),
             "usage.summary" => Ok(crate::usage::summary(now)),
             "cards.list" => Ok(json!({"cards": self.lock().cards.to_json()})),
             "pane.read" | "pane.run" | "pane.send_text" | "pane.send_keys" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
@@ -636,25 +654,46 @@ impl Core {
 
     /// `pane.wait_agent_status {pane_id, status, timeout}`: wait until the
     /// pane reaches the status (`done` means idle or exited).
+    /// A call from one pane acting on another (`_meta.caller`, `pane_id`)
+    /// is announced as `pane.presence {caller, pane_id, note}` before it
+    /// runs, so a client can show who is at work on the pane — the macOS
+    /// app's presence pill, which it showed for calls on its own socket —
+    /// for as long as a wait waits.
+    fn note_presence(&self, method: &str, p: &Value) {
+        if !PRESENCE_METHODS.contains(&method) {
+            return;
+        }
+        let (Some(caller), Some(target)) = (fm_policy::caller(p), str_param(p, "pane_id")) else { return };
+        let note = p.pointer("/_meta/note").and_then(Value::as_str).unwrap_or_default();
+        self.lock().registry.publish(json!({"type": "pane.presence", "caller": caller, "pane_id": target, "note": note}));
+        self.changed.notify_all();
+    }
+
     fn wait_status(&self, p: &Value) -> RpcResult {
         let hint = str_param(p, "pane_id").ok_or_else(|| RpcError::invalid_params("pane_id required"))?;
         let want = str_param(p, "status").unwrap_or_else(|| "done".into()).to_lowercase();
-        let timeout = p.get("timeout").and_then(Value::as_f64).unwrap_or(600.0);
-        let deadline = Instant::now() + Duration::from_secs_f64(timeout.max(0.0));
+        // `timeout_ms` as the app and the `seahelm` CLI send it; First Mate's
+        // CLI sends `timeout` in seconds.
+        let timeout = match p.get("timeout").and_then(Value::as_f64) {
+            Some(secs) if p.get("timeout_ms").is_none() => Duration::from_secs_f64(secs.max(0.0)),
+            _ if p.get("timeout_ms").is_some() => crate::actions::wait_timeout(p),
+            _ => Duration::from_secs(600),
+        };
+        let deadline = Instant::now() + timeout;
         let matches = |s: AgentStatus| match want.as_str() {
             "done" => matches!(s, AgentStatus::Idle | AgentStatus::Exited),
             w => s.as_str().eq_ignore_ascii_case(w),
         };
         let mut st = self.lock();
         loop {
-            let id = st.registry.resolve(Some(&hint), "").ok_or_else(|| RpcError::invalid_params("unknown pane"))?;
+            let id = st.registry.resolve(Some(&hint), "").ok_or_else(|| RpcError::pane_not_found(&hint))?;
             let status = st.registry.pane(&id).map(|p| p.status).unwrap_or_default();
             if matches(status) {
                 return Ok(json!({"matched": true, "status": status.as_str()}));
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return Ok(json!({"matched": false, "status": status.as_str()}));
+                return Ok(json!({"matched": false, "timed_out": true, "status": status.as_str()}));
             }
             st = self.changed.wait_timeout(st, left.min(Duration::from_millis(500))).unwrap_or_else(|e| e.into_inner()).0;
         }
@@ -1121,7 +1160,11 @@ impl State {
                 self.registry.set_alias(&key, str_param(p, "pane_id"));
             }
             match self.registry.pane(&key).map(|i| i.worktree_path.clone()) {
-                Some(old) if old == worktree => {}
+                Some(old) if old == worktree => {
+                    if !branch.is_empty() {
+                        self.registry.set_branch(&key, &branch, &project);
+                    }
+                }
                 Some(_) => {
                     self.registry.rehome(&key, &worktree, &branch, &project);
                 }

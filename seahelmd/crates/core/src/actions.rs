@@ -34,7 +34,7 @@ fn pane(core: &Core, p: &Value) -> Result<String, RpcError> {
     if seahelmd::client::connect(&hint).is_ok() {
         return Ok(hint);
     }
-    Err(RpcError::invalid_params(format!("no pane {hint}")))
+    Err(RpcError::pane_not_found(&hint))
 }
 
 fn send(session: &str, bytes: &[u8]) -> Result<(), RpcError> {
@@ -43,16 +43,88 @@ fn send(session: &str, bytes: &[u8]) -> Result<(), RpcError> {
         .map_err(|e| RpcError::internal(format!("{session}: {e}")))
 }
 
+/// `source: "visible"` (the app's default, and what `seahelm pane read`
+/// sends) is the screen as it stands, from seahelmd's snapshot, as the app
+/// reads its surface; `"recent"` / `"history"` the scrollback's tail. With
+/// no `source` (First Mate's calls) the scrollback's last 200 lines.
 pub fn pane_read(core: &Core, p: &Value) -> RpcResult {
     let id = pane(core, p)?;
-    let lines = p.get("lines").and_then(Value::as_u64).unwrap_or(200) as usize;
-    let text = match seahelmd::client::request(&id, &Msg::History) {
-        Ok(Msg::Text(t)) => t,
-        Ok(_) => String::new(),
-        Err(e) => return Err(RpcError::internal(format!("{id}: {e}"))),
+    let source = s(p, "source");
+    let default_lines = if source.is_empty() { 200 } else { 100 };
+    let lines = p.get("lines").and_then(Value::as_u64).unwrap_or(default_lines) as usize;
+    let text = match source.as_str() {
+        "" | "recent" | "history" | "scrollback" => history(&id)?,
+        _ => viewport(&id)?,
     };
+    Ok(json!({"pane_id": id, "text": tail(&text, lines)}))
+}
+
+/// The last `lines` lines (all of them for 0), trailing blank rows dropped.
+fn tail(text: &str, lines: usize) -> String {
     let all: Vec<&str> = text.trim_end().lines().collect();
-    Ok(json!({"pane_id": id, "text": all[all.len().saturating_sub(lines)..].join("\n")}))
+    let from = if lines == 0 { 0 } else { all.len().saturating_sub(lines) };
+    all[from..].join("\n")
+}
+
+fn history(id: &str) -> Result<String, RpcError> {
+    match seahelmd::client::request(id, &Msg::History) {
+        Ok(Msg::Text(t)) => Ok(t),
+        Ok(_) => Ok(String::new()),
+        Err(e) => Err(RpcError::internal(format!("{id}: {e}"))),
+    }
+}
+
+/// The screen as seahelmd holds it (`snapshot`'s `viewport`).
+fn viewport(id: &str) -> Result<String, RpcError> {
+    match seahelmd::client::request(id, &Msg::Snapshot) {
+        Ok(Msg::Text(t)) => Ok(serde_json::from_str::<Value>(&t)
+            .ok()
+            .and_then(|v| v.get("viewport").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_default()),
+        Ok(_) => Ok(String::new()),
+        Err(e) => Err(RpcError::internal(format!("{id}: {e}"))),
+    }
+}
+
+const WAIT_POLL: Duration = Duration::from_millis(150);
+const WAIT_DEFAULT_MS: u64 = 30_000;
+const WAIT_MAX_MS: u64 = 600_000;
+
+/// `timeout_ms` as the app reads it: 30 s by default, at most 10 minutes.
+pub fn wait_timeout(p: &Value) -> Duration {
+    let ms = p.get("timeout_ms").and_then(Value::as_u64).unwrap_or(WAIT_DEFAULT_MS).min(WAIT_MAX_MS);
+    Duration::from_millis(ms)
+}
+
+/// `wait.output {pane_id, match, regex?, timeout_ms?}`: until the screen
+/// shows `match` (a substring, or a regex with `regex: true`), polled as
+/// the app polls it. `{matched: true}`, or `{matched: false, timed_out: true}`.
+pub fn wait_output(core: &Core, p: &Value) -> RpcResult {
+    let id = pane(core, p)?;
+    let want = p.get("match").and_then(Value::as_str).unwrap_or_default().to_string();
+    if want.is_empty() {
+        return Err(RpcError::invalid_params("match required"));
+    }
+    let re = if p.get("regex").and_then(Value::as_bool) == Some(true) {
+        Some(regex::Regex::new(&want).map_err(|_| RpcError::invalid_params(format!("invalid regex: {want}")))?)
+    } else {
+        None
+    };
+    let deadline = std::time::Instant::now() + wait_timeout(p);
+    loop {
+        let screen = viewport(&id)?;
+        let hit = match &re {
+            Some(re) => re.is_match(&screen),
+            None => screen.contains(&want),
+        };
+        if hit {
+            return Ok(json!({"matched": true}));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(json!({"matched": false, "timed_out": true}));
+        }
+        std::thread::sleep(WAIT_POLL);
+    }
 }
 
 /// Type and submit: the Return as a write of its own, a beat later.
@@ -95,47 +167,19 @@ pub fn pane_send_keys(core: &Core, p: &Value) -> RpcResult {
     if keys.is_empty() {
         return Err(RpcError::invalid_params("keys required"));
     }
-    for (i, k) in keys.iter().enumerate() {
-        let bytes = key_bytes(k).ok_or_else(|| RpcError::invalid_params(format!("unknown key {k}")))?;
+    // Every key named right before any is pressed: half a sequence is worse
+    // than none.
+    let all = keys
+        .iter()
+        .map(|k| crate::keys::bytes(k).ok_or_else(|| RpcError::invalid_params(format!("unknown key {k}"))))
+        .collect::<Result<Vec<_>, _>>()?;
+    for (i, bytes) in all.iter().enumerate() {
         if bytes == "\r" && i > 0 {
             std::thread::sleep(SUBMIT_DELAY);
         }
         send(&id, bytes.as_bytes())?;
     }
     Ok(json!({"sent": true, "pane_id": id}))
-}
-
-/// A named key's bytes for a pane with no surface (`ControlKeys`): the
-/// common ones, ctrl+letter, and a lone character as itself.
-fn key_bytes(name: &str) -> Option<String> {
-    let k = name.to_lowercase();
-    let named = match k.as_str() {
-        "enter" | "return" => "\r",
-        "escape" | "esc" => "\x1b",
-        "tab" => "\t",
-        "backspace" => "\x7f",
-        "space" => " ",
-        "up" => "\x1b[A",
-        "down" => "\x1b[B",
-        "right" => "\x1b[C",
-        "left" => "\x1b[D",
-        "home" => "\x1b[H",
-        "end" => "\x1b[F",
-        "pageup" => "\x1b[5~",
-        "pagedown" => "\x1b[6~",
-        "delete" => "\x1b[3~",
-        "shift+tab" | "backtab" => "\x1b[Z",
-        _ => "",
-    };
-    if !named.is_empty() {
-        return Some(named.into());
-    }
-    if let Some(c) = k.strip_prefix("ctrl+").filter(|c| c.len() == 1).and_then(|c| c.chars().next()) {
-        if c.is_ascii_lowercase() {
-            return Some(((c as u8 - b'a' + 1) as char).to_string());
-        }
-    }
-    (name.chars().count() == 1).then(|| name.to_string())
 }
 
 /// The session the GPUI client would give a worktree's first pane
@@ -375,11 +419,17 @@ mod tests {
     }
 
     #[test]
-    fn keys() {
-        assert_eq!(key_bytes("Enter").as_deref(), Some("\r"));
-        assert_eq!(key_bytes("ctrl+c").as_deref(), Some("\x03"));
-        assert_eq!(key_bytes("2").as_deref(), Some("2"));
-        assert_eq!(key_bytes("hyper+q"), None);
+    fn tails_count_lines_from_the_end() {
+        assert_eq!(tail("a\nb\nc\n\n", 2), "b\nc");
+        assert_eq!(tail("a\nb", 0), "a\nb");
+        assert_eq!(tail("a\nb", 9), "a\nb");
+    }
+
+    #[test]
+    fn wait_timeouts_read_as_the_apps() {
+        assert_eq!(wait_timeout(&json!({})), Duration::from_secs(30));
+        assert_eq!(wait_timeout(&json!({"timeout_ms": 1500})), Duration::from_millis(1500));
+        assert_eq!(wait_timeout(&json!({"timeout_ms": 9_000_000})), Duration::from_secs(600));
     }
 }
 
