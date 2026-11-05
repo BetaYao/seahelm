@@ -64,8 +64,11 @@ struct State {
     /// the session (the program `seahelmd list` reports), and the last 7501
     /// change counter we ingested.
     panes: HashMap<String, PaneScan>,
-    /// Panes registered by `pane.sync` (shadow mode), so a sync removes only
-    /// what it added.
+    /// Panes the app's last `pane.sync` listed, so the next one unregisters
+    /// those it no longer lists. Every listed pane is claimed, however it was
+    /// first registered: a pane a hook announced before the app synced it (a
+    /// fork's Claude starts and reports at once) used to be left out, and
+    /// stayed in `pane.list` for good after the app closed it.
     synced: HashSet<String>,
     /// Worktrees a client shows, and whether that client is frontmost:
     /// "on screen" for unseen completion.
@@ -1147,7 +1150,8 @@ impl State {
     }
 
     /// Mirror a client's pane list (the app's `pane.list` entries): register
-    /// what is new, re-file what moved, drop what this sync added and is gone.
+    /// what is new, re-file what moved, drop what the last sync listed and
+    /// this one does not (`claim_synced`).
     fn sync(&mut self, panes: &[Value]) -> usize {
         let mut seen = HashSet::new();
         for p in panes {
@@ -1178,15 +1182,14 @@ impl State {
                         agent_type: AgentType::Unknown,
                         started_at: None,
                     });
-                    self.synced.insert(key);
                 }
             }
         }
-        let gone: Vec<String> = self.synced.iter().filter(|k| !seen.contains(*k)).cloned().collect();
-        for k in gone {
+        let n = seen.len();
+        for k in claim_synced(&mut self.synced, seen) {
             self.unregister(&k);
         }
-        seen.len()
+        n
     }
 
     fn scan_one(&mut self, id: &str, snap: Snapshot, table: Option<&ProcessTable>, now: Timestamp) {
@@ -1665,6 +1668,50 @@ fn one_line(text: &str, max: usize) -> String {
         line.chars().take(max - 1).collect::<String>() + "…"
     } else {
         line.to_string()
+    }
+}
+
+/// The app's `pane.sync` claims every pane it lists; returns those it
+/// claimed last time and no longer lists, which the sync unregisters.
+fn claim_synced(synced: &mut HashSet<String>, seen: HashSet<String>) -> Vec<String> {
+    let mut gone: Vec<String> = synced.difference(&seen).cloned().collect();
+    gone.sort();
+    *synced = seen;
+    gone
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::*;
+
+    fn set(keys: &[&str]) -> HashSet<String> {
+        keys.iter().map(|k| k.to_string()).collect()
+    }
+
+    #[test]
+    fn a_pane_the_app_stops_listing_is_dropped() {
+        let mut synced = set(&["a", "b"]);
+        assert_eq!(claim_synced(&mut synced, set(&["a"])), vec!["b".to_string()]);
+        assert_eq!(synced, set(&["a"]));
+    }
+
+    /// A pane a hook registered first (a fork's Claude reports before the
+    /// app's next sync) is still the app's once the app lists it, and goes
+    /// when the app closes it.
+    #[test]
+    fn a_pane_registered_elsewhere_is_claimed_once_listed() {
+        let mut synced = set(&["a"]);
+        assert!(claim_synced(&mut synced, set(&["a", "fork"])).is_empty());
+        assert_eq!(claim_synced(&mut synced, set(&["a"])), vec!["fork".to_string()]);
+    }
+
+    /// A pane the app never listed (another client's, or a hook from outside
+    /// any pane) is not the app's to drop.
+    #[test]
+    fn a_pane_the_app_never_listed_is_left_alone() {
+        let mut synced = set(&["a"]);
+        assert!(claim_synced(&mut synced, set(&["a"])).is_empty());
+        assert!(!synced.contains("gpui-x"));
     }
 }
 
