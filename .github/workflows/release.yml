@@ -356,6 +356,13 @@ jobs:
           done
           cp "clients/gpui/target/release/seahelm-gpui${{ matrix.exe }}" "dist/$name/"
           cp clients/gpui/README.md "dist/$name/README.md"
+          # Linux keeps the release profile's debug info inside the binaries
+          # (macOS and Windows keep it beside them): 70 MB of a tarball that
+          # needs a fraction of that to run.
+          if [ "${{ runner.os }}" = Linux ]; then
+            strip --strip-debug dist/$name/seahelm*
+            du -sh "dist/$name"
+          fi
           cd dist
           case "${{ runner.os }}" in
             Windows) 7z a -tzip "$name.zip" "$name" >/dev/null; echo "file=dist/$name.zip" >> "$GITHUB_ENV" ;;
