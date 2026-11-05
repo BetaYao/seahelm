@@ -1463,14 +1463,21 @@ impl State {
         }
     }
 
-    /// pane.list's entry: the registry's, with what the screen says added.
+    /// pane.list's entry: the registry's, with what the screen says added —
+    /// the terminal's title, and `display_title`, what the Mac's pane header
+    /// calls the pane (seahelm-web and Telegram name panes by it).
     fn pane_json(&self, id: &str) -> Option<Value> {
         let mut v = self.registry.pane_json(id)?;
+        let worktree = self.registry.pane(id).map(|p| p.worktree_path.clone()).unwrap_or_default();
         if let (Some(obj), Some(snap)) = (v.as_object_mut(), self.panes.get(id).and_then(|s| s.snapshot.as_ref())) {
             if !snap.title.is_empty() {
                 obj.insert("title".into(), json!(snap.title));
             }
             obj.insert("pwd".into(), json!(snap.pwd));
+            let home = std::env::var("HOME").unwrap_or_default();
+            if let Some(shown) = crate::pane_title::display_osc_title(&snap.title, &worktree, &snap.pwd, &home) {
+                obj.insert("display_title".into(), json!(shown));
+            }
         }
         Some(v)
     }
