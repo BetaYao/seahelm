@@ -874,7 +874,9 @@ impl Core {
 impl Core {
     /// Start First Mate's thread (it idles until the config gives it First Mate).
     /// Also starts the observation log, which records whether or not First
-    /// Mate is on (`first_mate::observations`).
+    /// Mate is on and creates First Mate's directory for it — the directory
+    /// only; First Mate itself waits for `autopilot_enabled`
+    /// (`first_mate::observations`).
     pub fn spawn_first_mate(self: &Arc<Self>) {
         let observer = first_mate::observations::spawn(Arc::clone(self));
         self.lock().observer = Some(observer.clone());
@@ -908,10 +910,6 @@ impl Core {
         });
     }
 
-    /// The worktree's PR as last fetched.
-    pub fn worktree_pr(&self, worktree: &str) -> Option<pr::PrStatus> {
-        self.prs.status(worktree)
-    }
 
     /// The calls the core performs itself (`actions`).
     pub fn act(&self, method: &str, p: &Value) -> RpcResult {
@@ -1037,6 +1035,13 @@ impl Core {
     /// (`pr`, else the PR store's last answer), busy panes, pane activity.
     /// Blocking: git, and maybe a fetch of the PR's head.
     pub fn measure_worktree(&self, worktree: &str, pr: Option<&pr::PrStatus>) -> first_mate::facts::Facts {
+        self.measure_worktree_with(worktree, pr, true)
+    }
+
+    /// `measure_worktree`, saying whether a PR head missing locally may be
+    /// fetched. The observation log's periodic measurements pass false, so
+    /// keeping it fresh never touches the network.
+    pub fn measure_worktree_with(&self, worktree: &str, pr: Option<&pr::PrStatus>, fetch_pr_head: bool) -> first_mate::facts::Facts {
         use first_mate::facts::{Context, Facts, PrInfo};
         let known = if pr.is_some() { None } else { self.prs.known(worktree) };
         let info = match (pr, &known) {
@@ -1048,6 +1053,7 @@ impl Core {
         let mut ctx = Context::new(info, now());
         ctx.busy_panes = self.busy_panes(worktree);
         ctx.last_pane_activity = self.last_pane_activity(worktree);
+        ctx.fetch_pr_head = fetch_pr_head;
         Facts::measure(std::path::Path::new(worktree), &ctx)
     }
 

@@ -9,18 +9,21 @@
 //! evidence a habit cites.
 //!
 //! A removal carries the core's *last measurement* of the worktree before
-//! it vanished: the observer re-measures every live worktree on a slow
-//! cadence (`FACTS_EVERY`, and when one first appears) on a thread of its
-//! own, so no RPC ever waits on git, and no app change is needed to know
-//! what was in a worktree the user deleted from the app.
+//! it vanished (`Core::measure_worktree_with`, serialized `Facts`): the
+//! observer re-measures every live worktree on a slow cadence
+//! (`FACTS_EVERY`, and when one first appears) on a thread of its own, so
+//! no RPC ever waits on git, and no app change is needed to know what was
+//! in a worktree the user deleted from the app. These measurements never
+//! fetch a PR head: keeping the log fresh must not go to the network.
 //!
 //! Recording does not follow First Mate's on/off switch: it runs whenever
-//! the core runs and First Mate's directory exists. The point of the log is
-//! that by the time the user turns First Mate on there is already evidence
-//! of how they clean up, so its first habits are drawn from what they did
-//! rather than from nothing. Requiring the directory keeps a core that has
-//! never had First Mate at all (a scratch HOME, a client-only machine) from
-//! growing one.
+//! the core runs. The point of the log is that by the time the user turns
+//! First Mate on there is already evidence of how they clean up, so its
+//! first habits are drawn from what they did rather than from nothing.
+//! That includes someone who has never turned First Mate on, so the core
+//! creates First Mate's directory at start (`ensure_dir`) — the directory
+//! only, which starts nothing: First Mate itself still runs only on
+//! `autopilot_enabled`.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -33,7 +36,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use super::engine::iso8601;
-use super::facts::{self, Facts};
+use super::facts;
 use crate::core::Core;
 
 pub const FILE_NAME: &str = "observations.jsonl";
@@ -198,19 +201,6 @@ fn id_number(id: &str) -> u64 {
     id.strip_prefix("obs-").and_then(|n| n.parse().ok()).unwrap_or(0)
 }
 
-/// `Facts` as the log writes them. By hand until phase 1 gives `Facts`
-/// `serde::Serialize`; then this is `serde_json::to_value(f)`.
-pub fn facts_json(f: &Facts) -> Value {
-    json!({
-        "changed": f.changed,
-        "deleted": f.deleted,
-        "untracked": f.untracked,
-        "insertions": f.insertions,
-        "deletions": f.deletions,
-        "unpushed": f.unpushed,
-        "busy_panes": f.busy_panes,
-    })
-}
 
 // MARK: attribution
 
@@ -296,7 +286,7 @@ pub fn norm(path: &str) -> String {
 pub struct Known {
     pub repo: String,
     pub branch: String,
-    /// The last measurement (`facts_json`, plus `pr` when it had one).
+    /// The last measurement: `Facts`, serialized.
     pub facts: Option<Value>,
     /// When `facts` was taken (unix seconds); 0 before the first time.
     pub measured_at: f64,
@@ -438,10 +428,19 @@ impl Handle {
     }
 }
 
-/// Start the observer. It records only while First Mate's directory exists.
+/// First Mate's directory, made if missing, so the log has somewhere to go
+/// before First Mate has ever run. Making it starts nothing.
+pub fn ensure_dir(dir: &Path) -> bool {
+    std::fs::create_dir_all(dir).is_ok()
+}
+
+/// Start the observer, creating First Mate's directory for its log.
 pub fn spawn(core: Arc<Core>) -> Handle {
     let (tx, rx) = mpsc::channel();
     let dir = super::pane::dir();
+    if !ensure_dir(&dir) {
+        eprintln!("seahelm-core: cannot create {}: observations are off", dir.display());
+    }
     let obs = Observer { core: Some(core), dir, log: None, watch: Watch::default(), claims: Claims::default() };
     let _ = std::thread::Builder::new().name("seahelm-core-observations".into()).spawn(move || obs.run(rx));
     Handle(tx)
@@ -473,7 +472,8 @@ impl Observer {
         }
     }
 
-    /// The log, opened (and trimmed) the first time First Mate's directory is there.
+    /// The log, opened (and trimmed) on first use. The directory is made at
+    /// start (`ensure_dir`); if that failed nothing is written.
     fn log(&mut self, now: f64) -> Option<&Log> {
         if self.log.is_none() && self.dir.is_dir() {
             self.log = Some(Log::open(self.dir.join(FILE_NAME), now));
@@ -563,13 +563,8 @@ impl Observer {
         let scan = self.watch.scan(&live, is_checkout, worktree_info);
         self.apply(scan, now, worktree_born);
         for path in self.watch.due(now, PROBES_PER_TICK) {
-            let mut f = Facts::probe(Path::new(&path));
-            f.busy_panes = core.busy_panes(&path);
-            let mut v = facts_json(&f);
-            if let Some(pr) = core.worktree_pr(&path) {
-                v["pr"] = pr.to_json();
-            }
-            self.watch.measured(&path, v, now);
+            let f = core.measure_worktree_with(&path, None, false);
+            self.watch.measured(&path, serde_json::to_value(&f).unwrap_or(Value::Null), now);
         }
     }
 
@@ -885,20 +880,37 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_written_without_first_mates_directory() {
+    fn the_directory_is_made_at_start_so_a_new_user_is_recorded() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join("first-mate");
+        let dir = tmp.path().join(".config/seahelm/first-mate");
+        let answer = || Msg::CardAnswered { card_kind: "approval", card: "c".into(), option: None, via: None, summary: String::new(), action: None, worktree: String::new(), repo: String::new() };
+
+        // Without the directory (creating it failed) nothing is written.
         let mut o = observer(&dir);
-        o.handle(Msg::CardAnswered { card_kind: "approval", card: "c".into(), option: None, via: None, summary: String::new(), action: None, worktree: String::new(), repo: String::new() }, NOW);
+        o.handle(answer(), NOW);
         assert!(!dir.exists());
+
+        // What `spawn` does first: only the directory, nothing of First Mate's in it.
+        assert!(ensure_dir(&dir));
+        assert!(ensure_dir(&dir), "and again on the next start");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        o.handle(answer(), NOW);
+        assert_eq!(records(&dir).len(), 1);
+        let names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, vec![FILE_NAME.to_string()]);
     }
 
     #[test]
-    fn facts_by_hand() {
-        let f = Facts { changed: 2, deleted: 1, untracked: 3, insertions: 4, deletions: 5, unpushed: None, busy_panes: 1 };
-        assert_eq!(
-            facts_json(&f),
-            json!({"changed": 2, "deleted": 1, "untracked": 3, "insertions": 4, "deletions": 5, "unpushed": null, "busy_panes": 1})
-        );
+    fn facts_are_logged_as_serde_writes_them() {
+        let f = super::facts::Facts { changed: 2, untracked: 3, unpushed: Some(0), pr: Some("merged".into()), ..Default::default() };
+        let v = serde_json::to_value(&f).unwrap();
+        let mut w = Watch::default();
+        w.scan(&live(&["/r/wt"]), |_| true, info);
+        w.measured("/r/wt", v.clone(), NOW);
+        let (path, k) = w.take("/r/wt").unwrap();
+        let r = removed_record(&path, &k, By::User, Map::new());
+        assert_eq!(r.fields["facts"], v);
+        assert_eq!(r.fields["facts"]["pr"], "merged");
+        assert_eq!(r.fields["facts"]["untracked"], 3);
     }
 }
