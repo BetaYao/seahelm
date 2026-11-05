@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::pr::{PrStatus, State};
 
@@ -37,7 +37,9 @@ pub const IGNORED_NAMES_CAP: usize = 8;
 /// Bases a branch is compared against, first that exists.
 pub const BASES: &[&str] = &["origin/main", "origin/master", "main", "master"];
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+/// Read back from the observation log by the habits, so every field has a default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Facts {
     pub changed: u32,
     pub deleted: u32,

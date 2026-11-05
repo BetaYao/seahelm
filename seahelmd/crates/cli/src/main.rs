@@ -36,7 +36,7 @@ fn main() {
         args.drain(..2);
     }
     let Some((group, rest)) = args.split_first() else {
-        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|integration|worktree> ...", 2)
+        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|integration|worktree|habit> ...", 2)
     };
     let cli = Cli { note };
     cli.run(group, rest);
@@ -78,6 +78,7 @@ impl Cli {
             "layout" => self.layout(a),
             "wait" => self.wait(a),
             "worktree" => self.worktree(a),
+            "habit" => self.habit(a),
             "pane" => self.pane(a),
             other => die(&format!("unknown command: {other}"), 2),
         }
@@ -145,6 +146,24 @@ impl Cli {
                 pretty(&self.call("worktree.delete", json!({"worktree_path": absolute(path)}), 40.0, &[]));
             }
             other => die(&format!("unknown worktree subcommand: {other}"), 2),
+        }
+    }
+
+    /// First Mate's habits, read-only: `seahelm habit list [--repo <path>] [--json]`.
+    fn habit(&self, a: &[String]) {
+        match first(a) {
+            Some("list") => {
+                let rest = &a[1..];
+                let params = opt(rest, "--repo").map(|r| json!({"repo": absolute(&r)})).unwrap_or_else(|| json!({}));
+                let v = self.call("habits.list", params, 40.0, &[]);
+                if has(rest, "--json") {
+                    pretty(&v);
+                } else {
+                    print!("{}", habit_table(&v));
+                }
+            }
+            Some(other) => die(&format!("unknown habit subcommand: {other}"), 2),
+            None => die("usage: seahelm habit list [--repo <path>] [--json]", 2),
         }
     }
 
@@ -396,6 +415,8 @@ fn route(method: &str) -> &'static [Side] {
             &[Side::Core, Side::App]
         }
         "worktree.create" | "worktree.delete" | "pane.close" => &[Side::App, Side::Core],
+        // First Mate's habits live in the core alone.
+        "habits.list" => &[Side::Core],
         _ => &[Side::App],
     }
 }
@@ -475,6 +496,37 @@ fn request(side: Side, method: &str, params: &Value, timeout: f64) -> Result<Str
 }
 
 // MARK: - arguments and output
+
+/// `habits.list` for a person: one block per file, one line per habit.
+fn habit_table(v: &Value) -> String {
+    let mut out = String::new();
+    for b in v["books"].as_array().into_iter().flatten() {
+        let title = b["repo"].as_str().map(str::to_string).unwrap_or_else(|| b["key"].as_str().unwrap_or("?").to_string());
+        out += &format!("{title}  ({})\n", b["file"].as_str().unwrap_or_default());
+        let habits = b["habits"].as_array().cloned().unwrap_or_default();
+        if habits.is_empty() {
+            out += "  (no habits)\n";
+        }
+        for h in habits {
+            let level = h["effective_level"].as_str().or(h["level"].as_str()).unwrap_or("?");
+            let e = &h["evidence"];
+            let when: Vec<String> = h["when"].as_object().map(|m| m.iter().map(|(k, v)| format!("{k}: {}", v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()))).collect()).unwrap_or_default();
+            out += &format!(
+                "  {:<8} {}  {} — {} [{}]  approved {} · rejected {} · manual {} · ignored {}\n",
+                level,
+                h["id"].as_str().unwrap_or("?"),
+                h["do"].as_str().unwrap_or("?"),
+                when.join(", "),
+                h["status"].as_str().unwrap_or("active"),
+                e["approved"], e["rejected"], e["manual"], e["ignored"],
+            );
+        }
+        for n in b["notes"].as_array().into_iter().flatten().chain(b["invalid"].as_array().into_iter().flatten()) {
+            out += &format!("  ! {}\n", n.as_str().unwrap_or_default());
+        }
+    }
+    out
+}
 
 fn first(a: &[String]) -> Option<&str> {
     a.first().map(String::as_str)
@@ -567,10 +619,22 @@ mod tests {
         for m in ["worktree.create", "worktree.delete", "pane.close"] {
             assert_eq!(route(m), [Side::App, Side::Core], "{m}");
         }
+        assert_eq!(route("habits.list"), [Side::Core], "habits live in the core alone");
         // Only the side drawing the panes can do these.
         for m in ["pane.split", "pane.focus", "pane.zoom", "pane.move", "pane.fork", "pane.exec", "layout.apply"] {
             assert_eq!(route(m), [Side::App], "{m}");
         }
+    }
+
+    #[test]
+    fn habits_read_as_a_table() {
+        let v = json!({"books": [{"key": "_global", "repo": null, "file": "/h/_global.yml", "notes": [], "invalid": ["habit 2: bad"],
+            "habits": [{"id": "delete-merged-clean", "do": "delete_worktree", "level": "ask", "status": "active",
+                        "when": {"pr": "merged", "idle_days": ">=1"}, "evidence": {"approved": 2, "rejected": 0, "manual": 3, "ignored": 0}}]}]});
+        let t = habit_table(&v);
+        assert!(t.starts_with("_global  (/h/_global.yml)\n"), "{t}");
+        assert!(t.contains("ask      delete-merged-clean  delete_worktree — pr: merged, idle_days: >=1 [active]  approved 2 · rejected 0 · manual 3"), "{t}");
+        assert!(t.contains("! habit 2: bad"));
     }
 
     #[test]

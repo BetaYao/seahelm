@@ -16,6 +16,11 @@ pub enum Kind {
     /// What the agent narrates while it works (Claude's visible thinking, a
     /// Codex reasoning summary), shown apart from what it says.
     Thinking,
+    /// A line the core writes into a pane's timeline itself (First Mate's
+    /// sweep reports), not typed into the pane, so it starts no turn.
+    /// Clients draw it as one line of note; one that does not know the kind
+    /// drops the row.
+    Note,
 }
 
 impl Kind {
@@ -28,6 +33,7 @@ impl Kind {
             Kind::Decision => "decision",
             Kind::Notice => "notice",
             Kind::Thinking => "thinking",
+            Kind::Note => "note",
         }
     }
 
@@ -40,6 +46,7 @@ impl Kind {
             "decision" => Kind::Decision,
             "notice" => Kind::Notice,
             "thinking" => Kind::Thinking,
+            "note" => Kind::Note,
             _ => return None,
         })
     }
@@ -155,5 +162,9 @@ mod tests {
         assert_eq!(v, json!({"seq": 3, "pane_id": "p", "pane_session_key": "seahelm-x", "kind": "tool", "ts": 10.5, "tool": "Bash", "detail": "cargo test", "count": 2}));
         assert_eq!(Message::from_json(&v), Some(m));
         assert!(Message::from_json(&json!({"seq": 1})).is_none());
+        let note = Message::new("seahelm-first-mate", "seahelm-first-mate", Kind::Note, 11.0).with_text("Deleted 2 worktrees by habit: a · b.");
+        let v = note.to_json();
+        assert_eq!(v["kind"], "note");
+        assert_eq!(Message::from_json(&v), Some(note));
     }
 }

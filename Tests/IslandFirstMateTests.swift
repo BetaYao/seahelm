@@ -85,6 +85,17 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(items.map(\.kind), [.decision(["Approve delete", "Keep worktree"]), .note("Which repo?")])
     }
 
+    /// A line seahelm-core wrote itself (a sweep report) is a note, its ` · `
+    /// kept: not buttons.
+    func testACoreNoteIsOneLineOfNote() {
+        let text = "Deleted 2 worktrees by habit: a (delete-merged-clean) · b (delete-merged-clean). Branches kept."
+        let items = ConversationItem.items(from: [
+            MessageEvent(seq: 1, paneId: "fm", paneSessionKey: "k", kind: .note, ts: Date(), text: text),
+        ])
+        XCTAssertEqual(items.map(\.kind), [.note(text)])
+        XCTAssertEqual(MessageEvent(dict: ["seq": 1, "pane_id": "fm", "kind": "note", "ts": 1.0, "text": text])?.kind, .note)
+    }
+
     func testLongRepliesFoldToThreeLines() {
         XCTAssertFalse(OpenedSurfaceView.isLongReply("one\ntwo\nthree"))
         XCTAssertTrue(OpenedSurfaceView.isLongReply("one\ntwo\nthree\nfour"))
