@@ -196,10 +196,18 @@ impl Batch {
     /// The card: every worktree with its facts. One worktree is asked
     /// about directly; several get "delete all" or "let me pick".
     pub fn card(&self) -> (String, Vec<String>) {
-        let mut m = if self.items.len() == 1 {
-            "First Mate: this worktree looks done:".to_string()
-        } else {
-            format!("First Mate: these {} worktrees look done:", self.items.len())
+        self.card_in(super::lang::Lang::En)
+    }
+
+    /// The card in the user's language. The option labels stay as they are:
+    /// answers are matched on them.
+    pub fn card_in(&self, lang: super::lang::Lang) -> (String, Vec<String>) {
+        use super::lang::Lang;
+        let mut m = match (lang, self.items.len()) {
+            (Lang::En, 1) => "First Mate: this worktree looks done:".to_string(),
+            (Lang::En, n) => format!("First Mate: these {n} worktrees look done:"),
+            (Lang::Zh, 1) => "First Mate：这个 worktree 看起来已经做完了：".to_string(),
+            (Lang::Zh, n) => format!("First Mate：这 {n} 个 worktree 看起来已经做完了："),
         };
         for r in &self.items {
             m += &format!("\n• {} — {} [{}]", r.candidate.name(), r.candidate.facts.summary(), r.decision.id);
@@ -217,8 +225,14 @@ impl Batch {
     }
 
     pub fn item_card(&self, i: usize) -> (String, Vec<String>) {
+        self.item_card_in(i, super::lang::Lang::En)
+    }
+
+    pub fn item_card_in(&self, i: usize, lang: super::lang::Lang) -> (String, Vec<String>) {
         let r = &self.items[i];
-        (format!("First Mate: delete worktree {}? — {} [{}]", r.candidate.name(), r.candidate.facts.summary(), r.decision.id), vec![DELETE.into(), KEEP.into()])
+        let head = lang.pick("First Mate: delete worktree", "First Mate：删除 worktree");
+        let q = lang.pick("?", "？");
+        (format!("{head} {}{q} — {} [{}]", r.candidate.name(), r.candidate.facts.summary(), r.decision.id), vec![DELETE.into(), KEEP.into()])
     }
 }
 

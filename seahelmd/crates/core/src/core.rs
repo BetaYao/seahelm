@@ -1153,6 +1153,18 @@ impl Core {
         self.lock().registry.pane(pane).map(|p| p.status)
     }
 
+    /// A pane as the user knows it: `#7 · feat-x` (its handle and its
+    /// worktree's name), from any id a client or First Mate uses for it.
+    /// None for a pane the core does not know.
+    pub fn pane_label(&self, pane_ref: &str) -> Option<String> {
+        let st = self.lock();
+        let id = st.registry.resolve(Some(pane_ref), "")?;
+        let p = st.registry.pane(&id)?;
+        let wt = std::path::Path::new(&p.worktree_path).file_name().and_then(|n| n.to_str()).unwrap_or(&p.worktree_path).to_string();
+        let handle = self.handles.lock().unwrap_or_else(|e| e.into_inner()).handle(&id);
+        Some(format!("#{handle} · {wt}"))
+    }
+
     pub fn pane_agent(&self, pane: &str) -> Option<AgentType> {
         self.lock().registry.pane(pane).map(|p| p.agent_type)
     }

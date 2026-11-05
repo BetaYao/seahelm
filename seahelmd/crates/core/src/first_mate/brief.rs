@@ -74,6 +74,80 @@ fn away(secs: f64, lang: Lang) -> String {
     }
 }
 
+/// One line, at most `DETAIL_CHARS` characters: what an action said or
+/// started, as the brief quotes it.
+const DETAIL_CHARS: usize = 60;
+
+fn one_line(t: &str) -> String {
+    let flat = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() > DETAIL_CHARS {
+        format!("{}…", flat.chars().take(DETAIL_CHARS).collect::<String>())
+    } else {
+        flat
+    }
+}
+
+/// An action First Mate asks for or took, in the user's language, from its
+/// params (with `pane_id` already the pane as the user knows it, `#7 ·
+/// feat-x`). None for an action without the params to say it.
+pub fn describe_action(lang: Lang, action: super::rules::Action, params: &Value) -> Option<String> {
+    use super::rules::Action;
+    let s = |k: &str| params.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+    match action {
+        Action::MessagePane => {
+            let pane = s("pane_id")?;
+            let what = s("command").or_else(|| s("text")).map(one_line).unwrap_or_default();
+            Some(match lang {
+                Lang::En => format!("tell {pane}: {what}"),
+                Lang::Zh => format!("告诉 {pane}：{what}"),
+            })
+        }
+        Action::StartAgent => {
+            let repo = base_name(s("repo_path")?);
+            let what = s("prompt").map(one_line).unwrap_or_default();
+            Some(match lang {
+                Lang::En => format!("start an agent in {repo}: {what}"),
+                Lang::Zh => format!("在 {repo} 启动一个 agent：{what}"),
+            })
+        }
+        Action::DeleteWorktree => {
+            let wt = base_name(s("worktree_path")?);
+            Some(match lang {
+                Lang::En => format!("delete worktree {wt}"),
+                Lang::Zh => format!("删除 worktree {wt}"),
+            })
+        }
+    }
+}
+
+/// An audit line of an action, in the user's language, from its structured
+/// fields (`FirstMate::annotate`). None for a line written before those
+/// fields existed: the brief then quotes its text.
+pub fn describe_entry(lang: Lang, e: &Entry) -> Option<String> {
+    use super::rules::Action;
+    let action = Action::parse(e.action.as_deref()?)?;
+    let mut p = serde_json::Map::new();
+    match action {
+        Action::MessagePane => {
+            p.insert("pane_id".into(), json!(e.pane.as_deref()?));
+            p.insert("command".into(), json!(e.detail.clone().unwrap_or_default()));
+        }
+        Action::StartAgent => {
+            p.insert("repo_path".into(), json!(e.worktree_path.as_deref()?));
+            p.insert("prompt".into(), json!(e.detail.clone().unwrap_or_default()));
+        }
+        Action::DeleteWorktree => {
+            p.insert("worktree_path".into(), json!(e.worktree_path.as_deref()?));
+        }
+    }
+    describe_action(lang, action, &Value::Object(p))
+}
+
+/// A card's first line without its "First Mate:" lead, in either language.
+fn strip_first_mate(line: &str) -> String {
+    ["First Mate: ", "First Mate："].iter().find_map(|p| line.strip_prefix(p)).unwrap_or(line).to_string()
+}
+
 fn base_name(path: &str) -> String {
     Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path).to_string()
 }
@@ -88,8 +162,9 @@ fn is_approved_delete(e: &Entry) -> bool {
 
 /// The brief's text: a title line, then one line per section that has
 /// something — done, waiting on you, could go, notes. None when every
-/// section is empty. First Mate's own action descriptions (`policy::
-/// describe`) and the cards' words are quoted as they are (English).
+/// section is empty. Actions are described in the user's language from
+/// their structured audit fields (`describe_entry`); an older line without
+/// them is quoted as written.
 pub fn compose(i: &Inputs) -> Option<String> {
     let l = i.lang;
     let actions: Vec<&Entry> = i.entries.iter().filter(|e| e.kind == "action").collect();
@@ -99,10 +174,13 @@ pub fn compose(i: &Inputs) -> Option<String> {
     let others: Vec<String> = actions
         .iter()
         .filter(|e| !is_habit_auto(e) && !is_approved_delete(e))
-        .map(|e| match e.level.as_deref() {
-            Some("auto") => format!("{}{}", e.text, l.pick(" (on my own)", "（自动）")),
-            Some("approved" | "picked") => format!("{}{}", e.text, l.pick(" (you approved)", "（你批准的）")),
-            _ => e.text.clone(),
+        .map(|e| {
+            let what = describe_entry(l, e).unwrap_or_else(|| e.text.clone());
+            match e.level.as_deref() {
+                Some("auto") => format!("{what}{}", l.pick(" (on my own)", "（自动）")),
+                Some("approved" | "picked") => format!("{what}{}", l.pick(" (you approved)", "（你批准的）")),
+                _ => what,
+            }
         })
         .collect();
     let mut done = Vec::new();
@@ -204,7 +282,7 @@ pub struct Held {
 
 impl Held {
     fn headline(&self) -> String {
-        self.message.lines().next().unwrap_or_default().trim_start_matches("First Mate: ").to_string()
+        strip_first_mate(self.message.lines().next().unwrap_or_default())
     }
 }
 
@@ -329,7 +407,7 @@ impl FirstMate {
             .cards_with_payloads(|p| self.is_first_mates(p))
             .iter()
             .filter_map(|c| c.get("message").and_then(Value::as_str))
-            .map(|m| m.lines().next().unwrap_or_default().trim_start_matches("First Mate: ").to_string())
+            .map(|m| strip_first_mate(m.lines().next().unwrap_or_default()))
             .collect();
         out.extend(self.held.iter().map(Held::headline));
         out
@@ -474,6 +552,34 @@ mod tests {
         e.level = Some(level.into());
         e.worktree_path = wt.map(str::to_string);
         e
+    }
+
+    #[test]
+    fn actions_read_in_the_users_language_with_the_pane_by_name() {
+        let mut e = action("Tell 3D827029-53B4-4174-A0FB-B9ABB1E7336E: PR #11403 failed", Some("fix-ci"), "auto", None);
+        e.action = Some("message_pane".into());
+        e.pane = Some("#7 · ru-guo-yao".into());
+        e.detail = Some("PR #11403 的 pr-state-gate 失败了：关联 issue #11402 中有 3 项「交付验收」未勾选，请先补齐再推送".into());
+        let i = Inputs { lang: Lang::Zh, entries: vec![e.clone()], ..Inputs::default() };
+        let text = compose(&i).unwrap();
+        let done = text.lines().nth(1).unwrap();
+        assert!(done.starts_with("做了：告诉 #7 · ru-guo-yao：PR #11403 的 pr-state-gate 失败了"), "{done}");
+        assert!(done.ends_with("…（自动）"), "{done}");
+        assert!(!text.contains("3D827029"), "no raw pane id: {text}");
+        let en = compose(&Inputs { lang: Lang::En, entries: vec![e], ..Inputs::default() }).unwrap();
+        assert!(en.lines().nth(1).unwrap().starts_with("Done: tell #7 · ru-guo-yao: "), "{en}");
+        // A line from before the structured fields is quoted as written.
+        let old = action("Tell #3: hi", None, "auto", None);
+        assert!(compose(&Inputs { lang: Lang::Zh, entries: vec![old], ..Inputs::default() }).unwrap().contains("Tell #3: hi（自动）"));
+    }
+
+    #[test]
+    fn approvals_and_deletes_are_described_too() {
+        use super::super::rules::Action;
+        assert_eq!(describe_action(Lang::Zh, Action::StartAgent, &json!({"repo_path": "/w/seahelm", "prompt": "fix\nthe login"})).unwrap(), "在 seahelm 启动一个 agent：fix the login");
+        assert_eq!(describe_action(Lang::Zh, Action::DeleteWorktree, &json!({"worktree_path": "/w/x/feat-a"})).unwrap(), "删除 worktree feat-a");
+        assert_eq!(describe_action(Lang::En, Action::MessagePane, &json!({})), None);
+        assert_eq!(strip_first_mate("First Mate：这 2 个 worktree 看起来已经做完了："), "这 2 个 worktree 看起来已经做完了：");
     }
 
     #[test]

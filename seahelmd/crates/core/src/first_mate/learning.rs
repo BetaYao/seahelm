@@ -366,7 +366,7 @@ impl FirstMate {
             }
             let nonce = self.mint("sweep");
             let batch = Batch::new(&nonce, report.ask);
-            let (message, options) = batch.card();
+            let (message, options) = batch.card_in(self.config.language);
             let payload = batch.payload.clone();
             self.batches.insert(payload.clone(), batch);
             self.log(Entry::new(now, "approval", message.lines().next().unwrap_or_default().to_string()));
@@ -509,7 +509,7 @@ impl FirstMate {
             BatchAnswer::Pick => {
                 for i in batch.open.clone() {
                     let p = batch.item_payload(i);
-                    let (message, options) = batch.item_card(i);
+                    let (message, options) = batch.item_card_in(i, self.config.language);
                     self.items.insert(p.clone(), (payload.to_string(), i));
                     // The user asked to pick: up at once, not counted.
                     self.put_card(CardKind::Approval, &p, message, options, Class::Answering, now);
