@@ -19,6 +19,7 @@ mod bridge;
 mod cli;
 mod command;
 mod core;
+mod discovery;
 mod facts_cli;
 mod first_mate;
 mod install;
@@ -109,6 +110,7 @@ fn serve() -> Result<()> {
     core.spawn_event_log(event_log);
     core.spawn_titles();
     pr::spawn(Arc::clone(&core));
+    discovery::spawn(Arc::clone(&core));
     usage::spawn();
     core.spawn_first_mate();
     eprintln!("seahelm-core listening on {}", path.display());
