@@ -133,7 +133,7 @@ version. The core retains its last revision in process memory, so rewriting both
 on-disk files cannot change an active core's trusted memory. SessionStart hooks
 and project events include it; new-agent briefs carry only a pointer. Injection
 keeps whole goal/milestone/don'ts entries first, then newest notes, with a real
-total/capacity warning. `/memory show|undo @repo` works from the island and chats.
+total/capacity warning. `/notes [undo] @repo` works from the island and chats (not `/memory`: that is Claude Code's own).
 First Mate may write notes; only the user may undo memory or confirm external edits. Routing uses the original user message and known
 project names, approved aliases or matching GitHub remotes; a mandate starts
 once per successful turn (another start asks on a card), otherwise ranked project

@@ -39,7 +39,7 @@ pub const ALL: &[Spec] = &[
         summary: "What a pane is doing",
         detail: "The pane's latest turn and its reply. Read-only. Bare `/show` reads the pane you are talking to.",
     },
-    Spec { verb:"memory",usage:"/memory show|undo @repo",summary:"Read or undo project memory",detail:"Runs directly in the core from the island, web or Telegram. Undo restores the previous core-written revision." },
+    Spec { verb:"notes",usage:"/notes [undo] @repo",summary:"Read or undo a project's notes (First Mate's project memory)",detail:"Runs directly in the core from the island, web or Telegram. Undo restores the previous core-written revision." },
     Spec { verb: "help", usage: "/help [command]", summary: "This list; with a command, its details", detail: "You are reading it." },
 ];
 

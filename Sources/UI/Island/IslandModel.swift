@@ -108,7 +108,7 @@ final class IslandModel {
     var draft = ""
     /// The last send that did not reach First Mate; the draft is kept for a retry.
     var sendError: String?
-    /// What the core answered the last `/command` typed here (`/memory show`,
+    /// What the core answered the last `/command` typed here (`/notes @repo`,
     /// `/status`, `/help` …): the island is the only place it can be read.
     var commandReply: IslandCommandReply?
     /// Say this to First Mate (a `/command` runs as one). False when it did not go.

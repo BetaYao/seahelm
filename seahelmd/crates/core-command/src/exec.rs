@@ -407,12 +407,13 @@ mod tests {
         let host=Fake::default();
         for ctx in [chat(None),on("s-b")] {
             for verb in ["show","undo"] {
-                let out=run(&format!("/memory {verb} @seahelm"),&ctx,&host);
+                let out=run(&format!("/notes {verb} @seahelm"),&ctx,&host);
                 assert!(!out.reply.is_error,"{}",out.reply.text); assert!(out.reply.text.starts_with(verb));
                 assert!(out.first_mate.is_none()); assert!(host.mate.borrow().is_empty());
             }
         }
-        assert!(run("/memory confirm @seahelm",&chat(None),&host).reply.is_error);
+        assert!(run("/notes confirm @seahelm",&chat(None),&host).reply.is_error);
+        assert!(run("/memory show @seahelm",&chat(None),&host).reply.is_error, "/memory is Claude Code's, not ours");
     }
 
     #[test]

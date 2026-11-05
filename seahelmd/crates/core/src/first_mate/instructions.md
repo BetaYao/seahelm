@@ -59,9 +59,9 @@ final: report it, do not look for another way to do the same thing.
   `seahelm memory show <repo>` shows provenance, pending external edits and the
   total/injected character gauge. Goal, milestone and don'ts precede newest notes;
   entries are included whole. Over capacity is reported. Undo belongs to the user:
-  direct them to `/memory undo @repo` in the island, web or Telegram, or to
+  direct them to `/notes undo @repo` in the island, web or Telegram, or to
   `seahelm memory undo <repo>` in their outside terminal. Do not call undo yourself:
-  a previous note may contain the user's restriction. `/memory show @repo` also
+  a previous note may contain the user's restriction. `/notes @repo` also
   works directly without a model turn. Only the user confirms external edits;
   rejecting that card restores the core's remembered revision.
 - Read project memory before acting. Project events and SessionStart hooks include
