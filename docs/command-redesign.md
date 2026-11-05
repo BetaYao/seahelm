@@ -22,7 +22,7 @@
 
 按 core / gateway 的边界（`docs/first-mate-core.md`），解析与执行在 seahelm-core（`seahelmd/crates/core-command`，接口 `command.run {text, context: {desktop?, binding?}}`，返回回复文本、按钮，以及变化后的对话对象）；对话对象由调用方保存、每次随命令带入。`#n` 编号存在 core 的 `core-pane-handles.json`，首次启动时继承 App 的 `pane-handles.json`。
 
-App 的各入口（Helm 输入框、Telegram、邮件、聊天按钮）都经 `MainWindowController.routeCommand` 调 `command.run`：App 把各会话的对话对象（`CommandSessionStore`，桌面则是选中项）带入并应用返回值；First Mate 仍由 App 运行时带 `first_mate_here`，core 把给 First Mate 的话交还 App 转交。core 不应答时退回 App 内的旧执行器（`CommandExecutor`，旧动词仍在其中，只作后备）。App 以 core 的 `#n` 为准（`PaneHandleRegistry.adopt`），并在首次打开 worktree 时接管 core 为 `/new` 起的会话（`CoreLink`）。
+App 的各入口（Helm 输入框、Telegram、邮件、聊天按钮）都经 `MainWindowController.routeCommand` 调 `command.run`：App 把各会话的对话对象（`CommandSessionStore`，桌面则是选中项）带入并应用返回值；First Mate 仍由 App 运行时带 `first_mate_here`，core 把给 First Mate 的话交还 App 转交。core 不应答时退回 App 内的旧执行器（`CommandExecutor`，旧动词仍在其中，只作后备）。`#n` 只由 core 分配，App 不再自己编号，只显示 core `pane.list` 里的编号（`CoreLink.handles`）；App 还会在首次打开 worktree 时接管 core 为 `/new` 起的会话（`CoreLink`）。
 
 下文第 1 节起是 2026-07 的原始设计，动词表以本节为准。
 
@@ -56,10 +56,10 @@ App 的各入口（Helm 输入框、Telegram、邮件、聊天按钮）都经 `M
 
 | 前缀 | 指什么 | 例子 | 解析 |
 |---|---|---|---|
-| `#` | **pane**，稳定编号 | `#7` | 只查 `PaneHandleRegistry`，不查别的 |
+| `#` | **pane**，稳定编号 | `#7` | 只查 core 的编号表（`crates/core-command/src/handles.rs`），不查别的 |
 | `@` | **地点**：worktree 或仓库，按名字 | `@main`、`@seahelm/main`、`@seahelm` | 每个动词声明自己接受哪一类，所以没有"撞名谁优先"的规则 |
 
-**pane 编号**：`PaneHandleRegistry` 在 pane 第一次出现时分配下一个整数，按 `paneSessionKey`（即 `SEAHELM_PANE_ID`）持久化到 `~/.config/seahelm/pane-handles.json`，永不复用。桌面的 pane 行也显示这个编号，所以你在卡片上看到的 `#7`、`/status` 里列出的 `#7`、Telegram 里敲的 `#7` 是同一个东西。
+**pane 编号**：seahelm-core 在 pane 第一次出现时分配下一个整数，按 seahelmd 会话名（即 `SEAHELM_PANE_ID`）持久化到 `~/.config/seahelm/core-pane-handles.json`，永不复用（首次启动时沿用了 App 旧的 `pane-handles.json`）。桌面的 pane 行也显示这个编号，所以你在卡片上看到的 `#7`、`/status` 里列出的 `#7`、Telegram 里敲的 `#7` 是同一个东西。
 
 **worktree**：`@branch`；多个仓库有同名分支时用 `@repo/branch`，列表里遇到歧义会直接以长形式打印。
 

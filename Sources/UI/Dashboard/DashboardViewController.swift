@@ -24,7 +24,7 @@ protocol DashboardDelegate: AnyObject {
 /// One split pane, for the fully-expanded "Group by Pane" fleet rows.
 struct PaneDisplayInfo {
     let stationId: String   // Station.id — the leaf's surface
-    let handle: Int         // stable #n — see PaneHandleRegistry
+    let handle: Int?        // seahelm-core's stable #n (CoreLink.handles); nil until it lists the pane
     let title: String       // per-pane title (PaneTitleResolver)
     let status: AgentStatus
     let isFocused: Bool      // the worktree's last-focused pane

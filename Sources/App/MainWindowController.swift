@@ -941,9 +941,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
             pool = repos + worktrees
         case "#":
             // Stable handles — the same numbers the pane rows and `/status` show.
-            pool = index.panes.sorted { $0.handle < $1.handle }.map { pane in
-                ("\(pane.handle)", "\(pane.status.icon) \(pane.project)/\(pane.branch) · \(pane.title)")
-            }
+            pool = index.panes.compactMap { pane in pane.handle.map { (pane, $0) } }
+                .sorted { $0.1 < $1.1 }
+                .map { pane, handle in
+                    ("\(handle)", "\(pane.status.icon) \(pane.project)/\(pane.branch) · \(pane.title)")
+                }
         default:
             pool = []
         }
@@ -2632,16 +2634,13 @@ extension MainWindowController {
         tabCoordinator.firstMate.sendUserMessage(text)
     }
 
-    /// The fleet as the command language sees it, with every pane's stable
-    /// handle minted on sight.
+    /// The fleet as the Helm menu offers it, each pane with the core's `#n`.
     func fleetIndex() -> FleetIndex {
-        let registry = PaneHandleRegistry.shared
         let panes = Fleet.shared.allPanes()
             .filter { !FirstMatePane.isFirstMate(worktreePath: $0.worktreePath) }
             .map { pane -> PaneRef in
             let sessionKey = pane.station?.paneSessionKey ?? ""
-            let key = PaneHandleRegistry.key(sessionKey: sessionKey, paneId: pane.id)
-            return PaneRef(handle: registry.handle(for: key), handleKey: key, id: pane.id, sessionKey: sessionKey,
+            return PaneRef(handle: CoreLink.shared.handle(forSession: sessionKey), id: pane.id, sessionKey: sessionKey,
                            project: pane.project, branch: pane.branch, worktreePath: pane.worktreePath,
                            type: pane.agentType.displayName, title: PaneTitleResolver.title(for: pane),
                            // `displayStatus`, the same field the dashboard
@@ -2666,11 +2665,13 @@ extension MainWindowController {
         return FleetIndex(panes: panes, worktrees: worktrees, repos: repos)
     }
 
-    /// The desktop talks to the selected worktree's pane.
+    /// The desktop talks to the selected worktree's pane: its seahelmd
+    /// session, which the core keys panes by (else the app's id, its alias).
     var desktopBoundPaneKey: String? {
         guard let path = dashboardVC?.lastCommittedWorktreePath,
               let pane = Fleet.shared.pane(forWorktree: path) else { return nil }
-        return PaneHandleRegistry.key(sessionKey: pane.station?.paneSessionKey ?? "", paneId: pane.id)
+        let session = pane.station?.paneSessionKey ?? ""
+        return session.isEmpty ? pane.id : session
     }
 
     func selectWorktree(path: String) {

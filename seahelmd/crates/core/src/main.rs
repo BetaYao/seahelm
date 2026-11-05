@@ -20,6 +20,7 @@ mod command;
 mod core;
 mod first_mate;
 mod install;
+mod keys;
 mod poller;
 mod pr;
 mod rpc;

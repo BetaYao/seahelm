@@ -1299,6 +1299,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "libc",
+ "regex",
  "seahelm-core-command",
  "seahelm-core-hooks",
  "seahelm-core-messages",

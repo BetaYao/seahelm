@@ -34,7 +34,16 @@ impl RpcError {
     pub fn not_found(method: &str) -> Self {
         Self { code: -32601, message: format!("method not found: {method}") }
     }
+
+    /// No pane by that name: the app's `ControlError.notFound`, code and
+    /// wording, so the `seahelm` CLI can try the app for a pane the core has
+    /// not heard of yet (one split a moment ago).
+    pub fn pane_not_found(hint: &str) -> Self {
+        Self { code: PANE_NOT_FOUND, message: format!("pane not found: {hint}") }
+    }
 }
+
+pub const PANE_NOT_FOUND: i64 = -32004;
 
 pub type RpcResult = std::result::Result<Value, RpcError>;
 

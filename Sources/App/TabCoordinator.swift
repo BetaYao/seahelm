@@ -497,8 +497,7 @@ class TabCoordinator {
                 let panePane = worktreePanes.first(where: { $0.id == paneStation.id })
                 return PaneDisplayInfo(
                     stationId: paneStation.id,
-                    handle: PaneHandleRegistry.shared.handle(
-                        for: PaneHandleRegistry.key(sessionKey: paneStation.paneSessionKey ?? "", paneId: paneStation.id)),
+                    handle: CoreLink.shared.handle(forSession: paneStation.paneSessionKey),
                     title: panePane.map { PaneTitleResolver.title(for: $0) }
                         ?? PaneTitleResolver.shortenPath(agent.worktreePath),
                     status: panePane?.status ?? .unknown,
@@ -741,6 +740,10 @@ class TabCoordinator {
                             self.adoptCoreSession(session, worktreePath: path)
                         case .paneClosedByRequest(let session, _):
                             self.removePaneEndedByRequest(paneSessionKey: session)
+                        case .presence(let caller, let target, let note):
+                            // A `seahelm` call the core answered: shown as the
+                            // app shows calls on its own socket.
+                            controlDataSource.notePresence(callerPaneId: caller, targetPaneId: target, note: note)
                         case .raw(let ev):
                             // The control socket's subscribers hear the core's
                             // events as the core sent them.

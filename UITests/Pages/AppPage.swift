@@ -43,7 +43,6 @@ class AppPage {
     lazy var modal = ModalPage(app)
     lazy var notifPanel = NotificationPanelPage(app)
     lazy var aiPanel = AIPanelPage(app)
-    lazy var statusBar = StatusBarPage(app)
     lazy var repo = RepoPage(app)
     lazy var dialog = DialogPage(app)
     lazy var splitPane = SplitPanePage(app)

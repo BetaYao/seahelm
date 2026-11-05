@@ -1907,7 +1907,7 @@ final class DashboardOverviewView: NSView {
             self.stationId = pane.stationId
             self.worktreePath = worktreePath
             self.dotLabel = NSTextField(labelWithString: "\u{25CF}")
-            self.handleLabel = NSTextField(labelWithString: "#\(pane.handle)")
+            self.handleLabel = NSTextField(labelWithString: pane.handle.map { "#\($0)" } ?? "")
             self.titleLabel = NSTextField(labelWithString: pane.title)
             super.init(frame: .zero)
             wantsLayer = true
@@ -1958,7 +1958,7 @@ final class DashboardOverviewView: NSView {
             setAccessibilityLabel(pane.title)
             let unseen = pane.status == .idle && pane.unseenCompletion
             dotLabel.textColor = unseen ? UnseenCompletion.color : pane.status.color
-            handleLabel.stringValue = "#\(pane.handle)"
+            handleLabel.stringValue = pane.handle.map { "#\($0)" } ?? ""
             titleLabel.stringValue = pane.title
             titleLabel.textColor = pane.isFocused ? DashboardOverviewView.inkDim : DashboardOverviewView.inkFaint
         }

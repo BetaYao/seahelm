@@ -343,3 +343,20 @@ fn rehome_keeps_history() {
     assert_eq!(last["worktree_path"], "/b");
     assert_eq!(last["old_worktree_path"], "/a");
 }
+
+/// A `git switch` in the worktree a pane already has: the branch follows.
+#[test]
+fn set_branch_follows_a_switch_in_place() {
+    let mut r = Registry::new();
+    register(&mut r, "p", "/a");
+    hook(&mut r, "p", prompt("go"), T0);
+    assert!(r.set_branch("p", "task/next", ""));
+    assert!(!r.set_branch("p", "task/next", ""), "unchanged");
+    assert!(!r.set_branch("nobody", "x", ""));
+    let p = r.pane("p").unwrap();
+    assert_eq!(p.branch, "task/next");
+    assert_eq!(p.worktree_path, "/a");
+    assert_eq!(p.last_user_prompt, "go");
+    assert!(r.set_branch("p", "task/next", "Other"), "a new project counts");
+    assert_eq!(r.pane("p").unwrap().project, "Other");
+}

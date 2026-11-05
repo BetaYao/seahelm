@@ -1,12 +1,12 @@
-//! The stable `#n` every pane carries (`PaneHandleRegistry.swift`): minted
+//! The stable `#n` every pane carries: minted
 //! the first time a pane is seen and never reused, so `#7` means the same
 //! pane in a listing and in a message typed a week later. Keyed by the
 //! pane's seahelmd session name.
 //!
-//! The core keeps its own file and, the first time, takes the app's
-//! (`pane-handles.json`) as its starting point, so handles people already
-//! use keep their meaning. Until the app takes handles from the core, a pane
-//! seen first by one side may get a different number on the other.
+//! The only numbering there is: the apps show these (`pane.list`'s
+//! `handle`). The core keeps its own file and, the first time, took the
+//! macOS app's old `pane-handles.json` as its starting point, so handles
+//! people already used kept their meaning.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
