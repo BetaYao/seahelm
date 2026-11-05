@@ -51,6 +51,7 @@ pub struct Inputs {
     pub tasks: Vec<String>,
     /// Habit level changes since the last brief.
     pub notes: Vec<Text>,
+    pub research: Vec<String>,
 }
 
 fn listed(items: &[String], lang: Lang) -> String {
@@ -125,6 +126,9 @@ pub fn describe_action(lang: Lang, action: super::rules::Action, params: &Value)
 /// fields (`FirstMate::annotate`). None for a line written before those
 /// fields existed: the brief then quotes its text.
 pub fn describe_entry(lang: Lang, e: &Entry) -> Option<String> {
+    if e.kind == "research.started" {
+        return Some(format!("{} {}", lang.pick("Started research under your schedule", "按你创建的调度启动调研"), e.detail.as_deref().unwrap_or_default()));
+    }
     use super::rules::Action;
     let action = Action::parse(e.action.as_deref()?)?;
     let mut p = serde_json::Map::new();
@@ -168,7 +172,7 @@ fn is_approved_delete(e: &Entry) -> bool {
 /// them is quoted as written.
 pub fn compose(i: &Inputs) -> Option<String> {
     let l = i.lang;
-    let actions: Vec<&Entry> = i.entries.iter().filter(|e| e.kind == "action").collect();
+    let actions: Vec<&Entry> = i.entries.iter().filter(|e| matches!(e.kind.as_str(), "action" | "research.started")).collect();
     let name = |e: &&Entry| e.worktree_path.as_deref().map(base_name).unwrap_or_else(|| e.text.clone());
     let by_habit: Vec<String> = actions.iter().filter(|e| is_habit_auto(e)).map(name).collect();
     let approved: Vec<String> = actions.iter().filter(|e| !is_habit_auto(e) && is_approved_delete(e)).map(name).collect();
@@ -208,7 +212,7 @@ pub fn compose(i: &Inputs) -> Option<String> {
             Lang::Zh => format!("{expired} 张卡片没人回，已撤下"),
         });
     }
-    if done.is_empty() && i.waiting.is_empty() && i.suggest.is_empty() && i.tasks.is_empty() && notes.is_empty() {
+    if done.is_empty() && i.waiting.is_empty() && i.suggest.is_empty() && i.tasks.is_empty() && notes.is_empty() && i.research.is_empty() {
         return None;
     }
     let title = match (i.away, i.fallback) {
@@ -242,6 +246,7 @@ pub fn compose(i: &Inputs) -> Option<String> {
     if !notes.is_empty() {
         out.push(format!("{}{}", l.pick("Notes: ", "备注："), notes.join(" · ")));
     }
+    if !i.research.is_empty() { out.push(format!("{}{}", l.pick("Research: ", "调研："), i.research.join(" · "))); }
     Some(out.join("\n"))
 }
 
@@ -403,7 +408,7 @@ impl FirstMate {
 
     /// Quiet hours: the user's own (`first_mate_quiet_hours`) or any known
     /// repo's (the brief is about all of them).
-    fn any_quiet_hours(&mut self, now: f64) -> bool {
+    pub(super) fn any_quiet_hours(&mut self, now: f64) -> bool {
         let local = super::clock::Local::at(now);
         if self.config.quiet_hours.is_some_and(|q| q.contains(&local)) {
             return true;
@@ -425,7 +430,7 @@ impl FirstMate {
     }
 
     fn is_first_mates(&self, payload: &str) -> bool {
-        self.task_cards.contains_key(payload) || self.approvals.contains_key(payload) || self.proposals.contains_key(payload) || self.is_habit_card(payload)
+        self.task_cards.contains_key(payload) || self.approvals.contains_key(payload) || self.proposals.contains_key(payload) || self.is_habit_card(payload) || payload.starts_with("research.stop:")
     }
 
     pub(super) fn send_brief(&mut self, due: Due, channel: BriefChannel, away: Option<f64>, now: f64) {
@@ -444,12 +449,15 @@ impl FirstMate {
             suggest: self.budget.suggest.clone(),
             tasks,
             notes: self.budget.notes.clone(),
+            research: self.research.pending(),
         };
         let Some(text) = compose(&inputs) else {
             self.budget.dealt_with(&day, None);
             self.save_budget();
             return;
         };
+        self.research.delivered();
+        self.research.save(&self.dir);
         self.core.first_mate_brief(&text);
         if channel == BriefChannel::Telegram {
             self.core.publish_event(json!({"type": "first_mate.brief", "text": text, "channel": channel.as_str()}));
@@ -630,6 +638,7 @@ mod tests {
                 Entry::new(1.0, "expired", "withdrawn unanswered after 3 days: …"),
             ],
             waiting: vec!["these 2 worktrees look done:".into(), "First Mate asks: delete x".into()],
+            research: vec![],
             later: 1,
             suggest: vec!["spike-x".into()],
             tasks: vec![],

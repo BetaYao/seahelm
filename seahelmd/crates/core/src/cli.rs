@@ -90,6 +90,8 @@ fn go(args: &[String]) -> Result<(), Fail> {
         ["memory", "confirm", repo, digest] => {
             print(&call("memory.confirm", json!({"repo": repo, "digest": digest}), short)?); Ok(())
         }
+
+        ["research", "summary", name, text] => { print(&call("research.summary", json!({"name": name, "summary": text}), short)?); Ok(()) }
         ["pane", "list", ..] => {
             let v = call("pane.list", json!({}), short)?;
             println!("PANE\tSTATUS\tAGENT\tWORKTREE");

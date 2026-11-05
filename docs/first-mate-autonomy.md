@@ -1,6 +1,6 @@
 # First Mate autonomy: learning to take over the chores
 
-Status: phases 1–8 built (2026-11-05); phase 9 remains design.
+Status: phases 1–9 built (2026-11-05).
 Builds on `docs/first-mate-core.md` (First Mate lives in seahelm-core) and
 `docs/superpowers/specs/2026-11-04-first-mate-surfaces-design.md` (the island).
 
@@ -57,6 +57,10 @@ up**, so that is the first vertical slice.
 | D28 | Task reads default to every 30 minutes per source; configurable from 5 minutes to 7 days. Each tick admits at most four due sources, each reads at most 50 issues, 100 open PRs and 100 recently updated merged PRs. Reads run off the First Mate thread, with request timeouts; failures never start work. Fetchers are injectable and tests use fakes. | 2026-11-05 |
 | D29 | `task.new` is internal candidate data. Only the daily brief lists tasks in “Could do / 可以做” and may raise one proactive selection card, with at most three ranked tasks plus Pass. Its answer is permission for that one `worktree.create`; pause, deny, budgets and deduplication still apply. No task event starts work or raises a card itself. | 2026-11-05 |
 | D30 | Ranking combines priority labels / Jira priority, assignment to the authenticated user, and bounded label preferences from `task.started` / `task.passed`. This is a judgement ranking habit, never an autonomy grant. Answered offers survive restart; unanswered cards become offerable again. A task on an expired card cools down for 7 days before it is offerable again; its second expiry drops it permanently, without user-pass evidence or a ranking penalty; newly assigned tasks may be offered anew; source content cannot become a memory directive. | 2026-11-05 |
+| D31 | Research reports live in `~/seahelm-research`, initialized on first use and registered as an ordinary project. The brief contains only a short change summary and report path, never the full report. | 2026-11-05 |
+| D32 | Global schedule mutations are user-only, peer-checked RPCs; schedule.list is read-only and available to panes. Only the exact job created through `schedule.add` has standing approval; hand edits do not grant starts. Cron fires once per matching minute, without catch-up, only while running, unpaused and outside quiet hours. `run-now` uses the same gates. | 2026-11-05 |
+| D33 | Creating a schedule is the user's standing approval for that job's `start_agent`: otherwise every recurrence would ask again for an action the user explicitly scheduled. The core applies this approval only to its own exact job start, preserving deny and concurrency/usage budgets. Runtime expiry plus 30 seconds of grace or a vanished session ends the run independently of interrupt delivery. Research has a global concurrency cap of one (`MAX_RESEARCH_RUNS`); overflow is skipped and audited. Scheduled starts use `research.started` / `schedule` audit entries, collected into the brief rather than individually sent to Telegram. | 2026-11-05 |
+| D34 | After three consecutive committed reports without a visible worktree visit or a follow-up to First Mate, propose stopping the job through a proactive card. Only the user's answer disables it. First Mate writes a capped change summary on `research.done`; the core stores it for the next brief. A committed report waits for an idle pane or the deadline before closing its session. Cleanup first verifies a linked worktree of the research repo (never main); integration is `--ff-only`. On failure any merge is aborted, the user gets one note and automatic cleanup stops, retaining the branch/worktree. Successful removals use `first_mate`, `how: research:<job>`. Failed runs are reported once; only reports/ and tracked changes are committed as leftovers. Untracked/ignored data is never force-added or deleted: its worktree is retained and the user is told. Launch reservations expire after 120 seconds; timeout/failure notes go to the timeline. Stop-job edits preserve unrelated schedule entries and their formatting. Finished runs retain only bounded report metadata; main is never removed. | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -640,7 +644,7 @@ including dropping a job nobody reads.
    The authenticated identity is read for assignment ranking. Branch names and
    PR bodies are checked again before starting; a failed read starts nothing.
    No GitHub or Jira writeback is implemented: that is a later gated action.
-9. **Global schedules and the research repo.**
+9. **Global schedules and the research repo. As built:** `research.rs`, D31–D34. `schedule.list` is readable by panes; mutations require the user. `seahelm schedule add <name> --cron '<5 fields>' --brief '<task>' [--max-minutes 30] [--pause-above-usage 80] [--disabled]`, `list`, `remove <name>`, `run-now <name>`. Jobs and budgets live in `first-mate/schedules.yml`; approvals, runs and brief summaries in `research.json`. Agents commit `reports/<job>/<date>.md` on ordinary worktree branches; First Mate receives `research.done` and stores a short summary with `seahelm research summary <job> '<summary>'`. Visible worktree visits and follow-ups count as readership; after three unread reports a proactive stop card is offered once until new completion evidence. Summary delivery is tried at most three times, then the brief includes “no summary”. Repo registration uses only `core-repos.json` plus `worktree.discovered`; the app owns `workspace_paths`. Invalid schedule entries are isolated and named by `schedule.list`, and `research.json` is written only when its contents change.
 
 Phases 1–5 solve the worktree pile-up end to end; phase 6 widens the learning loop.
 
@@ -650,8 +654,7 @@ Q1 (memory location), Q2 (brief timing), Q5 (thresholds) and Q6 (the
 `start_agent` mandate) are settled by D7–D10.
 
 Q3 is settled by D27: both Jira variants, credentials in the local 0600 secrets file.
-- **Q4. Research.** Where the research repo lives, and whether reports also go
-  out in full or only as the brief's summary.
+- **Q4. Research.** Settled by D31: `~/seahelm-research`; summaries and paths only.
 Q7 (routing without a named project) is settled by D23: the usual habit
 promotion card may grant auto.
 

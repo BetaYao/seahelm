@@ -31,6 +31,7 @@ pub mod tuning;
 pub mod pane;
 pub mod policy;
 pub mod presence;
+pub mod research;
 pub mod rules;
 pub mod sweep;
 pub mod task_sources;
@@ -114,6 +115,9 @@ pub enum Msg {
     TaskUnavailable { task: task_sources::Task },
     TasksFetched { results: Vec<task_sources::Fetched> },
     TaskReady { task: task_sources::Task, card: String },
+    ResearchLaunched { id: u64, result: Result<research::Run, String> },
+    ResearchSeen { worktrees: Vec<String> },
+    Research { method: String, params: Value, reply: Sender<RpcResult> },
     Gate { action: Action, method: String, params: Value, reply: Sender<Gate> },
     HabitPropose { habit: Value, reply: Sender<RpcResult> },
     Propose { summary: String, options: Vec<Value>, reply: Sender<RpcResult> },
@@ -152,6 +156,9 @@ pub enum Msg {
 pub struct Handle(Sender<Msg>);
 
 impl Handle {
+    pub fn research(&self, method: &str, params: Value) -> RpcResult {
+        self.ask(|reply| Msg::Research { method: method.into(), params, reply }, Err(refused("First Mate is not running")))
+    }
     pub fn send(&self, m: Msg) {
         let _ = self.0.send(m);
     }
@@ -260,6 +267,13 @@ struct FirstMate {
     /// Per worktree with a PR: its repo and branch, and when that was read.
     git_info: HashMap<String, (String, String, Instant)>,
     last_minute: Option<i64>,
+    research: research::State,
+    research_minute: Option<i64>,
+    research_starting: bool,
+    research_launch_id: u64,
+    research_launch_at: Option<f64>,
+    research_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    standing_research: bool,
     latest: Option<(String, String)>,
     next_id: u64,
     /// The habits (`habits`), and the cards about them.
@@ -309,6 +323,8 @@ impl FirstMate {
     fn new(core: Arc<Core>, tx: Sender<Msg>, dir: PathBuf, habits_dir: PathBuf) -> FirstMate {
         let audit = Audit::open(dir.join("audit.jsonl"));
         let latest = audit.recent(50).into_iter().rev().find(Entry::is_notable).map(|e| (e.headline(), e.at));
+        let research = research::State::load(&dir);
+        let research_started = research.active_paths();
         FirstMate {
             tasks: task_sources::State::load(&dir),
             tasks_running: false,
@@ -319,6 +335,13 @@ impl FirstMate {
             ledger: Ledger::open(dir.join("state.json")),
             audit,
             budget: budget::State::load(&budget::State::path(&dir)),
+            research,
+            research_minute: None,
+            research_starting: false,
+            research_launch_id: 0,
+            research_launch_at: None,
+            research_cancel: None,
+            standing_research: false,
             dir,
             detector: Detector::default(),
             config: UserConfig::parse("{}"),
@@ -342,7 +365,7 @@ impl FirstMate {
             reported_invalid: HashSet::new(),
             habit_proposals: HashMap::new(),
             proposals: HashMap::new(),
-            started: HashSet::new(),
+            started: research_started,
             configs: HashMap::new(),
             git_info: HashMap::new(),
             last_minute: None,
@@ -393,6 +416,15 @@ impl FirstMate {
             Msg::TaskUnavailable { task } => self.task_unavailable(&task),
             Msg::TasksFetched { results } => self.tasks_fetched(results),
             Msg::TaskReady { task, card } => self.start_task_ready(task, card),
+            Msg::ResearchLaunched { id, result } => self.research_launched(id, result, now),
+            Msg::ResearchSeen { worktrees } => {
+                self.research.seen(&worktrees);
+                self.research.save(&self.dir);
+            }
+            Msg::Research { method, params, reply } => {
+                let result = self.research_rpc(&method, &params, now);
+                let _ = reply.send(result);
+            }
             Msg::Gate { action, method, params, reply } => {
                 let _ = reply.send(self.gate(action, &method, &params, now));
             }
@@ -494,6 +526,7 @@ impl FirstMate {
         self.ensure_session();
         self.observe_prs(now);
         self.check_schedules(now);
+        self.research_tick(now);
         self.maybe_inventory(now);
         self.maybe_sweep(now);
         self.check_hand_edits(now);
@@ -785,6 +818,8 @@ impl FirstMate {
         if !self.running || t.is_empty() {
             return false;
         }
+        self.research.followup(t);
+        self.research.save(&self.dir);
         self.user_spoke = true;
         self.route_text = t.into();
         self.route_used = false;
@@ -830,7 +865,7 @@ impl FirstMate {
                 return Gate::Deny(why);
             }
         }
-        if action == Action::StartAgent {
+        if action == Action::StartAgent && !self.standing_research {
             if let Some(g) = self.route_gate(params, now) { return g; }
         }
         let mut level = self.level(action);
@@ -844,6 +879,7 @@ impl FirstMate {
             }
             if level == Level::Auto { level = Level::Ask; }
         }
+        if self.standing_research && action == Action::StartAgent && level != Level::Deny { return Gate::Allow; }
         match level {
             Level::Auto => {
                 let mut e = Entry::new(now, "action", summary);
@@ -996,6 +1032,7 @@ impl FirstMate {
             return;
         }
         if self.answer_task(payload, option, now) { return; }
+        if self.research_answer(payload, option) { return; }
         if self.answered_habit(payload, option, via.clone(), now) {
             return;
         }
