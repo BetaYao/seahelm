@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>First Mate 自治设计</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* 布局：左侧目录 + 860px 正文栏；core = 海蓝，First Mate = 黄铜，用户 = 墨色 */
+:root{
+  --bg:#f2f4f6; --surface:#ffffff; --sunk:#e8ecef; --ink:#17212b; --muted:#5b6976; --line:#d6dde3;
+  --accent:#2c6c8c; --accent-soft:#2c6c8c18; --brass:#9c6a12; --brass-soft:#9c6a1218;
+  --ok:#2b7a4b; --warn:#a96400; --bad:#b0281f;
+  --display:"Noto Serif SC","Songti SC",serif;
+  --body:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Noto Sans SC","Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1318; --surface:#151c23; --sunk:#1b242c; --ink:#e2e8ed; --muted:#8c9ba8; --line:#27323c;
+    --accent:#6eb2d1; --accent-soft:#6eb2d11f; --brass:#d8a54a; --brass-soft:#d8a54a1f;
+    --ok:#6cc08b; --warn:#e2a64c; --bad:#ef7c72; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1318; --surface:#151c23; --sunk:#1b242c; --ink:#e2e8ed; --muted:#8c9ba8; --line:#27323c;
+  --accent:#6eb2d1; --accent-soft:#6eb2d11f; --brass:#d8a54a; --brass-soft:#d8a54a1f;
+  --ok:#6cc08b; --warn:#e2a64c; --bad:#ef7c72; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.75 var(--body)}
+a{color:var(--accent)}
+code,.mono{font-family:var(--mono);font-size:.86em}
+code{background:var(--sunk);padding:1px 5px;border-radius:4px}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.shell{display:grid;grid-template-columns:220px minmax(0,860px);gap:48px;max-width:1180px;margin:0 auto;padding:40px 24px 80px}
+nav.toc{position:sticky;top:24px;align-self:start;font-size:13px}
+nav.toc .k{font:600 11px var(--mono);letter-spacing:.12em;color:var(--muted);margin-bottom:10px}
+nav.toc a{display:block;color:var(--muted);text-decoration:none;padding:3px 0 3px 10px;border-left:2px solid var(--line)}
+nav.toc a:hover{color:var(--ink);border-left-color:var(--accent)}
+@media (max-width:900px){.shell{grid-template-columns:1fr;gap:0;padding:24px 16px 60px}nav.toc{display:none}}
+header.hero{padding-bottom:28px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.eyebrow{font:600 11px var(--mono);letter-spacing:.14em;color:var(--brass)}
+h1{font:700 34px/1.25 var(--display);margin:8px 0 12px;text-wrap:balance}
+h2{font:700 23px/1.35 var(--display);margin:56px 0 8px;text-wrap:balance;scroll-margin-top:20px}
+h3{font-size:16px;margin:28px 0 6px}
+p{margin:8px 0;max-width:68ch}
+.lede{font-size:17px;color:var(--muted);max-width:62ch}
+.meta{font:12px var(--mono);color:var(--muted);margin-top:14px}
+.traits{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:22px}
+.trait{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.trait b{display:block;font-size:15px}
+.trait span{font-size:13px;color:var(--muted)}
+.trait .n{font:600 12px var(--mono);color:var(--brass)}
+@media (max-width:560px){.traits{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:16px 0}
+.panel h4{margin:0 0 4px;font-size:14px}
+.note{font-size:13px;color:var(--muted)}
+.tag{display:inline-block;font:600 11px var(--mono);padding:1px 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.t-core{color:var(--accent)} .t-fm{color:var(--brass)} .t-user{color:var(--ink)}
+.t-ok{color:var(--ok)} .t-warn{color:var(--warn)} .t-bad{color:var(--bad)} .t-mute{color:var(--muted)}
+.tbl{overflow-x:auto;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:600}
+td.num{font-family:var(--mono);color:var(--brass);white-space:nowrap}
+.rule{border-left:3px solid var(--brass);background:var(--brass-soft);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;font-weight:600}
+.rule small{display:block;font-weight:400;color:var(--muted);font-size:13px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:640px){.grid2{grid-template-columns:1fr}}
+svg text{font-family:var(--body)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 12px;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.btn.brass{border-color:var(--brass);color:var(--brass)}
+.btn:disabled{opacity:.4;cursor:default}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+/* 习惯阶梯 */
+.ladder{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}
+.rung{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg);transition:all .2s}
+.rung b{display:block;font:600 13px var(--mono)}
+.rung span{font-size:12px;color:var(--muted)}
+.rung.on{border-color:var(--brass);background:var(--brass-soft);box-shadow:0 0 0 1px var(--brass)}
+@media (max-width:560px){.ladder{grid-template-columns:1fr 1fr}}
+.stats{display:flex;flex-wrap:wrap;gap:14px;font:12px var(--mono);color:var(--muted);margin:6px 0 10px}
+.stats b{color:var(--ink)}
+.offer{border:1px dashed var(--brass);border-radius:10px;padding:10px 12px;margin:10px 0;display:none}
+.offer.show{display:block}
+.log{max-height:210px;overflow:auto;font-size:13px;border-top:1px solid var(--line);margin-top:12px;padding-top:8px}
+.log div{padding:3px 0;display:flex;gap:8px}
+.log .who{flex:none;width:76px}
+/* 事实检测 */
+.facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px 16px;margin:10px 0}
+.facts label{font-size:13px;display:flex;flex-direction:column;gap:3px}
+.facts select,.facts input[type=number]{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.verdict{border-radius:10px;padding:12px 14px;margin-top:10px;border:1px solid var(--line)}
+.verdict .big{font-weight:700;font-size:15px}
+/* 卡片 mockup */
+.island{background:#1a1b21;color:#e5e5ec;border-radius:18px;padding:16px 18px;font-size:13px;border:1px solid #ffffff14}
+.island .h{font:600 11px var(--mono);letter-spacing:.1em;color:#90929f;margin-bottom:8px}
+.island .group{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #ffffff10;flex-wrap:wrap}
+.island .group small{color:#90929f;display:block}
+.seg{display:inline-flex;border:1px solid #ffffff22;border-radius:7px;overflow:hidden}
+.seg button{background:none;border:0;color:#b9bac6;padding:4px 10px;font-size:12px}
+.seg button.on{background:#c6b8fc;color:#1a1b21}
+.island .line{padding:4px 0;color:#cfd0da}
+.island .line b{color:#fff}
+.island .acc{color:#c6b8fc}
+.tg{background:#e7ebf0;border-radius:14px;padding:14px;font-size:13px;color:#14202b}
+:root[data-theme="dark"] .tg{background:#1f2933;color:#e6edf3}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .tg{background:#1f2933;color:#e6edf3}}
+.bubble{background:#fff;border-radius:12px;padding:10px 12px;max-width:92%;box-shadow:0 1px 1px #0001}
+:root[data-theme="dark"] .bubble{background:#2b3640}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .bubble{background:#2b3640}}
+.bubble .kb{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.bubble .kb span{flex:1;text-align:center;border-radius:8px;padding:5px;background:#3a8fd61a;color:#2a7fc4;font-size:12px;min-width:90px}
+pre.yaml{background:var(--sunk);border-radius:8px;padding:12px 14px;font:12.5px/1.6 var(--mono);overflow-x:auto;margin:10px 0;white-space:pre}
+/* issue 流程 */
+.steps{list-style:none;padding:0;margin:12px 0;counter-reset:s}
+.steps li{position:relative;padding:8px 10px 8px 40px;border-radius:8px;margin:4px 0;color:var(--muted);transition:all .2s}
+.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:10px;top:9px;width:20px;height:20px;border-radius:50%;border:1px solid var(--line);font:600 11px/18px var(--mono);text-align:center}
+.steps li.done{color:var(--ink);background:var(--accent-soft)}
+.steps li.done::before{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.steps li.stop{color:var(--ink);background:var(--brass-soft)}
+.steps li.stop::before{background:var(--brass);border-color:var(--brass);color:var(--surface)}
+.steps li .out{display:block;font-size:13px;margin-top:2px}
+.urlbox{display:flex;gap:8px;flex-wrap:wrap}
+.urlbox input{flex:1;min-width:220px;font:13px var(--mono);padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.chk{font-size:13px;display:inline-flex;gap:6px;align-items:center}
+.phases{display:grid;gap:8px;margin:12px 0}
+.phase{display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:start;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.phase .n{font:700 18px var(--mono);color:var(--brass)}
+.phase b{display:block;font-size:14px}
+.phase span{font-size:13px;color:var(--muted)}
+.phase.first{border-color:var(--brass)}
+.chat{display:grid;gap:8px;font-size:13px}
+.chat .u{justify-self:end;background:var(--accent-soft);padding:6px 10px;border-radius:10px 10px 2px 10px}
+.chat .f{background:var(--brass-soft);padding:6px 10px;border-radius:10px 10px 10px 2px;justify-self:start}
+.chat .c{justify-self:start;font:12px var(--mono);color:var(--accent);border:1px solid var(--accent);padding:3px 9px;border-radius:999px}
+.chat .x{justify-self:start;font:12px var(--mono);color:var(--bad)}
+footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="toc" aria-label="目录">
+  <div class="k">目录</div>
+  <a href="#goal">目标与原则</a>
+  <a href="#decisions">已定的决策</a>
+  <a href="#loop">原理：学习闭环</a>
+  <a href="#habit">习惯怎么长大</a>
+  <a href="#facts">可测事实</a>
+  <a href="#cleanup">首期：worktree 清理</a>
+  <a href="#budget">打扰预算与简报</a>
+  <a href="#tuning">阈值自调</a>
+  <a href="#issue">一个 issue 链接</a>
+  <a href="#memory">项目记忆</a>
+  <a href="#prior">借鉴：Hermes / OpenClaw / Muse</a>
+  <a href="#scenarios">五个场景</a>
+  <a href="#phases">分期</a>
+  <a href="#open">待定问题</a>
+</nav>
+
+<main>
+<header class="hero" id="goal">
+  <div class="eyebrow">SEAHELM · FIRST MATE · 设计稿</div>
+  <h1>First Mate 自治设计：从看着你做，到替你做</h1>
+  <p class="lede">刚装好的 First Mate 几乎什么都不会。它看你怎么处理 worktree、怎么回卡片、怎么跟 agent 说话，把规律写成"习惯"，攒够证据后再问你一句：以后这件事交给我？</p>
+  <div class="traits">
+    <div class="trait"><span class="n">01</span><b>帮我处理杂活</b><span>清理、建 worktree、拉任务、定时调研</span></div>
+    <div class="trait"><span class="n">02</span><b>从我的操作中学习</b><span>操作、卡片回答、对话，都是证据</span></div>
+    <div class="trait"><span class="n">03</span><b>不过度打扰</b><span>能合并就合并，能事后说就不先问</span></div>
+  </div>
+  <div class="meta">2026-11-05 · 状态：设计讨论中，尚未实现 · 英文版：docs/first-mate-autonomy.md</div>
+</header>
+
+<h2 id="decisions">已定的决策</h2>
+<p>讨论中你拍板的十条。后面每一节都按它们展开。</p>
+<div class="tbl"><table>
+<thead><tr><th>#</th><th>决策</th></tr></thead>
+<tbody>
+<tr><td class="num">D1</td><td><b>放宽必须你点一次头，收紧自动。</b>由 core 强制，提示词说了不算。</td></tr>
+<tr><td class="num">D2</td><td>先解决 worktree 堆积，也用它把学习闭环完整走通。</td></tr>
+<tr><td class="num">D3</td><td>First Mate 从几乎一无所知开始，从你的操作和会话中学，逐步自动化。</td></tr>
+<tr><td class="num">D4</td><td>内置规则（<code>fix-ci</code>、<code>cleanup-merged</code>、<code>triage-issues</code>）保留，作为通用规则；学到的习惯是你个人的，与之并列。</td></tr>
+<tr><td class="num">D5</td><td>可以从你跟各 pane 里 agent 的对话中学习，接受这些内容会发给模型 API。</td></tr>
+<tr><td class="num">D6</td><td>首次开启时发一张"盘点"卡，作为冷启动，这是唯一一次主动打扰。</td></tr>
+<tr><td class="num">D7</td><td>学到的一切都只放本机：习惯、项目记忆都不进仓库。</td></tr>
+<tr><td class="num">D8</td><td>简报不定时，First Mate 学你什么时候、在哪儿看，自己决定发送时机。</td></tr>
+<tr><td class="num">D9</td><td>阈值它自己调，但不超出 core 设定的硬边界。</td></tr>
+<tr><td class="num">D10</td><td>能确定项目的链接（GitHub issue/PR，以后加上已映射的 Jira key）等同于你点了项目名，直接开工，不发卡。</td></tr>
+</tbody></table></div>
+
+<h2 id="loop">原理：学习闭环</h2>
+<p>三个角色，各做各最擅长的事。<span class="tag t-core">core</span> 是确定性代码，负责记账和把关。<span class="tag t-fm">First Mate</span> 是 LLM，负责看出规律。<span class="tag t-user">你</span>负责每一次放宽。</p>
+<div class="panel" style="padding:10px 6px">
+<svg viewBox="0 0 820 300" width="100%" role="img" aria-label="学习闭环：core 记录，First Mate 归纳，你点头，core 执行，执行结果又成为观察">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+  </defs>
+  <g font-size="13">
+    <rect x="20" y="40" width="200" height="96" rx="12" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="36" y="66" font-weight="700" fill="var(--accent)">① 记录 · core</text>
+    <text x="36" y="88" fill="var(--ink)">你做了什么 + 当时的实测事实</text>
+    <text x="36" y="108" fill="var(--muted)" font-size="12">observations.jsonl</text>
+    <text x="36" y="125" fill="var(--muted)" font-size="12">谁删的、删前有没有未推送…</text>
+
+    <rect x="310" y="40" width="200" height="96" rx="12" fill="var(--brass-soft)" stroke="var(--brass)"/>
+    <text x="326" y="66" font-weight="700" fill="var(--brass)">② 归纳 · First Mate</text>
+    <text x="326" y="88" fill="var(--ink)">把零散记录写成一条"习惯"</text>
+    <text x="326" y="108" fill="var(--muted)" font-size="12">空闲时复盘，有 token 预算</text>
+    <text x="326" y="125" fill="var(--muted)" font-size="12">habit propose → 交给 core 校验</text>
+
+    <rect x="600" y="40" width="200" height="96" rx="12" fill="var(--surface)" stroke="var(--ink)"/>
+    <text x="616" y="66" font-weight="700" fill="var(--ink)">③ 点头 · 你</text>
+    <text x="616" y="88" fill="var(--ink)">每次升档都要你的一个"好"</text>
+    <text x="616" y="108" fill="var(--muted)" font-size="12">卡片附证据和例子</text>
+    <text x="616" y="125" fill="var(--muted)" font-size="12">降档不用问你</text>
+
+    <rect x="310" y="190" width="200" height="90" rx="12" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="326" y="216" font-weight="700" fill="var(--accent)">④ 执行 · core</text>
+    <text x="326" y="238" fill="var(--ink)">情况再出现时按事实套用</text>
+    <text x="326" y="258" fill="var(--muted)" font-size="12">条件必须是 core 测得出的事实</text>
+  </g>
+  <path d="M220 88 H306" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+  <path d="M510 88 H596" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+  <path d="M700 136 V235 H514" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+  <path d="M310 235 H120 V140" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)" stroke-dasharray="5 4"/>
+  <text x="128" y="228" font-size="12" fill="var(--muted)">结果又成为新的观察（批准、拒绝、撤销）</text>
+</svg>
+</div>
+<div class="rule">一条习惯只有在触发条件能用 core 实测的事实表达时，才有资格升到"自动"。
+<small>"PR 已合并、全部推送、闲置 3 天"测得出来，可以自动。"跟项目目标无关了"测不出来，最多到"问你"。First Mate 声称"我很确定"不算数。</small></div>
+
+<h3>为什么这样分工</h3>
+<div class="grid2">
+  <div class="panel"><h4 class="t-core">记录和执行放在 core</h4><p class="note">证据要准，不能靠模型回忆。自动执行要由代码把关：模型可能被 issue 正文里的一句话带偏，可能说"记住了"却没调用工具，也可能在长会话里忘掉规则。core 不会。</p></div>
+  <div class="panel"><h4 class="t-fm">归纳放在 First Mate</h4><p class="note">"这 7 次删除其实是同一种情况"、"他说'文档 PR 别管'是一条规则"，这类提炼只有模型做得了。所以它只负责提议，提议要经 core 校验、由你批准，才会生效。</p></div>
+</div>
+
+<h2 id="habit">习惯怎么长大</h2>
+<p>每条习惯有四个档位。往上走一档要证据加你的同意，往下走一档是自动的。下面是一个可以操作的模拟，用"删除已合并且干净的 worktree"这条习惯来演示。</p>
+<div class="panel" id="sim">
+  <div class="ladder" id="ladder">
+    <div class="rung" data-l="0"><b>observe</b><span>只计数，什么都不做</span></div>
+    <div class="rung" data-l="1"><b>suggest</b><span>简报里提一句，不发卡</span></div>
+    <div class="rung" data-l="2"><b>ask</b><span>一键确认后执行</span></div>
+    <div class="rung" data-l="3"><b>auto</b><span>直接做，事后汇报</span></div>
+  </div>
+  <div class="stats" id="stats"></div>
+  <div class="row" id="actions"></div>
+  <div class="offer" id="offer">
+    <div id="offerText"></div>
+    <div class="row" style="margin-top:8px"><button class="btn brass" id="offerYes">好，交给你</button><button class="btn" id="offerNo">先不要</button></div>
+  </div>
+  <div class="log" id="log" aria-live="polite"></div>
+  <div class="row" style="margin-top:10px"><button class="btn" id="simReset">重来</button><span class="note">门槛：同类操作 3 次，跨 2 天、2 个不同 worktree，才进 suggest；连续批准 5 次才会问你要不要转自动。</span></div>
+</div>
+<p class="note">升档卡每个档位只发一次。你说"先不要"，它就重新攒证据，攒够之前不再问。被拒绝、被你撤销，或者卡片连续两次没人理，都会自动降一档，不用问你。</p>
+
+<h3>习惯长什么样</h3>
+<p>按项目存在本机，<code>~/.config/seahelm/first-mate/habits/&lt;repo&gt;.yml</code>，你能看、能改、能删。每条都带出处，所以永远能回答"你凭什么这么做"。</p>
+<pre class="yaml">- id: delete-merged-clean
+  about: worktree.cleanup
+  when: { pr: merged, days_since_merge: "&gt;=1", uncommitted: 0, untracked: 0,
+          ignored_files: 0, unpushed: 0, busy_panes: 0 }
+  do: delete_worktree
+  level: ask            # observe | suggest | ask | auto
+  status: active        # 偏好变了：原地标记 superseded，新旧并排保留
+  observed: 2026-11-05
+  sources: [obs-0012, obs-0031, obs-0040]   # 指回观察记录
+  origin: inventory     # general | inventory | learned | user
+  evidence: { approved: 5, rejected: 0, manual: 3, ignored: 0 }
+  examples: [feat/island-pill, fix/web-question-details]</pre>
+<p>习惯分两种。<b>可测习惯</b>的条件只用 core 的事实词汇，由 core 自己匹配，最高能到 <code>auto</code>。<b>判断习惯</b>的条件是一句话，比如"只改了文档的 PR"，由 First Mate 判断是否适用，core 把它封顶在 <code>ask</code>。</p>
+
+<h3>和现有规则的关系</h3>
+<ul class="note">
+  <li>仓库里的 <code>.seahelm/automations.yml</code> 是人写的、共享的，它给该仓库所有习惯<b>封顶</b>：那里写了 <code>deny</code>，习惯就算到了 <code>auto</code> 也不执行。</li>
+  <li>你批准过的习惯，在它的条件范围内<b>取代</b>你的全局默认值（<code>autopilot_autonomy</code>）。否则 <code>delete_worktree: ask</code> 这个默认值会让任何学来的 <code>auto</code> 都永远动不了。</li>
+  <li>内置规则照常工作（D4）。<code>cleanup-merged</code> 仍然在 PR 合并时触发，习惯在此之外补上每日清扫和学来的阈值。</li>
+</ul>
+
+<h2 id="facts">可测事实：core 看得到什么</h2>
+<p>自动化全靠这张词汇表。今天的 <code>facts.rs</code> 有两个漏洞，第一期就要补：</p>
+<ul>
+  <li><b>看不到被 ignore 的文件。</b><code>git worktree remove</code> 会悄悄删掉 <code>.env</code>、本地笔记、数据文件，卡片上一个字都不提。</li>
+  <li><b>squash 合并后误报"未推送"。</b>仓库在合并后删掉远端分支，分支上的提交就不在任何远端引用上了。其实 GitHub 还保留着 <code>refs/pull/N/head</code>，但现在的 PR 拉取不带 head oid，没法比对。</li>
+</ul>
+<div class="tbl"><table>
+<thead><tr><th>事实</th><th>怎么测</th></tr></thead>
+<tbody>
+<tr><td><code>pr</code></td><td>merged / closed / open / draft / none，来自 core 的 PR 拉取</td></tr>
+<tr><td><code>days_since_merge</code></td><td>PR 的 mergedAt</td></tr>
+<tr><td><code>uncommitted</code> · <code>untracked</code></td><td><code>git status --porcelain</code>（同今天）</td></tr>
+<tr><td><code>ignored_files</code></td><td><code>git status --ignored</code>，减去可重建的目录（node_modules、target、.build、DerivedData、dist、.venv…），剩下的文件名直接写在卡片上</td></tr>
+<tr><td><code>unpushed</code></td><td>HEAD 上既不在任何远端引用、也不在 PR head 下的提交</td></tr>
+<tr><td><code>idle_days</code></td><td>最后一次提交、pane 状态变化、你在该 worktree 里发 prompt，三者取最晚</td></tr>
+<tr><td><code>busy_panes</code></td><td>同今天</td></tr>
+<tr><td><code>identical_to_base</code></td><td><code>git merge-tree</code> 合并进 base 不产生任何改动</td></tr>
+</tbody></table></div>
+
+<h3>试一试：这个 worktree 会怎么处理？</h3>
+<p class="note">假设你已经把"已合并且干净"批准到了 <code>auto</code>。改下面的条件，看 First Mate 走哪条路。</p>
+<div class="panel">
+  <div class="facts">
+    <label for="fPr">PR 状态<select id="fPr"><option value="merged">已合并</option><option value="closed">已关闭未合并</option><option value="open">进行中</option><option value="none">没有 PR</option></select></label>
+    <label for="fIdle">闲置天数<input id="fIdle" type="number" min="0" max="90" value="3"></label>
+    <label for="fUnc">未提交文件<input id="fUnc" type="number" min="0" max="99" value="0"></label>
+    <label for="fUnt">未跟踪文件<input id="fUnt" type="number" min="0" max="99" value="0"></label>
+    <label for="fIgn">被 ignore 的非缓存文件<select id="fIgn"><option value="">无</option><option value=".env">.env</option><option value="notes.md, data/">notes.md, data/</option></select></label>
+    <label for="fUnp">未推送提交<input id="fUnp" type="number" min="0" max="99" value="0"></label>
+    <label for="fBusy">忙碌的 pane<input id="fBusy" type="number" min="0" max="9" value="0"></label>
+  </div>
+  <div class="verdict" id="verdict" aria-live="polite"></div>
+</div>
+
+<h2 id="cleanup">首期：worktree 清理</h2>
+<p>今天的清理只在"看到 PR 合并"这一刻触发一次。First Mate 关着时合并的、PR 被关掉的、做到一半放弃的，都会永远留着。新设计分四步：</p>
+<div class="grid2">
+  <div class="panel"><h4>1 · 补全事实</h4><p class="note">上面那张词汇表，出现在每一张删除卡上。光这一步就能让现有的卡片说实话。</p></div>
+  <div class="panel"><h4>2 · 每日清扫</h4><p class="note">每天一次（First Mate 开启时也扫一次），core 测量每个活着的 worktree 并匹配习惯：auto 的直接删并汇报，ask 的进简报里那张批量卡，suggest 的列一下，其余不动。</p></div>
+  <div class="panel"><h4>3 · 盘点卡（冷启动）</h4><p class="note">worktree 会堆起来，恰恰因为你不删，First Mate 也就没机会学。所以首次开启时，按事实分组发一张卡，你对每组选一次，就是第一批训练数据。</p></div>
+  <div class="panel"><h4>4 · 持续学习</h4><p class="note">之后谁删了 worktree、你怎么回卡，都记成观察。core 用删除前最后一次测量当证据，app 那边几乎不用改。</p></div>
+</div>
+
+<h3>盘点卡：长这样，可以点</h3>
+<div class="grid2">
+  <div class="island" id="inv">
+    <div class="h">FIRST MATE · 盘点 · 24 个 WORKTREE</div>
+    <div class="line">我按实际状态分了组。每组选一次，我就照着学。</div>
+  </div>
+  <div>
+    <div class="note" style="margin-bottom:4px">你的选择会生成这些习惯：</div>
+    <pre class="yaml" id="invOut"></pre>
+    <p class="note">一组选择不管覆盖几个 worktree，都只算<b>一次</b>决定。"有未推送工作"这组只能选留或问，永远不会被学成自动删。</p>
+  </div>
+</div>
+<div class="rule">安全底线：只要未提交、未跟踪、被 ignore 的非缓存文件、未推送提交中有一项大于零，这个 worktree 就不可能被任何 auto 习惯匹配。
+<small>core 根本不接受这样的 auto 条件，攒多少证据都不行。主仓库和集成仓库永远不匹配。删除时保留分支（同今天）。</small></div>
+
+<h2 id="budget">打扰预算与每日简报</h2>
+<p>打扰是最贵的东西，所以要限量供应。</p>
+<div class="tbl"><table>
+<thead><tr><th>通道</th><th>代价</th><th>放什么</th></tr></thead>
+<tbody>
+<tr><td><span class="tag t-mute">静默</span></td><td>零</td><td>只写审计日志</td></tr>
+<tr><td><span class="tag t-core">汇报</span></td><td>低</td><td>对话里的一行，汇总进简报：auto 习惯做了什么</td></tr>
+<tr><td><span class="tag t-warn">卡片</span></td><td>高</td><td>只给 ask 档、或者你自己的请求正在等的东西</td></tr>
+</tbody></table></div>
+<ul class="note">
+  <li><b>主动发现的东西一律只进简报</b>：拉来的任务、调研结果、suggest 档的习惯，哪儿都不发。</li>
+  <li><b>卡片会过期</b>：几天没人理就收回，并记为"不感兴趣"，连续两次就把对应习惯降一档。</li>
+  <li><b>每天主动卡片有上限</b>（初始 3 张，会自调），超出的等下一份简报。回应你本人请求的卡片不占额度。</li>
+  <li>静默时段照旧。</li>
+</ul>
+
+<h3>简报什么时候发：学你的作息（D8）</h3>
+<p>不设固定时间。core 本来就知道你什么时候在电脑前（各客户端的 <code>app_active</code>）、什么时候给 agent 打字、什么时候在 Telegram 上回卡片。</p>
+<div class="panel">
+  <div class="row" style="margin-bottom:8px">
+    <button class="btn primary" id="dayDesk" aria-pressed="true">今天在电脑前</button>
+    <button class="btn" id="dayAway" aria-pressed="false">今天出门了</button>
+  </div>
+  <svg id="daySvg" viewBox="0 0 820 150" width="100%" role="img" aria-label="一天的活跃时间与简报发送时机"></svg>
+  <p class="note" id="dayText"></p>
+</div>
+<div class="grid2">
+  <div>
+    <div class="note" style="margin-bottom:6px">在电脑前：island 打开时第一眼看到</div>
+    <div class="island">
+      <div class="h">FIRST MATE · 早上好 · 离开了 13 小时</div>
+      <div class="line"><span class="acc">做了</span>：删了 3 个已合并的 worktree（<b>feat/island-pill</b> 等）；提醒 #7 修 CI，已推送。</div>
+      <div class="line"><span class="acc">等你</span>：2 个 PR 关闭未合并的 worktree，<b>一键处理</b>。</div>
+      <div class="line"><span class="acc">可以做</span>：seahelm #312（分配给你，P1）。</div>
+      <div class="line"><span class="acc">调研</span>：终端复用器周报，和上周比新增 2 条。</div>
+      <div class="line" style="color:#90929f">清理这类以后少问你：最近 6 次你都批了。</div>
+    </div>
+  </div>
+  <div>
+    <div class="note" style="margin-bottom:6px">出门：Telegram 补发一次</div>
+    <div class="tg"><div class="bubble">
+      <b>First Mate · 今日简报</b><br>
+      删了 3 个已合并的 worktree。2 个关闭未合并的等你决定。#312 可以开工。
+      <div class="kb"><span>删掉那 2 个</span><span>开工 #312</span><span>都先不管</span></div>
+    </div></div>
+  </div>
+</div>
+
+<h2 id="tuning">阈值自调（D9）</h2>
+<p>这些阈值只决定<b>什么时候问你</b>，不决定<b>什么时候动手</b>。所以让它自己调，不会绕开 D1。core 守住边界，每次调整都写审计日志，并在简报里说一句。</p>
+<div class="tbl"><table>
+<thead><tr><th>阈值</th><th>初始</th><th>边界</th><th>调低，当…</th><th>调高，当…</th></tr></thead>
+<tbody>
+<tr><td>N：同类操作几次后提议习惯</td><td class="num">3</td><td class="num">2–10</td><td>提议常被接受</td><td>提议常被拒</td></tr>
+<tr><td>M：连续批准几次后问转自动</td><td class="num">5</td><td class="num">3–20</td><td>升档常被接受</td><td>升档被拒，或升了又被降</td></tr>
+<tr><td>卡片过期</td><td class="num">3 天</td><td class="num">1–7 天</td><td>你回卡很快</td><td>你回得晚，但确实会回</td></tr>
+<tr><td>每天主动卡片上限</td><td class="num">3</td><td class="num">1–5</td><td>卡片没人理就过期</td><td>每张都回了</td></tr>
+</tbody></table></div>
+
+<h2 id="issue">你发一个 issue 链接，会发生什么</h2>
+<p>这是"一句话建 worktree"最典型的情况。链接本身就能确定是哪个项目，所以不用卡片（D10）。</p>
+<div class="panel">
+  <div class="urlbox"><label class="note" for="issueUrl" style="width:100%">发给 First Mate：</label><input id="issueUrl" value="https://github.com/BetaYao/seahelm/issues/123"><button class="btn primary" id="issueGo">发送</button></div>
+  <div class="row" style="margin-top:8px">
+    <label class="chk"><input type="checkbox" id="optExists"> 已经有 #123 的分支</label>
+    <label class="chk"><input type="checkbox" id="optClosed"> issue 已关闭</label>
+    <label class="chk"><input type="checkbox" id="optNoRepo"> 本地没有这个仓库</label>
+  </div>
+  <ol class="steps" id="steps">
+    <li data-s="0">定项目<span class="out"></span></li>
+    <li data-s="1">查重<span class="out"></span></li>
+    <li data-s="2">值不值得做<span class="out"></span></li>
+    <li data-s="3">开工<span class="out"></span></li>
+    <li data-s="4">从你接下来的动作里学<span class="out"></span></li>
+  </ol>
+</div>
+<p class="note">Jira 链接也一样，只是第一次要问你这个 project key 对应哪个仓库。你答了之后，它就记成一条别名习惯。没带链接的"修一下登录 500"，要你点了项目名或用了已学会的别名才免确认，否则发一张卡，给 2–3 个候选项目。</p>
+
+<h2 id="memory">项目记忆</h2>
+<p>每个项目一份，放本机（D7）：目标、当前里程碑、优先级、禁区、完成标准，再加上学来的笔记，比如"提交前先跑测试"、"PR 总结用中文"。</p>
+<div class="grid2">
+  <div class="panel"><h4>来源</h4><p class="note">你对 First Mate 说"记住……"；复盘时读你反复对 agent 说的话（D5）。只从<b>你本人</b>的操作和话语中学。agent 的输出、issue 正文、网页、邮件只当作数据，永远不会变成指令。</p></div>
+  <div class="panel"><h4>让每个 agent 都看到，又不进仓库</h4><p class="note">core 本来就会在每个 seahelm pane 里 agent 的 SessionStart 时注入 suggest 引导（<code>core-hooks/src/suggest.rs</code>）。项目记忆一起附上，Claude、Codex、Cursor 启动就带着它。有长度上限（约 2000 字符），附带占用比例，逼 First Mate 主动精简。</p></div>
+</div>
+<h3>写入由 core 确认</h3>
+<p>Hermes 最常见的故障，是模型嘴上说"记住了"，其实没调用工具。我们的做法：First Mate 只能通过 core 写入，"记下了"这一行由 core 回显。</p>
+<div class="grid2">
+  <div class="panel"><div class="chat">
+    <div class="u">记住，seahelm 的 PR 总结用中文</div>
+    <div class="f">好的，记下了。</div>
+    <div class="c">✓ core：记下了 · seahelm 记忆 · 1,180/2,000</div>
+  </div><p class="note">有回显，说明写进了文件。</p></div>
+  <div class="panel"><div class="chat">
+    <div class="u">记住，seahelm 的 PR 总结用中文</div>
+    <div class="f">好的，记下了。</div>
+    <div class="x">（没有 core 回显）</div>
+  </div><p class="note">没有回显就是没存，一眼看得出来。</p></div>
+</div>
+<p class="note">每次修改都保留旧版本，说"撤销"就回退。遗忘顺着来源链删除：一条观察被删掉，只靠它撑着的习惯会跟着降级。</p>
+
+<h2 id="prior">借鉴：Hermes、OpenClaw、Muse</h2>
+<p class="note">Hermes 和 OpenClaw 的内容来自它们仓库里的官方文档。Muse 闭源，信息来自媒体报道。</p>
+<div class="tbl"><table>
+<thead><tr><th></th><th>Hermes</th><th>OpenClaw</th><th>Meta Muse</th></tr></thead>
+<tbody>
+<tr><td>常驻记忆</td><td>MEMORY.md 2,200 字符 + USER.md，硬上限，显示占用比例</td><td>USER.md 4,000 字符指令 + MEMORY.md</td><td>云端虚拟机里的一份可编辑记忆文件</td></tr>
+<tr><td>检索层</td><td>全部会话存 SQLite 全文检索</td><td>每日笔记，向量 + 关键词混合检索</td><td>—</td></tr>
+<tr><td>写入</td><td>agent 调工具；每约 10 轮后台复盘</td><td>压缩前静默落盘；夜间"做梦"按频率、多样性、跨天重复打分后才提升</td><td>每小时给你生活里的每个人更新档案</td></tr>
+<tr><td>控制</td><td>可选写入审批；学习时间线；整理器只归档不删</td><td>原地标记作废；按会话来源遗忘；被污染的记忆移出上下文</td><td>遗忘"尽力而为"，没有总开关</td></tr>
+</tbody></table></div>
+<div class="grid2">
+  <div class="panel"><h4 class="t-ok">我们拿来的</h4><ul class="note">
+    <li>常驻记忆小而有上限，其余放检索层</li>
+    <li>条目带观察日期、状态、出处，原地作废</li>
+    <li>提议习惯前过门槛：次数 + 跨天 + 跨 worktree</li>
+    <li>空闲时复盘、有预算、开启满一天才首次复盘</li>
+    <li>一切可撤销，遗忘顺着来源链走</li>
+    <li>只从用户本人学；外部内容是数据，不是指令</li>
+    <li>写入由 core 回显确认</li>
+  </ul></div>
+  <div class="panel"><h4 class="t-bad">我们拒绝的（Muse 的教训）</h4><ul class="note">
+    <li>不给任何人建档，不推断第三方的信息</li>
+    <li>遗忘是真删除，不是"尽力而为"</li>
+    <li>学习有一个总开关</li>
+    <li>记忆只在本机，你能读、能改、能删</li>
+  </ul></div>
+</div>
+<h3>未来：邮箱和日历</h3>
+<p class="note"><b>日历</b>让作息学习更准：开会时不发卡，简报在会议间隙发。<b>邮件</b>是又一个任务来源，跟 GitHub、Jira 并列，只进简报。规则借鉴 OpenClaw：只读连接；邮件交给隔离的读取器，产出的摘要标记为不可信；这两类来源都不会变成习惯或指令；每个来源可以单独开关。</p>
+
+<h2 id="scenarios">五个场景，放进这个框架</h2>
+<div class="tbl"><table>
+<thead><tr><th>场景</th><th>今天</th><th>设计</th><th>打扰</th></tr></thead>
+<tbody>
+<tr><td><b>1 清理 worktree</b></td><td>只在看到 PR 合并时触发</td><td>补全事实 + 每日清扫 + 盘点冷启动 + 学习</td><td>auto 汇报；其余进一张批量卡</td></tr>
+<tr><td><b>2 一句话建 worktree</b></td><td>First Mate 没有项目列表；你亲口要求也要再点一下卡片</td><td>项目列表 + 一行描述 + 学来的别名；链接或点名项目即免确认</td><td>开工后汇报一行；不确定时给 2–3 个候选</td></tr>
+<tr><td><b>3 拉任务</b></td><td>GitHub 晨间分诊（默认关），没有 Jira</td><td>按项目配置来源，core 轮询、去重；你点了什么、略过了什么，用来学排序</td><td>只进简报</td></tr>
+<tr><td><b>4 定时调研</b></td><td>定时任务只能挂在某个仓库下</td><td>全局定时任务；专用调研仓库，报告即提交；First Mate 总结"比上次变了什么"</td><td>只进简报；没人看的任务会被提议停掉</td></tr>
+<tr><td><b>5 项目记忆</b></td><td>只有一个全局 standing-orders</td><td>按项目本机存储，SessionStart 注入，带上限和回显</td><td>无</td></tr>
+</tbody></table></div>
+
+<h2 id="phases">分期（每期一个 PR）</h2>
+<div class="phases">
+  <div class="phase first"><div class="n">1</div><div><b>补全事实</b><span>被 ignore 的非缓存文件、PR head oid、闲置天数、identical_to_base，出现在每张删除卡上</span></div><span class="tag t-fm">首期</span></div>
+  <div class="phase first"><div class="n">2</div><div><b>观察日志</b><span>记录 worktree 的增删（谁做的 + 删前事实）、卡片回答、卡片过期</span></div><span class="tag t-fm">首期</span></div>
+  <div class="phase first"><div class="n">3</div><div><b>习惯与清扫</b><span>习惯存储、core 匹配、四个档位、升档卡与自动降档（落实 D1）、每日清扫</span></div><span class="tag t-fm">首期</span></div>
+  <div class="phase first"><div class="n">4</div><div><b>盘点卡</b><span>首次开启时按事实分组，你的回答生成第一批习惯</span></div><span class="tag t-fm">首期</span></div>
+  <div class="phase first"><div class="n">5</div><div><b>打扰预算</b><span>学作息的简报、汇报与卡片分流、过期计入证据、每日上限</span></div><span class="tag t-fm">首期</span></div>
+  <div class="phase"><div class="n">6</div><div><b>归纳</b><span>learn.review、habit propose / note、判断习惯、阈值自调</span></div></div>
+  <div class="phase"><div class="n">7</div><div><b>项目记忆与路由</b><span>记忆文件、SessionStart 注入、别名、链接免确认</span></div></div>
+  <div class="phase"><div class="n">8</div><div><b>任务来源</b><span>先 GitHub，再 Jira</span></div></div>
+  <div class="phase"><div class="n">9</div><div><b>全局定时任务与调研仓库</b><span>报告即提交，"比上次变了什么"</span></div></div>
+</div>
+<p class="note">1–5 期做完，worktree 堆积问题就彻底解决了；6 期往后把同一个闭环推广到其他场景。</p>
+
+<h2 id="open">待定问题</h2>
+<div class="tbl"><table><tbody>
+<tr><td class="num">Q3</td><td><b>Jira</b>：Cloud（邮箱 + API token）还是自建（PAT）？凭据放 Keychain，还是放 seahelm-gateway（它已经管着 Telegram 的密钥）？做到第 8 期再定。</td></tr>
+<tr><td class="num">Q4</td><td><b>调研仓库</b>放哪？报告只在简报里出摘要，还是也全文推送？做到第 9 期再定。</td></tr>
+<tr><td class="num">Q7</td><td><b>没带链接的需求</b>（"修一下登录 500"）：First Mate 判断项目连续对了 M 次之后，能不能也像其他习惯一样升到自动？</td></tr>
+</tbody></table></div>
+
+<footer>seahelm · First Mate 自治设计 · 2026-11-05 · 源文档 docs/first-mate-autonomy.md（英文）</footer>
+</main>
+</div>
+
+<script>
+(function(){
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+  /* ---------- 习惯阶梯模拟 ---------- */
+  const N = 3, M = 5;
+  const names = ['feat/island-pill','fix/web-question-details','task/design-discussion','feat/pane-fork','fix/ci-flake','feat/usage-bar','chore/purge-zmx'];
+  let S;
+  function reset(){ S = {level:0, manual:0, days:new Set(), wts:new Set(), day:1, streak:0, ignored:0, declinedAt:undefined, offer:null, pending:null, i:0, log:[]}; add('core','开始观察：习惯"删除已合并且干净的 worktree"，档位 observe'); render(); }
+  const dayName = d => ['周一','周二','周三','周四','周五','周六','周日'][(d-1)%7];
+  function add(who, text){ S.log.unshift({who, text}); }
+  function nextName(){ const n = names[S.i % names.length]; S.i++; return n; }
+  function down(why){ if(S.level>0){ S.level--; add('core', '降一档 → '+['observe','suggest','ask','auto'][S.level]+'（'+why+'，不用问你）'); } S.streak=0; S.ignored=0; S.offer=null; }
+  function maybeOffer(){
+    if(S.offer) return;
+    if(S.level===0 && S.manual>=N && S.days.size>=2 && S.wts.size>=2){ S.level=1; add('core','证据够了（'+S.manual+' 次、'+S.days.size+' 天、'+S.wts.size+' 个 worktree）→ suggest：简报里提一句'); }
+    if(S.level===1 && (S.declinedAt===undefined || S.manual>=S.declinedAt+N)){ S.offer={to:2, text:'<b>First Mate：</b>你已经手动删了 '+S.manual+' 个"已合并 · 干净"的 worktree。以后遇到这类，我先问你一下再删？'}; }
+    if(S.level===2 && S.streak>=M){ S.offer={to:3, text:'<b>First Mate：</b>这类删除你连续批准了 '+S.streak+' 次，一次没拒。以后我直接删，在简报里告诉你？'}; }
+  }
+  function act(kind){
+    if(kind==='manual'){ const n=nextName(); S.manual++; S.wts.add(n); S.days.add(dayName(S.day)); add('user','你手动删了 '+n+'（已合并 · 干净）'); if(S.level>=2){ add('core','你自己动手了，记为一次同意'); } }
+    if(kind==='day'){ S.day++; add('core','到了'+dayName(S.day)); }
+    if(kind==='card'){ S.pending=nextName(); add('fm','发卡：删除 '+S.pending+'？（已合并 · 干净 · 闲置 2 天）'); }
+    if(kind==='approve'){ S.streak++; S.ignored=0; add('user','你批准了，删除 '+S.pending+'（连续批准 '+S.streak+' 次）'); S.pending=null; }
+    if(kind==='reject'){ add('user','你拒绝了删除 '+S.pending); S.pending=null; down('被拒绝'); }
+    if(kind==='ignore'){ S.ignored++; add('core','卡片过期没人理（第 '+S.ignored+' 次）'); S.pending=null; if(S.ignored>=2) down('连续两次没人理'); }
+    if(kind==='autodel'){ const n=nextName(); add('fm','自动删了 '+n+'，写进简报'); S.lastAuto=n; }
+    if(kind==='undo'){ add('user','你撤销了：恢复了 '+(S.lastAuto||'刚才那个')); S.lastAuto=null; down('被你撤销'); }
+    maybeOffer(); render();
+  }
+  function answer(yes){
+    const o=S.offer; S.offer=null;
+    if(yes){ S.level=o.to; S.streak=0; add('user','你同意了 → 升到 '+['observe','suggest','ask','auto'][o.to]); }
+    else { if(o.to===2) S.declinedAt=S.manual; S.streak=0; add('user','你说先不要，攒到新证据之前不再问'); }
+    render();
+  }
+  function render(){
+    document.querySelectorAll('#ladder .rung').forEach(r => r.classList.toggle('on', +r.dataset.l===S.level));
+    $('#stats').innerHTML = '手动删除 <b>'+S.manual+'</b> · 天数 <b>'+S.days.size+'</b> · 不同 worktree <b>'+S.wts.size+'</b> · 连续批准 <b>'+S.streak+'</b>/'+M+' · 今天 <b>'+dayName(S.day)+'</b>';
+    const A = $('#actions'); A.innerHTML='';
+    const b = (t,k,cls,dis) => { const e=document.createElement('button'); e.className='btn '+(cls||''); e.textContent=t; e.disabled=!!dis; e.onclick=()=>act(k); A.appendChild(e); };
+    const blocked = !!S.offer;
+    if(S.level<=1){ b('你手动删一个','manual','',blocked); b('过一天','day','',blocked); }
+    if(S.level===2){
+      if(!S.pending){ b('有一个符合条件的 worktree 出现','card','primary',blocked); b('你手动删一个','manual','',blocked); }
+      else { b('批准','approve','primary'); b('拒绝','reject'); b('不理它（过期）','ignore'); }
+    }
+    if(S.level===3){ b('有一个符合条件的 worktree 出现','autodel','primary'); b('你撤销刚才那次','undo','',!S.lastAuto); }
+    $('#offer').classList.toggle('show', !!S.offer);
+    if(S.offer) $('#offerText').innerHTML = S.offer.text;
+    const tag = {core:'<span class="tag t-core">core</span>', fm:'<span class="tag t-fm">First Mate</span>', user:'<span class="tag t-user">你</span>'};
+    $('#log').innerHTML = S.log.map(l => '<div><span class="who">'+tag[l.who]+'</span><span>'+esc(l.text)+'</span></div>').join('');
+  }
+  $('#offerYes').onclick=()=>answer(true); $('#offerNo').onclick=()=>answer(false); $('#simReset').onclick=reset;
+  reset();
+
+  /* ---------- 事实检测 ---------- */
+  const fields = ['fPr','fIdle','fUnc','fUnt','fIgn','fUnp','fBusy'];
+  function verdict(){
+    const v = id => $('#'+id).value; const n = id => Math.max(0, +v(id)||0);
+    const pr=v('fPr'), idle=n('fIdle'), unc=n('fUnc'), unt=n('fUnt'), ign=v('fIgn'), unp=n('fUnp'), busy=n('fBusy');
+    const loss=[]; if(unc) loss.push(unc+' 个未提交文件'); if(unt) loss.push(unt+' 个未跟踪文件'); if(ign) loss.push('被 ignore 的 '+ign); if(unp) loss.push(unp+' 个未推送提交');
+    let cls, head, why;
+    if(busy){ cls='t-mute'; head='不动'; why='有 '+busy+' 个 pane 正在工作。正在忙的 worktree 永远不碰。'; }
+    else if(loss.length && pr==='merged'){ cls='t-warn'; head='进批量卡，并写明会丢什么'; why='PR 已合并，但删掉会丢：'+loss.join('、')+'。有损失的永远不能自动删，卡片上会逐项列出。'; }
+    else if(loss.length){ cls='t-mute'; head=idle>=30?'简报里提一句':'不动'; why='还有 '+loss.join('、')+'。'+(idle>=30?'闲置 '+idle+' 天了，在简报里提醒你看一眼，不发卡。':'看起来还在进行中。'); }
+    else if(pr==='merged' && idle>=1){ cls='t-ok'; head='自动删除，写进简报'; why='已合并、什么都不会丢、闲置 '+idle+' 天，匹配你批准过的 auto 习惯。分支保留，提交也在 refs/pull 下，随时能找回。'; }
+    else if(pr==='merged'){ cls='t-mute'; head='再等等'; why='刚合并，习惯要求闲置满 1 天，给你留个反悔的窗口。'; }
+    else if(pr==='closed'){ cls='t-warn'; head='进批量卡'; why='PR 关了但没合并，这是你的判断题。删不删由你决定，你的选择会成为证据。'; }
+    else if(idle>=30){ cls='t-mute'; head='简报里提一句'; why='闲置 '+idle+' 天、没有损失，但也没合并。只是提醒，不发卡。'; }
+    else { cls='t-mute'; head='不动'; why='进行中，或者还没开 PR。'; }
+    $('#verdict').innerHTML = '<div class="big '+cls+'">'+head+'</div><div class="note">'+esc(why)+'</div>';
+  }
+  fields.forEach(id => $('#'+id).addEventListener('input', verdict)); verdict();
+
+  /* ---------- 盘点卡 ---------- */
+  const groups = [
+    {k:'merged-clean', t:'已合并 · 干净', d:'12 个 · 什么都不会丢', opts:['删','留','每次问我'], pick:0},
+    {k:'closed-unmerged', t:'PR 已关闭、没合并', d:'3 个 · 提交都在远端', opts:['删','留','每次问我'], pick:2},
+    {k:'idle-30', t:'30 天以上没动、无未推送', d:'5 个 · 没有 PR', opts:['删','留','每次问我'], pick:2},
+    {k:'unpushed', t:'有未推送的工作', d:'4 个 · 删了会丢东西', opts:['留','每次问我'], pick:0}
+  ];
+  const inv = $('#inv');
+  groups.forEach((g,gi) => {
+    const row = document.createElement('div'); row.className='group';
+    row.innerHTML = '<div><b>'+g.t+'</b><small>'+g.d+'</small></div>';
+    const seg = document.createElement('div'); seg.className='seg'; seg.setAttribute('role','group'); seg.setAttribute('aria-label', g.t);
+    g.opts.forEach((o,oi) => { const bt=document.createElement('button'); bt.textContent=o; bt.onclick=()=>{g.pick=oi; drawInv();}; seg.appendChild(bt); });
+    row.appendChild(seg); inv.appendChild(row);
+  });
+  function drawInv(){
+    inv.querySelectorAll('.seg').forEach((seg,gi) => seg.querySelectorAll('button').forEach((b,oi) => { b.classList.toggle('on', oi===groups[gi].pick); b.setAttribute('aria-pressed', oi===groups[gi].pick); }));
+    const out = groups.map(g => {
+      const o = g.opts[g.pick];
+      const lv = o==='删' ? 'ask      # 先一键确认，攒够批准再问你转 auto' : o==='留' ? 'keep     # 这组不再提' : 'observe  # 继续看你怎么做';
+      return '- id: '+g.k+'\n  level: '+lv+'\n  origin: inventory\n  evidence: { decisions: 1 }';
+    }).join('\n');
+    $('#invOut').textContent = out;
+  }
+  drawInv();
+
+  /* ---------- 作息与简报 ---------- */
+  const svg = $('#daySvg'); const W=820, x0=30, x1=800, X = h => x0 + (x1-x0)*h/24;
+  function day(mode){
+    $('#dayDesk').classList.toggle('primary', mode==='desk'); $('#dayAway').classList.toggle('primary', mode==='away');
+    $('#dayDesk').setAttribute('aria-pressed', mode==='desk'); $('#dayAway').setAttribute('aria-pressed', mode==='away');
+    const typical = [[9.3,12.2],[13.5,19],[21,23.4]];
+    const today = mode==='desk' ? [[10.1,12.5],[14,18.6]] : [[19.5,20.2]];
+    let s = '';
+    s += '<rect x="'+X(0)+'" y="24" width="'+(X(8)-X(0))+'" height="84" fill="var(--sunk)"/><rect x="'+X(23)+'" y="24" width="'+(X(24)-X(23))+'" height="84" fill="var(--sunk)"/>';
+    s += '<text x="'+(X(0)+6)+'" y="40" font-size="11" fill="var(--muted)">静默时段</text>';
+    for(let h=0; h<=24; h+=3){ s += '<line x1="'+X(h)+'" x2="'+X(h)+'" y1="24" y2="108" stroke="var(--line)"/><text x="'+X(h)+'" y="126" font-size="11" text-anchor="middle" fill="var(--muted)">'+h+':00</text>'; }
+    s += '<text x="'+x0+'" y="16" font-size="11" fill="var(--muted)">平时（学到的作息）</text>';
+    typical.forEach(([a,b]) => s += '<rect x="'+X(a)+'" y="48" width="'+(X(b)-X(a))+'" height="16" rx="4" fill="var(--accent-soft)" stroke="var(--accent)" stroke-dasharray="3 3"/>');
+    s += '<text x="'+x0+'" y="88" font-size="11" fill="var(--muted)" dy="-6">今天</text>';
+    today.forEach(([a,b]) => s += '<rect x="'+X(a)+'" y="80" width="'+(X(b)-X(a))+'" height="16" rx="4" fill="var(--accent)"/>');
+    let at, label, text;
+    if(mode==='desk'){ at=10.1; label='回到电脑前 → island 发简报'; text='离开超过 4 小时后，10:06 第一次回到电脑前，简报就在这一刻发到 island，成为你看到的第一条，而不是从 9:00 起一直放在那里。'; }
+    else { at=10.3; label='过了平时开工 + 1 小时 → Telegram 补发一次'; text='平时 9:20 左右开工。今天到 10:20 还没回到电脑前，简报就往 Telegram 补发一次。晚上回来不会再发第二份，一天只发一次。'; }
+    s += '<line x1="'+X(at)+'" x2="'+X(at)+'" y1="20" y2="112" stroke="var(--brass)" stroke-width="2"/><circle cx="'+X(at)+'" cy="20" r="4" fill="var(--brass)"/>';
+    s += '<text x="'+(X(at)+8)+'" y="24" font-size="12" font-weight="700" fill="var(--brass)">'+label+'</text>';
+    svg.innerHTML = s; $('#dayText').textContent = text;
+  }
+  $('#dayDesk').onclick=()=>day('desk'); $('#dayAway').onclick=()=>day('away'); day('desk');
+
+  /* ---------- issue 链接流程 ---------- */
+  function runIssue(){
+    const url = $('#issueUrl').value.trim();
+    const m = url.match(/github\.com\/([^\/]+)\/([^\/]+)\/(issues|pull)\/(\d+)/);
+    const lis = [...document.querySelectorAll('#steps li')];
+    lis.forEach(li => { li.className=''; li.querySelector('.out').textContent=''; });
+    const set = (i, cls, t) => { lis[i].className=cls; lis[i].querySelector('.out').textContent=t; };
+    if(!m){ set(0,'stop','这不是 GitHub issue/PR 链接。First Mate 会当作一句普通需求处理：点了项目名就开工，否则发卡给候选项目。'); return; }
+    const [_, owner, repo, , num] = m;
+    const exists=$('#optExists').checked, closed=$('#optClosed').checked, norepo=$('#optNoRepo').checked;
+    const plan = [];
+    if(norepo){ plan.push([0,'stop','本地没有哪个仓库的 remote 是 '+owner+'/'+repo+'。发一张卡："clone 到 ~/workspace 并加入项目？"']); }
+    else {
+      plan.push([0,'done','core 用 git remote 对上本地仓库 '+repo+'。这是实测匹配，等于你点了项目名，不发卡。']);
+      if(exists){ plan.push([1,'stop','已经有 fix/'+num+'-login-500，pane #7 闲着。告诉你在哪，并提议跳过去，不重复建。']); }
+      else {
+        plan.push([1,'done','没有分支、PR 或 brief 提到 #'+num+'。']);
+        if(closed){ plan.push([2,'stop','gh issue view 显示它已关闭。说明一下就停，不动手。']); }
+        else {
+          plan.push([2,'done','读了 issue：是个 bug，有复现步骤，值得做。']);
+          plan.push([3,'done','建 fix/'+num+'-login-500（按你习惯的分支命名），brief 带上 issue、项目记忆和"PR 里写 Closes #'+num+'"。回你一行："已在 '+repo+' 建 fix/'+num+'-login-500，#9 在做"。']);
+          plan.push([4,'done','接下来你改了分支名、跟 agent 说"先出方案"、或者换了项目，都会记成观察，攒够了就提议成习惯。']);
+        }
+      }
+    }
+    plan.forEach(([i,c,t],k) => setTimeout(() => set(i,c,t), 260*k));
+  }
+  $('#issueGo').onclick=runIssue; ['optExists','optClosed','optNoRepo'].forEach(id => $('#'+id).addEventListener('change', runIssue));
+  runIssue();
+})();
+</script>
+</body>
+</html>
