@@ -50,9 +50,9 @@ up**, so that is the first vertical slice.
 | D21 | Tuning lives in budget.json under first-mate, with bounded N 2–10, M 3–20, expiry 1–7 days and cap 1–5. Six consistent outcomes move a knob one step; acceptance/decline adjusts N, auto promotion acceptance/decline (including subsequent auto demotions) adjusts M, answers within an hour / after a day adjust expiry, answered/expired cards adjust cap. Dismissal supplies neither an answer nor latency, rule approvals supply response timing only, and demotion supplies promotion evidence without resetting the expired streak. Each actual move writes an audit line and one brief note; it grants no level. | 2026-11-05 |
 | D22 | Core card delivery translates built-in option labels using first_mate_language. Clients answer by index or the card’s shown label, as the registry requires; island, web and Telegram currently send indices. The shown label resolves to a core-owned canonical key before any First Mate comparison. Arbitrary canonical keys and English aliases are not accepted on a Chinese card. Cards raised in English retain their own English labels across a language change. | 2026-11-05 |
 | D27 | Jira supports Cloud (email + API token, HTTP basic auth, `https://<site>.atlassian.net`) and Server/Data Center (personal access token, bearer). Credentials stay in `~/.config/seahelm/first-mate/secrets.json`, mode 0600, never in config.json or a repository; only the user may write them through `seahelm task-source …`, with kernel peer checks. | 2026-11-05 |
-| D28 | Task reads default to every 30 minutes per source; configurable from 5 minutes to 7 days. Each tick admits at most four due sources, each reads at most 50 issues and 1,000 recent PRs. Reads run off the First Mate thread, with request timeouts; failures never start work. Fetchers are injectable and tests use fakes. | 2026-11-05 |
+| D28 | Task reads default to every 30 minutes per source; configurable from 5 minutes to 7 days. Each tick admits at most four due sources, each reads at most 50 issues, 100 open PRs and 100 recently updated merged PRs. Reads run off the First Mate thread, with request timeouts; failures never start work. Fetchers are injectable and tests use fakes. | 2026-11-05 |
 | D29 | `task.new` is internal candidate data. Only the daily brief lists tasks in “Could do / 可以做” and may raise one proactive selection card, with at most three ranked tasks plus Pass. Its answer is permission for that one `worktree.create`; pause, deny, budgets and deduplication still apply. No task event starts work or raises a card itself. | 2026-11-05 |
-| D30 | Ranking combines priority labels / Jira priority, assignment to the authenticated user, and bounded label preferences from `task.started` / `task.passed`. This is a judgement ranking habit, never an autonomy grant. Offers survive restart and are not offered twice; source content cannot become a memory directive. | 2026-11-05 |
+| D30 | Ranking combines priority labels / Jira priority, assignment to the authenticated user, and bounded label preferences from `task.started` / `task.passed`. This is a judgement ranking habit, never an autonomy grant. Answered and expired offers survive restart; unanswered cards become offerable again; newly assigned tasks may be offered anew; source content cannot become a memory directive. | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -680,20 +680,35 @@ seahelm task-source add --repo /path/to/project --json '{"id":"jira","kind":"jir
 
 `test` reads the source through the same fetcher but creates no event, candidate,
 card or worktree. A poll creates candidates only while First Mate is enabled and
-not paused. Local branches include linked worktrees; GitHub PR head branches
-and bodies are read for GitHub sources and for Jira sources whose origin is
-GitHub. Exact key/number boundaries avoid treating #123 as #12. Offers are
-persisted before the card is used. Unselected items and explicit passes produce
+not paused. The core reads local/remote branches and `git worktree list`, including
+paths and HEAD messages for detached worktrees. Branches require issue tokens
+(`fix/12-…`, `12-…`, `issue-12`, or the Jira key), never an arbitrary bare
+number such as `release-12`. Only open or merged PRs count, and their bodies
+must contain `Closes|Fixes|Resolves #n` or the Jira key. GitHub sources and Jira
+sources whose origin is GitHub use these PR reads. Exact boundaries avoid
+#123 matching #12. Offers are persisted only on an answer or expiry; pending
+tasks on unanswered cards recover after stop/restart. A newly assigned item
+becomes offerable again. Expiry produces no user pass or ranking penalty. Unselected items and explicit passes produce
 `task.passed`; successful creation produces `task.started`. Source removal and
 closed/disappeared fetched issues remove pending candidates. A task already
 started elsewhere is refused at click time. Issue text is labelled untrusted
-in the kickoff brief; the clear project-memory hook in `Task::params` is for
+inside one delimited data block, including key, title and body, in the kickoff brief; the clear project-memory hook in `Task::params` is for
 phase 7 once that code is present on rebase.
 
 Current bounds and follow-ups: each source's filter should select a modest
-backlog (50 returned issues); PR deduplication considers up to 1,000 PRs.
+backlog (50 returned issues); PR deduplication reads at most 100 open and 100 recently updated merged PRs.
 Custom Jira priority names currently rank as neutral unless they match
 highest/critical/blocker, high, medium, low/lowest. Pagination beyond these
 bounds and user-defined priority mappings remain design questions. Real
 GitHub/Jira authentication, live polling, app/Telegram rendering and actual
 agent startup are not exercised by the isolated tests.
+
+
+Phase 8 review fixes: atomic writes use unique 0600 temporary files, remove
+legacy/abandoned temps, and surface persistence failures. Refused starts keep
+the task available and write a note. Source tests distinguish `auth`,
+`not_found`, `bad_jql` and `network` without exposing response bodies or secrets.
+Fetcher panics return a failed result to the actor and reset the polling flag.
+Jira ADF descriptions become plain text; identity lookup failure only removes
+the assignment bonus. The CLI validates source kind before reading credentials
+from stdin. Regression fixtures use portable absolute paths and fake clients.

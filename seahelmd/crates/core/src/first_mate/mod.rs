@@ -397,7 +397,7 @@ impl FirstMate {
             Msg::DidRun { method, result } => self.did_run(&method, &result),
             Msg::Ran { action, what, level, params, result } => {
                 if result.is_ok() {
-                    if let Some(task)=params.get("_task").and_then(|v|serde_json::from_value(v.clone()).ok()) { self.task_observation(&task,true,now); self.tasks.save(&self.dir); }
+                    if let Some(task)=params.get("_task").and_then(|v|serde_json::from_value(v.clone()).ok()) { self.complete_offer(&task); self.task_observation(&task,true,now); self.save_tasks(); }
                 }
                 let outcome = match &result {
                     Ok(r) => {

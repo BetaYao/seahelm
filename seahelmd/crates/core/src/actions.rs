@@ -276,7 +276,8 @@ pub fn worktree_create(core: &Core, p: &Value) -> RpcResult {
         .filter(|b| !b.is_empty() && !b.contains("HEAD"))
         .collect();
     let base = ["main", "master"].into_iter().find(|b| branches.iter().any(|x| x == b)).map(str::to_string).or_else(|| branches.first().cloned()).unwrap_or_else(|| "main".into());
-    let branch = branch_name(&task, &branches);
+    let hint=s(p,"branch_hint");
+    let branch = branch_name(if hint.is_empty(){&task}else{&hint}, &branches);
     let name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
     let path = repo.parent().unwrap_or(&repo).join(format!("{name}-worktrees")).join(&branch);
     if path.exists() {
