@@ -110,6 +110,12 @@ impl Due {
 /// `first-mate/budget.json`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct State {
+    #[serde(default)]
+    pub tuned: super::tuning::State,
+    #[serde(default)]
+    pub review_enabled_at: f64,
+    #[serde(default)]
+    pub last_review: f64,
     /// When the last brief went out (unix seconds; 0: never).
     #[serde(default)]
     pub last_brief_at: f64,
@@ -136,7 +142,9 @@ impl State {
     }
 
     pub fn load(path: &Path) -> State {
-        std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        let mut state: State = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        state.tuned.clamp();
+        state
     }
 
     pub fn save(&self, path: &Path) {
@@ -173,7 +181,7 @@ impl State {
         match class {
             Class::Answering | Class::TimeSensitive => Route::Now,
             Class::Proactive => {
-                if user_active && self.cards_on(day) < tuning::DAILY_CARD_CAP {
+                if user_active && self.cards_on(day) < self.tuned.daily_cap.clamp(1,5) {
                     self.cards_today += 1;
                     Route::Now
                 } else {
@@ -303,8 +311,10 @@ impl Expiry {
     }
 
     /// Payloads up for `CARD_EXPIRY` or longer, oldest first; forgotten.
-    pub fn take_due(&mut self, now: f64) -> Vec<String> {
-        let mut due: Vec<(String, f64)> = self.raised.iter().filter(|(_, at)| now - **at >= tuning::CARD_EXPIRY).map(|(p, at)| (p.clone(), *at)).collect();
+    pub fn age(&self, payload: &str, now: f64) -> Option<f64> { self.raised.get(payload).map(|at| (now - at).max(0.0)) }
+    pub fn take_due(&mut self, now: f64) -> Vec<String> { self.take_due_after(now, tuning::CARD_EXPIRY) }
+    pub fn take_due_after(&mut self, now: f64, expiry: f64) -> Vec<String> {
+        let mut due: Vec<(String, f64)> = self.raised.iter().filter(|(_, at)| now - **at >= expiry).map(|(p, at)| (p.clone(), *at)).collect();
         due.sort_by(|a, b| a.1.total_cmp(&b.1));
         for (p, _) in &due {
             self.raised.remove(p);

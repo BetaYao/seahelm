@@ -141,7 +141,7 @@ fn has_github_remote(repo: &str) -> Option<bool> {
 }
 
 impl FirstMate {
-    fn today(now: f64) -> String {
+    pub(super) fn today(now: f64) -> String {
         Local::at(now).day_key()
     }
 
@@ -184,6 +184,11 @@ impl FirstMate {
     /// A habit's level moved: a line now, and a note for the next brief.
     pub(super) fn report_change(&mut self, c: &Change, now: f64) {
         let t = c.text();
+        if c.from == habits::HabitLevel::Auto && c.to < c.from {
+            for note in self.budget.tuned.record(super::tuning::Evidence::Demotion, None) {
+                self.log(Entry::new(now, "tuning", note.en.clone())); self.budget.note(note);
+            }
+        }
         self.report_text("habit", &t, now);
         self.budget.note(t);
     }
@@ -292,6 +297,13 @@ impl FirstMate {
         self.hand_checked = Some(Instant::now());
         let today = Self::today(now);
         for b in self.habits.all(&today) {
+            for (entry, why) in &b.invalid {
+                if self.reported_invalid.insert(format!("{}:{entry:?}:{why}", b.key)) {
+                    let note = Text::new(format!("Habit file {} has an invalid entry; it will not be applied: {why}",b.key),format!("习惯文件 {} 有一条无效记录，不会生效：{why}",b.key));
+                    self.report_text("habit", &note, now);
+                    self.budget.note(note);
+                }
+            }
             for (id, to, from) in b.pending_confirmations() {
                 if self.offers.pending(&b.key, &id) || self.confirm_expired(&b.key, &id, to) {
                     continue;
@@ -395,7 +407,7 @@ impl FirstMate {
         let fm_dir = self.dir.to_string_lossy().into_owned();
         for mut b in self.habits.all(&today) {
             let key = b.key.clone();
-            let changes = b.count(&records, |r| r.worktree != fm_dir && (key == GLOBAL || habits::repo_key(&r.repo) == key));
+            let changes = b.count_with_n(&records, |r| r.worktree != fm_dir && (key == GLOBAL || habits::repo_key(&r.repo) == key), self.budget.tuned.n);
             let before = self.habits.load(&key, &today);
             if b != before || !self.habits.path(&key).exists() {
                 self.save_book(&b, now);
@@ -403,7 +415,7 @@ impl FirstMate {
             for c in &changes {
                 self.report_change(c, now);
             }
-            for (id, level) in b.offers_due(&records) {
+            for (id, level) in b.offers_with_thresholds(&records, self.budget.tuned.n, self.budget.tuned.m) {
                 if self.offers.pending(&key, &id) {
                     continue;
                 }
@@ -437,7 +449,7 @@ impl FirstMate {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn observe_habit_answer(&self, kind: &'static str, card: &str, option: Option<&str>, via: Option<String>, summary: String, habit: String, worktree: String) {
+    pub(super) fn observe_habit_answer(&self, kind: &'static str, card: &str, option: Option<&str>, via: Option<String>, summary: String, habit: String, worktree: String) {
         self.core.observe(observations::Msg::CardAnswered {
             card_kind: kind,
             card: card.into(),
@@ -494,7 +506,7 @@ impl FirstMate {
     fn answer_batch(&mut self, payload: &str, option: Option<&str>, via: Option<String>, now: f64) {
         let Some(batch) = self.batches.get(payload).cloned() else { return };
         let summary = batch.card().0.lines().next().unwrap_or_default().to_string();
-        let habit = batch.items.first().map(|r| format!("{}/{}", r.decision.key, r.decision.id)).unwrap_or_default();
+        let habit = batch.items.iter().map(|r| format!("{}/{}", r.decision.key, r.decision.id)).collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(",");
         self.observe_habit_answer("habit.sweep", payload, option, via, summary.clone(), habit, String::new());
         match sweep::answer_batch(&batch, option) {
             BatchAnswer::Delete(idxs) => {
@@ -534,7 +546,7 @@ impl FirstMate {
         }
         self.observe_habit_answer("habit.item", payload, option, via, format!("delete worktree {}", r.candidate.name()), format!("{}/{}", r.decision.key, r.decision.id), r.candidate.path.clone());
         match option {
-            Some(sweep::DELETE) => {
+            Some("delete") => {
                 // Not a no after all: let a later Keep in this batch demote.
                 if first_no {
                     if let Some(b) = self.batches.get_mut(&batch_payload) {
@@ -543,7 +555,7 @@ impl FirstMate {
                 }
                 self.approve(std::slice::from_ref(&r), payload, now);
             }
-            Some(sweep::KEEP) => self.reject(&r, first_no, now),
+            Some("keep") => self.reject(&r, first_no, now),
             _ => {}
         }
     }

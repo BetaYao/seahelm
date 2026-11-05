@@ -298,7 +298,7 @@ impl Core {
         let mut gated = false;
         if fm_policy::is_first_mate(&p) {
             match fm_policy::classify(method) {
-                fm_policy::Class::Open => {}
+                fm_policy::Class::Open | fm_policy::Class::Card => {}
                 fm_policy::Class::Forbidden => {
                     return Reply::Value(Err(first_mate::refused(format!("{method} is not available to First Mate"))));
                 }
@@ -325,7 +325,7 @@ impl Core {
                     }
                 }
             }
-        } else if method == "autopilot.propose" {
+        } else if matches!(method, "autopilot.propose" | "habits.propose") {
             return Reply::Value(Err(first_mate::refused("only First Mate proposes")));
         }
         self.note_presence(method, &p);
@@ -562,6 +562,10 @@ impl Core {
                 Some(fm) => fm.state(),
                 None => json!({"enabled": false, "owner": "core"}),
             }),
+            "habits.propose" => match self.first_mate.get() {
+                Some(fm) => fm.propose_habit(p.get("habit").cloned().unwrap_or(p)),
+                None => Err(first_mate::refused("First Mate is not running")),
+            },
             "autopilot.propose" => {
                 let summary = str_param(&p, "summary").unwrap_or_default();
                 let options = p.get("options").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -1092,7 +1096,15 @@ impl Core {
         if prompts.is_empty() {
             return;
         }
+        let projects: HashMap<String, String> = self.pane_infos().into_iter().map(|(p, _)| (p.id, p.project)).collect();
         let mut t = self.presence.lock().unwrap_or_else(|e| e.into_inner());
+        for (pane, text) in prompts {
+            if !t.is_echo(pane, text, now) {
+                t.profile.prompts.push((now, projects.get(pane).cloned().unwrap_or_default(), text.chars().take(1000).collect()));
+            }
+        }
+        let excess = t.profile.prompts.len().saturating_sub(200);
+        t.profile.prompts.drain(..excess);
         if prompts.iter().all(|(pane, text)| t.is_echo(pane, text, now)) {
             return;
         }
@@ -1102,6 +1114,16 @@ impl Core {
 
     /// What First Mate reads to time the brief: the profile, and whether a
     /// desktop client is in front.
+    #[cfg(test)]
+    pub fn set_test_first_mate(&self, handle: first_mate::Handle) {
+        self.lock().first_mate = Some(handle.clone());
+        let _ = self.first_mate.set(handle);
+    }
+
+    pub fn presence_last_seen(&self) -> f64 {
+        self.presence.lock().unwrap_or_else(|e| e.into_inner()).profile.last_seen
+    }
+
     pub fn presence(&self) -> first_mate::presence::Snapshot {
         let desktop_in_front = self.lock().clients.iter().any(|(name, (_, active))| *active && !name.starts_with("web"));
         let profile = self.presence.lock().unwrap_or_else(|e| e.into_inner()).profile.clone();

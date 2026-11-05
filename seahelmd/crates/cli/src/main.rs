@@ -143,7 +143,9 @@ impl Cli {
             }
             "delete" => {
                 let Some(path) = rest.first() else { die("usage: seahelm worktree delete <worktree-path>", 2) };
-                pretty(&self.call("worktree.delete", json!({"worktree_path": absolute(path)}), 40.0, &[]));
+                let mut params = json!({"worktree_path": absolute(path)});
+                if let Some(habit) = opt(rest, "--habit") { params["habit"] = json!(habit); }
+                pretty(&self.call("worktree.delete", params, 40.0, &[]));
             }
             other => die(&format!("unknown worktree subcommand: {other}"), 2),
         }
@@ -163,6 +165,11 @@ impl Cli {
                 } else {
                     print!("{}", habit_table(&v));
                 }
+            }
+            Some("propose") => {
+                let raw = opt(&a[1..], "--json").unwrap_or_else(|| die("habit propose --json <habit>", 2));
+                let habit: Value = serde_json::from_str(&raw).unwrap_or_else(|_| die("invalid habit JSON", 2));
+                pretty(&self.call("habits.propose", json!({"habit": habit}), 40.0, &[]));
             }
             Some("inventory") => {
                 let rest = &a[1..];
@@ -431,7 +438,7 @@ fn route(method: &str) -> &'static [Side] {
         }
         "worktree.create" | "worktree.delete" | "pane.close" => &[Side::App, Side::Core],
         // First Mate's habits live in the core alone.
-        "habits.list" | "habits.inventory" => &[Side::Core],
+        "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
         _ => &[Side::App],
     }
 }

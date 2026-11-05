@@ -1,6 +1,6 @@
 # First Mate autonomy: learning to take over the chores
 
-Status: phases 1–5 built (2026-11-05); the rest is design.
+Status: phases 1–6 built (2026-11-05); the rest is design.
 Builds on `docs/first-mate-core.md` (First Mate lives in seahelm-core) and
 `docs/superpowers/specs/2026-11-04-first-mate-surfaces-design.md` (the island).
 
@@ -45,6 +45,10 @@ up**, so that is the first vertical slice.
 | D16 | The brief is always written into First Mate's timeline (a `brief` row); Telegram gets it too when that is the channel. Channel order: arrived on Telegram → Telegram; a desktop client in front → the island; answered on Telegram within 14 days (and more recently than on the web) → Telegram; otherwise the timeline only. Before sending to Telegram the core asks seahelm-gateway (`gateway.status`: Telegram on, configured, connected): an arrival brief meant for Telegram goes to the timeline instead; the fallback is not sent and does not count, so it waits for the user to come back. Quiet hours are the user's own (`config.json` `first_mate_quiet_hours`, e.g. `"23:00-08:00"`) together with every known repo's `quiet_hours`. The fallback needs a learned usual start; a profile that knows nothing never falls back. The brief and the core's note rows are written in `first_mate_language` (`en`, default, or `zh`). | 2026-11-05 |
 | D17 | Cards are *answering* (an approval or proposal while the user spoke this turn, the per-worktree cards after "Let me pick", a level written by hand (D12), the inventory (D6)) — up at once, never counted; *time-sensitive* (an approval for a `ci.failed` rule) — up at once whether the user is there or not, never counted, and on Telegram as it goes up (seahelm-gateway sends every First Mate card there); or *proactive* (the sweep's batch, promotion offers, any other rule's approval such as `cleanup-merged`'s, an unprompted proposal) — up only while the user is active and under the day's cap of 3, else held. The brief puts at most 3 held cards up with it, uncounted, and lists the rest in its text; those go up later by the usual rule (user active, cap left). | 2026-11-05 |
 | D18 | A card expires 3 days after it went up (time held does not count). Only action cards count as unanswered evidence: an expired sweep batch or delete approval is one `ignored` for each habit it was about (a batch: once per habit on it), and two in a row demote. A promotion offer or a hand-edit confirmation (D12) that expires is only withdrawn: no `ignored`, no demotion; the offer waits for fresh evidence (like "not yet"), the confirmation is not asked again until the file says something else. Item cards, inventory cards, proposals and non-delete approvals teach no habit. A habit's automatic actions no longer ping Telegram one by one: they are the brief's. | 2026-11-05 |
+| D19 | Review waits a full 24 h after enabling, then at least 24 h between deliveries, with 30 min without a presence signal. Delivery uses the existing idle/session/paused gates; no queued event is displaced. The core caps the JSON payload at 24 KB, groups worktree observations by kind, actor, PR state, risk/clean status, age buckets (0, 1–3, 4–14, 15+ days) and busy panes, ranked by count before capping, and supplies distinct days/worktrees and examples. Card outcomes are counted separately per habit; recent user/assistant messages are filtered before taking the last ten, then shown oldest first. Project prompts are filtered for programmatic echoes when ingested. Review timing persists in budget.json. | 2026-11-05 |
+| D20 | `habits.propose` is a card-producing First Mate call. New habits, global or `repo` scoped, at most ask; existing ids are refused without changing level or evidence; core discards supplied evidence and grants. No habit is saved until the user answers. A prose `when` requires `judgement: true` on the proposal and persists with an explicit judgement tag; ordinary scalar conditions in habit files are refused with a note and never silently interpreted as judgement; a named habit action (`--habit`) is held at ask and must name an active granted deletion habit. Invalid measured objects are refused. | 2026-11-05 |
+| D21 | Tuning lives in budget.json under first-mate, with bounded N 2–10, M 3–20, expiry 1–7 days and cap 1–5. Six consistent outcomes move a knob one step; acceptance/decline adjusts N, auto promotion acceptance/decline (including subsequent auto demotions) adjusts M, answers within an hour / after a day adjust expiry, answered/expired cards adjust cap. Dismissal supplies neither an answer nor latency, rule approvals supply response timing only, and demotion supplies promotion evidence without resetting the expired streak. Each actual move writes an audit line and one brief note; it grants no level. | 2026-11-05 |
+| D22 | Core card delivery translates built-in option labels using first_mate_language. Clients answer by index or the card’s shown label, as the registry requires; island, web and Telegram currently send indices. The shown label resolves to a core-owned canonical key before any First Mate comparison. Arbitrary canonical keys and English aliases are not accepted on a Chinese card. Cards raised in English retain their own English labels across a language change. | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -287,7 +291,7 @@ propose edits to its own judgement habits and brief layout through
 
 ### Generalisation (First Mate)
 
-Once a day (with the brief), the core sends First Mate a `learn.review` event:
+Once a day while the user has been idle for 30 minutes, the core sends First Mate a `learn.review` event:
 
 - observations since the last review, **pre-grouped by the core** by facts
   signature (e.g. "user removed 4 worktrees: merged, clean, 2–6 days after
@@ -615,15 +619,16 @@ including dropping a job nobody reads.
 4. **Inventory card.** First-run grouping and the answers that seed habits.
 5. **Interruption budget.** Daily brief (conversation + Telegram), report vs
    card, card expiry as evidence, per-day cap.
-6. **Generalisation.** `learn.review`, `seahelm habit propose / note`,
-   judgement habits.
+6. **Generalisation (as built).** `learn.review`, `seahelm habit propose`,
+   judgement habits, bounded persisted self-tuning and Chinese card options.
+   Proposals introduce new global/project habits at ask; existing ids are refused. `habit note` belongs to phase 7's project memory.
 7. **Project memory and routing** (scenarios 5 and 2): memory files, project
    list and aliases, the user mandate, memory in briefs, learning from pane
    prompts.
 8. **Task sources**: GitHub, then Jira.
 9. **Global schedules and the research repo.**
 
-Phases 1–5 solve the worktree pile-up end to end; 6 onward widen the loop.
+Phases 1–5 solve the worktree pile-up end to end; phase 6 widens the learning loop.
 
 ## Open questions
 
