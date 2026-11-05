@@ -116,8 +116,26 @@ fn measure_for_inventory(core: &Core, live: &HashSet<String>, skip: &HashSet<Str
         .filter(|t| !*denies.entry(norm(&t.repo)).or_insert_with(|| repo_denies(&t.repo)))
         .collect();
     let n = targets.len();
-    let out = targets.into_iter().map(|t| Candidate { facts: core.measure_worktree(&t.path, None), path: t.path, repo: t.repo, branch: t.branch }).collect();
+    let mut github: HashMap<String, Option<bool>> = HashMap::new();
+    let out = targets
+        .into_iter()
+        .map(|t| {
+            let mut facts = core.measure_worktree(&t.path, None);
+            if facts.pr.is_none() {
+                let gh = *github.entry(norm(&t.repo)).or_insert_with(|| has_github_remote(&t.repo));
+                inventory::settle_pr(&mut facts, gh);
+            }
+            Candidate { facts, path: t.path, repo: t.repo, branch: t.branch }
+        })
+        .collect();
     (n, out)
+}
+
+/// Whether any of the repo's remotes is on GitHub; None when git could not
+/// list them.
+fn has_github_remote(repo: &str) -> Option<bool> {
+    let out = super::facts::git(Path::new(repo), &["remote", "-v"])?;
+    Some(out.lines().filter_map(|l| l.split_whitespace().nth(1)).any(|url| crate::pr::github_repo(url).is_some()))
 }
 
 impl FirstMate {
@@ -726,6 +744,13 @@ impl FirstMate {
         let mut book = self.habits.load(GLOBAL, &today);
         let mut written = Vec::new();
         let mut changes = Vec::new();
+        let mut superseded = false;
+        for id in &a.supersede {
+            if book.supersede(id) {
+                superseded = true;
+                self.log(Entry::new(now, "habit", format!("inventory habit {id} superseded by the user's answer")));
+            }
+        }
         for (h, g) in a.habits {
             let id = h.id.clone();
             match book.adopt(h, g, &today) {
@@ -736,7 +761,7 @@ impl FirstMate {
                 Err(e) => self.log(Entry::new(now, "denied", format!("inventory habit {id} not written — {e}"))),
             }
         }
-        if !written.is_empty() {
+        if !written.is_empty() || superseded {
             self.save_book(&book, now);
         }
         self.report("habit", &inventory::line_answered(&a.card, answer, &written), now);

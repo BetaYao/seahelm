@@ -304,7 +304,7 @@ the model: the core opens an `observe` habit and the review words it.
 
 | Fact | How |
 |------|-----|
-| `pr` | `merged / closed / open / draft / none`, from the core's PR fetch |
+| `pr` | `merged / closed / open / draft / none`, from the core's PR fetch; a repo with no GitHub remote at all counts as `none` for the inventory (a lookup that is only pending or failed stays unknown, and unknown never matches) |
 | `days_since_merge` | PR `mergedAt` |
 | `uncommitted`, `untracked` | `git status --porcelain` (as today) |
 | `ignored_files` | `git status --ignored --porcelain`, minus known regenerable dirs (`node_modules`, `target`, `.build`, `DerivedData`, `dist`, `.venv`, …); the remainder's names go on the card |
@@ -312,6 +312,7 @@ the model: the core opens an `observe` habit and the review words it.
 | `idle_days` | since the latest of: last commit, last pane status change, last user prompt in the worktree's panes |
 | `busy_panes` | as today |
 | `identical_to_base` | `git merge-tree` against the base finds no change (the app's `GitDiff.branchChangedFiles` idea, in the core) |
+| `at_risk` | derived, true / false: any of `uncommitted`, `untracked`, `ignored_files`, `unpushed` above zero. False only when all four are known to be zero; unknown `unpushed` with nothing else above zero is unknown (never matches). A `when` with `at_risk: true` is never `auto`; `at_risk: false` pins those four to zero for the safety rule (`busy_panes` still has to be pinned on its own) |
 | `is_main`, `has_panes` | main checkout / integration checkout never matches; panes present |
 
 ## Interruption budget
@@ -441,7 +442,11 @@ ignored files and misjudge squash-merged branches as unpushed.
    card lists the existing worktrees **grouped by facts signature** ("merged ·
    clean · 12", "PR closed unmerged · 3", "idle 30+ days, nothing unpushed ·
    5", "has unpushed work · 4"), each group with *delete / keep / ask me each
-   time*. The answers seed habits at `ask` (delete), `observe` (ask each time)
+   time* (the at-risk group: *keep / ask me each time* only; its one habit is
+   `at_risk: true`). A delete on the merged group goes to the general
+   `delete-merged-clean` rather than a second habit saying the same. Each
+   answer is one `decision` in the habit's evidence; a delete is also one
+   approval. The answers seed habits at `ask` (delete), `observe` (ask each time)
    or a "keep" habit that stops the group being offered, and give the loop its
    first evidence without waiting for the user to delete things they were not
    deleting anyway.

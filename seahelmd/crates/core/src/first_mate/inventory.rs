@@ -13,26 +13,31 @@
 //!   unpushed commits git could not count).
 //!
 //! An open or draft PR, a busy pane, recent work without a PR, or a PR
-//! nobody could look up leaves a worktree out. Each non-empty group is
+//! that could not be looked up (yet) leaves a worktree out. Each non-empty group is
 //! one card, all raised together (raised cards carry one question each;
 //! the follow-up chain in the card model is for an agent's own
 //! multi-question dialog, whose keys the core presses). The answers:
 //!
 //! - *delete* — the group's worktrees are deleted now, each measured and
 //!   matched against the group again first, and a deletion habit for the
-//!   signature is written at `ask`, granted by the answer;
+//!   signature is written at `ask`, granted by the answer (for the merged
+//!   group, the general `delete-merged-clean`, rather than a second habit
+//!   saying the same);
 //! - *keep* — a `keep` habit for the signature: the group is never offered;
 //! - *ask me each time* — a deletion habit at `observe`.
 //!
 //! The at-risk group offers no *delete*: nothing that would lose work is
-//! deleted from a group answer. Each answer is one decision in the habit's
-//! evidence, however many worktrees it covered. Habits go into the global
+//! deleted from a group answer; its one habit is `at_risk: true`. Each
+//! answer is one decision in the habit's evidence (`decisions`), however
+//! many worktrees it covered; a delete is an approval too. A repo with no
+//! GitHub remote at all has no PR to wait for: its worktrees count as
+//! `pr: none`. Habits go into the global
 //! book: the answer is about a signature, not a repo.
 //!
 //! Pure where it can be: the facts, the deletion (`Deleter`) and the habit
 //! files are the caller's.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -120,6 +125,15 @@ pub fn classify(f: &Facts) -> Option<Group> {
     }
 }
 
+/// A PR nobody could look up is `none` when the repo has no GitHub
+/// remote at all (`github`: Some(false)); left unknown while the lookup is
+/// only pending or failed, or the remotes could not be read.
+pub fn settle_pr(f: &mut Facts, github: Option<bool>) {
+    if f.pr.is_none() && github == Some(false) {
+        f.pr = Some("none".into());
+    }
+}
+
 /// The measured worktrees by group, in `Group::ALL` order, empty groups left out.
 pub fn group(candidates: Vec<Candidate>) -> Vec<(Group, Vec<Candidate>)> {
     let mut by: HashMap<Group, Vec<Candidate>> = HashMap::new();
@@ -183,79 +197,62 @@ pub fn parse_answer(g: Group, n: usize, option: Option<&str>) -> Option<Answer> 
     }
 }
 
-/// The at-risk facts a worktree has above zero.
-fn risks(f: &Facts) -> Vec<&'static str> {
-    let mut out = Vec::new();
-    if f.changed > 0 {
-        out.push("uncommitted");
-    }
-    if f.untracked > 0 {
-        out.push("untracked");
-    }
-    if f.ignored > 0 {
-        out.push("ignored");
-    }
-    if f.unpushed.is_some_and(|n| n > 0) {
-        out.push("unpushed");
-    }
-    out
+/// The signature a group's habit is written for: (id, when). The at-risk
+/// group's is `at_risk: true` on any PR state the inventory lists (a
+/// `when` is a conjunction, so it cannot also say "idle 30+ days" for the
+/// PR-less ones only). Its members whose only risk is unpushed commits git
+/// could not count do not match it (unknown is not true).
+pub fn signature(g: Group) -> (String, When) {
+    let text = match g {
+        Group::AtRisk => "{pr: \"merged|closed|none\", at_risk: true, busy_panes: 0}".to_string(),
+        _ => format!("{{{}, at_risk: false, busy_panes: 0}}", g.scope()),
+    };
+    (format!("inventory-{}", g.key()), When::parse_yaml(&text).expect("inventory signatures are valid"))
 }
 
-/// The signatures a group's habits are written for: (id, when). One for a
-/// group with nothing to lose; for the at-risk group one per (finished or
-/// idle, at-risk fact) its members show — a `when` is a conjunction, and
-/// "anything to lose" is not one fact. A member whose only risk is
-/// unpushed commits git could not count gives none: no measured fact
-/// says so, and no deletion habit matches an unknown anyway.
-pub fn signatures(g: Group, members: &[Candidate]) -> Vec<(String, When)> {
-    let zeros = "uncommitted: 0, untracked: 0, ignored: 0, unpushed: 0, busy_panes: 0";
-    if g.can_delete() {
-        let when = When::parse_yaml(&format!("{{{}, {zeros}}}", g.scope())).expect("inventory signatures are valid");
-        return vec![(format!("inventory-{}", g.key()), when)];
+/// Habits an answer replaces: a delete on the merged card goes to the
+/// general habit, so an earlier inventory answer's `inventory-merged`
+/// (a keep, say) must not keep overruling it.
+pub fn superseded_by(g: Group, a: Answer) -> Vec<String> {
+    if g == Group::Merged && a == Answer::Delete {
+        vec![signature(g).0]
+    } else {
+        Vec::new()
     }
-    let mut set: BTreeSet<(&str, &str)> = BTreeSet::new();
-    for m in members {
-        let scope = if matches!(m.facts.pr.as_deref(), Some("merged" | "closed")) { "done" } else { "idle" };
-        for r in risks(&m.facts) {
-            set.insert((scope, r));
-        }
-    }
-    set.into_iter()
-        .map(|(scope, fact)| {
-            let s = if scope == "done" { "pr: \"merged|closed\"" } else { "pr: none, idle_days: \">=30\"" };
-            let when = When::parse_yaml(&format!("{{{s}, {fact}: \">=1\", busy_panes: 0}}")).expect("inventory signatures are valid");
-            (format!("inventory-at-risk-{scope}-{fact}"), when)
-        })
-        .collect()
 }
 
-/// The habits an answer writes, at the level it grants: delete → a
-/// deletion habit at `ask`, keep → a `keep` habit, ask me each time → a
-/// deletion habit at `observe`. One decision in each habit's evidence.
-pub fn habits_for(g: Group, a: Answer, members: &[Candidate], today: &str) -> Vec<Habit> {
+/// The habit an answer writes, at the level it grants: delete → a
+/// deletion habit at `ask` (for the merged group, the general
+/// `delete-merged-clean`), keep → a `keep` habit, ask me each time → a
+/// deletion habit at `observe`. Every answer is one decision; a delete is
+/// also one approval (and one in a row).
+pub fn habit_for(g: Group, a: Answer, members: &[Candidate], today: &str) -> Habit {
     let (act, level) = match a {
         Answer::Delete => (Do::DeleteWorktree, HabitLevel::Ask),
         Answer::Keep => (Do::Keep, HabitLevel::Observe),
         Answer::AskEachTime => (Do::DeleteWorktree, HabitLevel::Observe),
     };
-    let decided = a != Answer::AskEachTime;
-    signatures(g, members)
-        .into_iter()
-        .map(|(id, when)| Habit {
-            id,
-            about: habits::ABOUT_CLEANUP.into(),
-            when,
-            act,
-            level,
-            status: Status::Active,
-            observed: today.into(),
-            sources: Vec::new(),
-            origin: Origin::Inventory,
-            evidence: Evidence { approved: decided as u32, streak: (a == Answer::Delete) as u32, since: today.into(), ..Evidence::default() },
-            examples: members.iter().map(|m| m.branch.clone()).filter(|b| !b.is_empty()).take(habits::tuning::EXAMPLES_CAP).collect(),
-            approved: decided.then(|| today.to_string()),
-        })
-        .collect()
+    let delete = a == Answer::Delete;
+    let evidence = Evidence { decisions: 1, approved: delete as u32, streak: delete as u32, since: today.into(), ..Evidence::default() };
+    let examples = members.iter().map(|m| m.branch.clone()).filter(|b| !b.is_empty()).take(habits::tuning::EXAMPLES_CAP).collect();
+    if g == Group::Merged && delete {
+        return Habit { evidence, examples, approved: Some(today.into()), ..Habit::seed(today) };
+    }
+    let (id, when) = signature(g);
+    Habit {
+        id,
+        about: habits::ABOUT_CLEANUP.into(),
+        when,
+        act,
+        level,
+        status: Status::Active,
+        observed: today.into(),
+        sources: Vec::new(),
+        origin: Origin::Inventory,
+        evidence,
+        examples,
+        approved: delete.then(|| today.to_string()),
+    }
 }
 
 // MARK: the cards
@@ -294,6 +291,8 @@ pub struct Answered {
     pub card: Card,
     pub answer: Option<Answer>,
     pub habits: Vec<(Habit, Grant)>,
+    /// Habits the answer replaces (`superseded_by`).
+    pub supersede: Vec<String>,
 }
 
 /// The inventory cards open now.
@@ -337,16 +336,13 @@ impl Cards {
         let answer = parse_answer(card.group, card.members.len(), option);
         let habits = answer
             .map(|a| {
-                habits_for(card.group, a, &card.members, today)
-                    .into_iter()
-                    .map(|h| {
-                        let g = Grant::from_inventory_card(GLOBAL, &h.id, h.level);
-                        (h, g)
-                    })
-                    .collect()
+                let h = habit_for(card.group, a, &card.members, today);
+                let g = Grant::from_inventory_card(GLOBAL, &h.id, h.level);
+                vec![(h, g)]
             })
             .unwrap_or_default();
-        Some(Answered { card, answer, habits })
+        let supersede = answer.map(|a| superseded_by(card.group, a)).unwrap_or_default();
+        Some(Answered { card, answer, habits, supersede })
     }
 }
 
@@ -505,7 +501,7 @@ pub fn preview_json(measured: usize, groups: &[(Group, Vec<Candidate>)]) -> Valu
                 "group": g.key(),
                 "title": g.title(),
                 "options": options(*g, m.len()),
-                "habits": signatures(*g, m).into_iter().map(|(id, _)| id).collect::<Vec<_>>(),
+                "habit": signature(*g).0,
                 "worktrees": m.iter().map(|c| json!({"path": c.path, "repo": c.repo, "branch": c.branch, "facts": c.facts.summary()})).collect::<Vec<_>>(),
             })
         })
@@ -590,6 +586,24 @@ mod tests {
     }
 
     #[test]
+    fn no_github_remote_means_no_pr_but_a_pending_lookup_stays_unknown() {
+        let idle = || Facts { pr: None, idle_days: Some(45), ..clean("none") };
+        let mut f = idle();
+        settle_pr(&mut f, Some(false));
+        assert_eq!(f.pr.as_deref(), Some("none"));
+        assert_eq!(classify(&f), Some(Group::Idle));
+        for gh in [Some(true), None] {
+            let mut f = idle();
+            settle_pr(&mut f, gh);
+            assert_eq!((f.pr.clone(), classify(&f)), (None, None), "{gh:?}");
+        }
+        // A PR that is known stays what it is.
+        let mut f = clean("merged");
+        settle_pr(&mut f, Some(false));
+        assert_eq!(f.pr.as_deref(), Some("merged"));
+    }
+
+    #[test]
     fn empty_groups_are_left_out_and_nothing_means_no_card() {
         let g = group(vec![cand("m1", clean("merged")), cand("open", clean("open"))]);
         assert_eq!(g.iter().map(|(g, _)| *g).collect::<Vec<_>>(), vec![Group::Merged]);
@@ -656,17 +670,27 @@ mod tests {
         assert!(!cards.contains(&card.payload), "answered once");
         let members = a.card.members.clone();
         let ids = adopt_all(&mut book, a);
-        assert_eq!(ids, vec!["inventory-merged"]);
+        assert_eq!(ids, vec![habits::SEED_ID], "the merged group's delete goes to the general habit");
         store.save(&book, 1_793_000_000.0).unwrap();
 
-        // Read back as the core does: granted at ask, origin inventory, one decision.
+        // Read back as the core does: granted at ask, one decision, one approval.
         let back = store.load(GLOBAL, TODAY);
-        let h = back.get("inventory-merged").unwrap();
-        assert_eq!((back.level(h), h.act, h.origin), (HabitLevel::Ask, Do::DeleteWorktree, Origin::Inventory));
-        assert_eq!(h.evidence.approved, 1, "one answer about four worktrees is one decision");
+        assert!(back.get("inventory-merged").is_none(), "no second habit saying the same");
+        assert_eq!(back.habits.len(), 1);
+        let h = back.get(habits::SEED_ID).unwrap();
+        assert_eq!((back.level(h), h.act, h.origin), (HabitLevel::Ask, Do::DeleteWorktree, Origin::General));
+        assert_eq!((h.evidence.decisions, h.evidence.approved, h.evidence.streak), (1, 1, 1), "one answer about four worktrees is one decision");
+        assert_eq!(h.approved.as_deref(), Some(TODAY));
+        assert_eq!(h.examples.len(), 4);
         assert!(back.notes.is_empty(), "{:?}", back.notes);
         let granted: Value = serde_json::from_str(&std::fs::read_to_string(tmp.path().join(".granted.json")).unwrap()).unwrap();
-        assert_eq!(granted[GLOBAL]["inventory-merged"], "ask");
+        assert_eq!(granted[GLOBAL][habits::SEED_ID], "ask");
+        // Written through the core's sealed path: the seal covers it, and a
+        // fresh read (a core restart) still honours ask.
+        let seal: Value = serde_json::from_str(&std::fs::read_to_string(tmp.path().join(".granted.seal.json")).unwrap()).unwrap();
+        assert_eq!(seal["text"].as_str().unwrap(), std::fs::read_to_string(tmp.path().join(".granted.json")).unwrap());
+        let again = Store::new(tmp.path().to_path_buf()).load(GLOBAL, TODAY);
+        assert_eq!(again.level(again.get(habits::SEED_ID).unwrap()), HabitLevel::Ask);
         // It decides a clean merged worktree at ask, never auto.
         let prec = Precedence { repo_cap: None, user_default: RuleLevel::Auto };
         let d = habits::decide(&clean("merged"), &[&back], &prec).unwrap();
@@ -676,10 +700,10 @@ mod tests {
         // Deletion: re-measured; one changed since, one fails in git.
         let del = FakeDeleter::default();
         let measure = |p: &str| if p.ends_with("/changed") { Facts { changed: 1, ..clean("merged") } } else { clean("merged") };
-        let r = delete_group(Group::Merged, members, "inventory-merged", measure, &del);
+        let r = delete_group(Group::Merged, members, habits::SEED_ID, measure, &del);
         let calls = del.calls.borrow().clone();
         assert_eq!(calls.iter().map(|c| c.0.rsplit('/').next().unwrap().to_string()).collect::<Vec<_>>(), vec!["m1", "m2", "busy"]);
-        assert!(calls.iter().all(|c| c.1 == "inventory" && c.2 == "inventory-merged"));
+        assert!(calls.iter().all(|c| c.1 == "inventory" && c.2 == habits::SEED_ID));
         assert_eq!(names(&r.deleted), vec!["m1", "m2"]);
         assert_eq!(r.failed.len(), 2);
         assert!(r.failed.iter().any(|(c, why)| c.name() == "changed" && why.starts_with("changed since the card")));
@@ -698,7 +722,7 @@ mod tests {
         store.save(&book, 1_793_000_000.0).unwrap();
         let back = store.load(GLOBAL, TODAY);
         let h = back.get("inventory-merged").unwrap();
-        assert_eq!((h.act, h.evidence.approved), (Do::Keep, 1));
+        assert_eq!((h.act, h.evidence.decisions, h.evidence.approved, h.origin), (Do::Keep, 1, 0, Origin::Inventory));
         // The seed would offer a clean merged worktree; the keep habit wins.
         let prec = Precedence { repo_cap: None, user_default: RuleLevel::Ask };
         assert_eq!(habits::decide(&clean("merged"), &[&back], &prec), None);
@@ -715,34 +739,62 @@ mod tests {
         store.save(&book, 1_793_000_000.0).unwrap();
         let back = store.load(GLOBAL, TODAY);
         let h = back.get("inventory-idle").unwrap();
-        assert_eq!((back.level(h), h.act, h.evidence.approved), (HabitLevel::Observe, Do::DeleteWorktree, 0));
+        assert_eq!((back.level(h), h.act, h.evidence.decisions, h.evidence.approved), (HabitLevel::Observe, Do::DeleteWorktree, 1, 0));
         assert!(h.when.matches(&Facts { idle_days: Some(31), ..clean("none") }));
         assert!(!h.when.matches(&Facts { idle_days: Some(29), ..clean("none") }));
     }
 
     #[test]
-    fn at_risk_habits_follow_what_the_members_have_to_lose() {
+    fn the_at_risk_group_writes_one_at_risk_habit() {
         let members = vec![
             cand("dirty", Facts { changed: 2, ..clean("merged") }),
             cand("env", Facts { ignored: 1, ..clean("closed") }),
             cand("ahead", Facts { unpushed: Some(3), idle_days: Some(60), ..clean("none") }),
-            cand("cant-tell", Facts { unpushed: None, ..clean("merged") }),
         ];
-        let ids: Vec<String> = signatures(Group::AtRisk, &members).into_iter().map(|(id, _)| id).collect();
-        assert_eq!(ids, vec!["inventory-at-risk-done-ignored", "inventory-at-risk-done-uncommitted", "inventory-at-risk-idle-unpushed"]);
         let mut cards = Cards::default();
         let (raised, _) = cards.raise("n5", vec![(Group::AtRisk, members)]);
         let a = cards.answer(&raised[0].payload, Some(KEEP), TODAY).unwrap();
-        assert!(a.habits.iter().all(|(h, g)| h.act == Do::Keep && g.level == HabitLevel::Observe));
-        // A keep for "merged with uncommitted files" leaves such a worktree alone.
+        assert_eq!(a.habits.len(), 1);
+        let (h, g) = &a.habits[0];
+        assert_eq!((h.id.as_str(), h.act, g.level), ("inventory-at-risk", Do::Keep, HabitLevel::Observe));
+        assert_eq!(habits::describe_when(&h.when), "pr: merged|closed|none, busy_panes: 0, at_risk: true");
         let tmp = tempfile::tempdir().unwrap();
         let (_, mut book) = global_book(tmp.path());
         adopt_all(&mut book, a);
         let prec = Precedence { repo_cap: None, user_default: RuleLevel::Ask };
-        assert_eq!(habits::decide(&Facts { changed: 1, ..clean("merged") }, &[&book], &prec), None);
+        // Kept: any finished worktree with something to lose is left alone…
+        for f in [Facts { changed: 1, ..clean("merged") }, Facts { untracked: 2, ..clean("closed") }, Facts { unpushed: Some(1), ..clean("none") }] {
+            assert_eq!(habits::decide(&f, &[&book], &prec), None, "{f:?}");
+        }
+        // …a clean one is not (the general habit still asks), nor an open PR.
+        assert!(habits::decide(&clean("merged"), &[&book], &prec).is_some());
+        assert!(!book.get("inventory-at-risk").unwrap().when.matches(&Facts { changed: 1, ..clean("open") }));
         // An at-risk deletion habit can never be auto.
-        let h = book.get("inventory-at-risk-done-uncommitted").unwrap();
-        assert!(h.when.admits_risk());
+        let obs = habit_for(Group::AtRisk, Answer::AskEachTime, &[], TODAY);
+        assert!(obs.when.admits_risk());
+        assert_eq!(obs.when.risky_facts(), vec!["at_risk"]);
+    }
+
+    #[test]
+    fn a_delete_on_the_merged_card_supersedes_an_earlier_keep() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_, mut book) = global_book(tmp.path());
+        let mut cards = Cards::default();
+        let group = || vec![(Group::Merged, vec![cand("m1", clean("merged"))])];
+        let (r1, _) = cards.raise("s1", group());
+        adopt_all(&mut book, cards.answer(&r1[0].payload, Some(KEEP), TODAY).unwrap());
+        let prec = Precedence { repo_cap: None, user_default: RuleLevel::Ask };
+        assert_eq!(habits::decide(&clean("merged"), &[&book], &prec), None);
+        let (r2, _) = cards.raise("s2", group());
+        let a = cards.answer(&r2[0].payload, Some("Delete it"), TODAY).unwrap();
+        assert_eq!(a.supersede, vec!["inventory-merged"]);
+        for id in &a.supersede {
+            assert!(book.supersede(id));
+        }
+        adopt_all(&mut book, a);
+        let d = habits::decide(&clean("merged"), &[&book], &prec).unwrap();
+        assert_eq!((d.id.as_str(), d.level), (habits::SEED_ID, HabitLevel::Ask));
+        assert_eq!(book.get("inventory-merged").unwrap().status, Status::Superseded);
     }
 
     #[test]
@@ -757,7 +809,7 @@ mod tests {
         assert!(old.is_empty(), "the first card was answered");
         adopt_all(&mut book, cards.answer(&r2[0].payload, Some("Delete all 2"), TODAY).unwrap());
         let h = book.get("inventory-closed").unwrap();
-        assert_eq!((h.evidence.approved, h.evidence.streak, book.level(h)), (2, 2, HabitLevel::Ask));
+        assert_eq!((h.evidence.decisions, h.evidence.approved, h.evidence.streak, book.level(h)), (2, 2, 2, HabitLevel::Ask));
         // Changed their mind: keep. The habit turns into a keep habit.
         let (r3, _) = cards.raise("n8", group());
         let (r4, old) = cards.raise("n9", group());
@@ -765,7 +817,7 @@ mod tests {
         assert!(cards.answer(&r3[0].payload, Some(KEEP), TODAY).is_none(), "a replaced card answers nothing");
         adopt_all(&mut book, cards.answer(&r4[0].payload, Some(KEEP), TODAY).unwrap());
         let h = book.get("inventory-closed").unwrap();
-        assert_eq!((h.act, h.evidence.approved, h.evidence.streak), (Do::Keep, 3, 0));
+        assert_eq!((h.act, h.evidence.decisions, h.evidence.approved, h.evidence.streak), (Do::Keep, 3, 2, 0));
         assert_eq!(book.habits.iter().filter(|h| h.id == "inventory-closed").count(), 1);
     }
 
@@ -773,7 +825,7 @@ mod tests {
     fn a_grant_only_covers_its_own_habit_and_never_auto() {
         let tmp = tempfile::tempdir().unwrap();
         let (_, mut book) = global_book(tmp.path());
-        let h = habits_for(Group::Merged, Answer::Delete, &[cand("m1", clean("merged"))], TODAY).remove(0);
+        let h = habit_for(Group::Closed, Answer::Delete, &[cand("c1", clean("closed"))], TODAY);
         let other = Grant::from_inventory_card(GLOBAL, "something-else", HabitLevel::Ask);
         assert!(book.adopt(h.clone(), other, TODAY).is_err());
         let auto = Grant::from_inventory_card(GLOBAL, &h.id, HabitLevel::Auto);
