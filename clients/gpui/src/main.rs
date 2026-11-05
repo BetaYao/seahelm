@@ -15,12 +15,14 @@ mod keys;
 mod notify;
 mod platform;
 mod session;
+mod side_panel;
 mod split;
 mod terminal_view;
 mod text_input;
 mod theme;
 mod tokens;
 mod workspace;
+mod worktree_git;
 
 use std::borrow::Cow;
 

@@ -18,6 +18,7 @@ use crate::fleet::{self, Dot, GitStats, Group, Grouping, Item, Snapshot};
 use crate::gateway_page::GatewayPage;
 use crate::platform;
 use crate::session;
+use crate::side_panel::{self, SidePanel, Tab as SideTab};
 use crate::split::{Axis, Direction, LeafId, Rect, SplitTree};
 use crate::terminal_view::TerminalView;
 use crate::theme;
@@ -122,10 +123,17 @@ pub struct Workspace {
     /// Remote access (seahelm-gateway's settings) is in the main area.
     gateway_open: bool,
     gateway_page: Entity<GatewayPage>,
+    /// The selected worktree's Files / Changes panel, on the right, and
+    /// which tab it is open on (None: closed).
+    side_tab: Option<SideTab>,
+    side_panel: Entity<SidePanel>,
+    _side_closed: Subscription,
 }
 
 impl Workspace {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        let side_panel = cx.new(SidePanel::new);
+        let side_closed = cx.subscribe(&side_panel, |w, _, _: &side_panel::CloseRequested, cx| w.set_side(None, cx));
         let this = Self {
             fleet: Snapshot::default(),
             git: HashMap::new(),
@@ -158,6 +166,9 @@ impl Workspace {
             window_active: true,
             gateway_open: false,
             gateway_page: cx.new(GatewayPage::new),
+            side_tab: None,
+            side_panel,
+            _side_closed: side_closed,
         };
         Self::poll_core(cx);
         Self::listen_core(cx);
@@ -207,6 +218,7 @@ impl Workspace {
                     w.fleet = snap;
                     if w.selected.is_none() {
                         w.selected = w.fleet.groups.iter().flat_map(|g| g.items.first()).next().map(|i| i.id.clone());
+                        w.side_follow(cx);
                     }
                     cx.notify();
                 })
@@ -596,6 +608,30 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The header's folder (Files) and diff (Changes) buttons: open the side
+    /// panel on that tab, or close it if it is already showing it.
+    fn toggle_side(&mut self, tab: SideTab, cx: &mut Context<Self>) {
+        let next = if self.side_tab == Some(tab) { None } else { Some(tab) };
+        notify::log("side_panel", serde_json::json!({"tab": format!("{next:?}")}));
+        self.set_side(next, cx);
+    }
+
+    fn set_side(&mut self, tab: Option<SideTab>, cx: &mut Context<Self>) {
+        self.side_tab = tab;
+        let wt = self.selected_worktree();
+        self.side_panel.update(cx, |p, cx| match tab {
+            Some(t) => p.show(wt, t, cx),
+            None => p.hide(cx),
+        });
+        cx.notify();
+    }
+
+    /// The panel follows the selected worktree.
+    fn side_follow(&mut self, cx: &mut Context<Self>) {
+        let wt = self.selected_worktree();
+        self.side_panel.update(cx, |p, cx| p.set_worktree(wt, cx));
+    }
+
     fn set_gateway_open(&mut self, open: bool, cx: &mut Context<Self>) {
         if self.gateway_open != open {
             self.gateway_open = open;
@@ -843,6 +879,7 @@ impl Workspace {
         self.first_mate_open = false;
         self.set_gateway_open(false, cx);
         self.selected = Some(id.clone());
+        self.side_follow(cx);
         // On screen in a frontmost window: a turn that ends here is seen.
         self.report_visible(window.is_window_active(), cx);
         notify::log("select", serde_json::json!({"worktree": id}));
@@ -1293,6 +1330,10 @@ impl Render for Workspace {
             );
         }
         root = root.child(self.terminal_column(title, cards, body, window.is_maximized(), cx));
+        // Beside a worktree's terminals only, not over First Mate or Remote access.
+        if self.side_tab.is_some() && !self.gateway_open && !self.first_mate_open && selected.is_some() {
+            root = root.child(self.side_panel.clone());
+        }
         if self.sidebar_visible {
             root = root.child(self.divider(width, cx));
         }
@@ -1332,8 +1373,16 @@ impl Workspace {
             .gap(px(2.))
             .child(chrome_icon("contrast", !theme::is_dark()).id("toggle-theme").on_click(cx.listener(Self::toggle_theme)))
             .child(chrome_icon("share", self.gateway_open).id("toggle-gateway").on_click(cx.listener(Self::toggle_gateway)))
-            .child(chrome_icon("folder", false))
-            .child(chrome_icon("diff", false))
+            .child(
+                chrome_icon("folder", self.side_tab == Some(SideTab::Files))
+                    .id("toggle-files")
+                    .on_click(cx.listener(|w, _: &ClickEvent, _, cx| w.toggle_side(SideTab::Files, cx))),
+            )
+            .child(
+                chrome_icon("diff", self.side_tab == Some(SideTab::Changes))
+                    .id("toggle-changes")
+                    .on_click(cx.listener(|w, _: &ClickEvent, _, cx| w.toggle_side(SideTab::Changes, cx))),
+            )
             .child(chrome_icon("panel-left", false).id("toggle-sidebar").on_click(cx.listener(Self::toggle_sidebar)))
     }
 
