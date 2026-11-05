@@ -119,7 +119,7 @@ pub enum Msg {
     /// A gated call went through.
     DidRun { method: String, result: Value },
     /// An approved or picked call finished.
-    Ran { action: Action, what: String, level: &'static str, result: Result<Value, String> },
+    Ran { action: Action, what: String, level: &'static str, params: Value, result: Result<Value, String> },
     /// The daily sweep measured, matched and deleted what it may on its own.
     Swept { report: sweep::Report },
     /// A deletion the user approved on a habit card finished.
@@ -367,7 +367,7 @@ impl FirstMate {
             }
             Msg::Answered { payload, option, via } => self.answered(&payload, option.as_deref(), via, now),
             Msg::DidRun { method, result } => self.did_run(&method, &result),
-            Msg::Ran { action, what, level, result } => {
+            Msg::Ran { action, what, level, params, result } => {
                 let outcome = match &result {
                     Ok(r) => {
                         if let Some(m) = r.get("_method").and_then(Value::as_str) {
@@ -380,6 +380,7 @@ impl FirstMate {
                 let mut e = Entry::new(now, "action", format!("{what} — {outcome}"));
                 e.action = Some(action.as_str().into());
                 e.level = Some(level.into());
+                self.annotate(&mut e, action, &params);
                 self.log(e);
                 let verb = if level == "picked" { format!("picked \"{what}\"") } else { format!("approved: {what}") };
                 self.tell(&format!("[seahelm] The user {verb}\nResult: {outcome}"));
@@ -736,7 +737,9 @@ impl FirstMate {
         if self.config.paused {
             return Gate::Deny("First Mate is paused".into());
         }
-        let summary = policy::describe(method, params, params.get("_facts").and_then(Value::as_str));
+        // Described with the pane as the user knows it, never a raw id.
+        let shown = self.with_pane_label(params);
+        let summary = policy::describe(method, &shown, params.get("_facts").and_then(Value::as_str));
         let deny = |fm: &mut Self, level: Option<&str>, text: String| {
             let mut e = Entry::new(now, "denied", text);
             e.action = Some(action.as_str().into());
@@ -754,6 +757,7 @@ impl FirstMate {
                 let mut e = Entry::new(now, "action", summary);
                 e.action = Some(action.as_str().into());
                 e.level = Some("auto".into());
+                self.annotate(&mut e, action, params);
                 self.log(e);
                 Gate::Allow
             }
@@ -775,7 +779,8 @@ impl FirstMate {
                 } else {
                     budget::Class::Proactive
                 };
-                self.put_card(CardKind::Approval, &id, format!("First Mate asks: {summary}"), vec![APPROVE.into(), REJECT.into()], class, now);
+                let lang = self.config.language;
+                self.put_card(CardKind::Approval, &id, format!("{}{}", lang.pick("First Mate asks: ", "First Mate 请示："), brief::describe_action(lang, action, &shown).unwrap_or(summary.clone())), vec![APPROVE.into(), REJECT.into()], class, now);
                 let mut e = Entry::new(now, "approval", summary.clone());
                 e.action = Some(action.as_str().into());
                 e.level = Some("ask".into());
@@ -925,6 +930,37 @@ impl FirstMate {
 
     /// Run a call as the user's, off this thread; the outcome comes back as
     /// `Msg::Ran`.
+    /// `params` with `pane_id` replaced by the pane as the user knows it
+    /// (`#7 · feat-x`), for descriptions only.
+    fn with_pane_label(&self, params: &Value) -> Value {
+        let mut shown = params.clone();
+        if let Some(label) = params.get("pane_id").and_then(Value::as_str).and_then(|p| self.core.pane_label(p)) {
+            shown["pane_id"] = json!(label);
+        }
+        shown
+    }
+
+    /// The structured side of an action's audit line, which the brief
+    /// describes in the user's language (`brief::describe_entry`).
+    fn annotate(&self, e: &mut Entry, action: Action, params: &Value) {
+        let s = |k: &str| params.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string);
+        match action {
+            Action::MessagePane => {
+                e.pane = s("pane_id").map(|p| self.core.pane_label(&p).unwrap_or(p));
+                e.detail = s("command").or_else(|| s("text")).or_else(|| {
+                    params.get("keys").and_then(Value::as_array).map(|k| k.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+                });
+            }
+            Action::StartAgent => {
+                e.worktree_path = e.worktree_path.take().or_else(|| s("repo_path"));
+                e.detail = s("prompt");
+            }
+            Action::DeleteWorktree => {
+                e.worktree_path = e.worktree_path.take().or_else(|| s("worktree_path"));
+            }
+        }
+    }
+
     fn execute(&self, action: Action, method: String, params: Value, what: String, level: &'static str, card: &str) {
         let core = self.core.clone();
         let tx = self.tx.clone();
@@ -938,7 +974,7 @@ impl FirstMate {
                 r["_method"] = json!(method);
                 r
             });
-            let _ = tx.send(Msg::Ran { action, what, level, result: result.map_err(|e| e.message) });
+            let _ = tx.send(Msg::Ran { action, what, level, params, result: result.map_err(|e| e.message) });
         });
     }
 

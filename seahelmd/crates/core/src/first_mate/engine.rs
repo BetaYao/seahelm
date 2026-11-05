@@ -230,6 +230,13 @@ pub struct Entry {
     pub action: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level: Option<String>,
+    /// The pane an action spoke to, as the user knows it (`#7 · feat-x`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// What an action said or started, one line: the brief describes the
+    /// action itself, in the user's language, from these fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     pub text: String,
 }
 
