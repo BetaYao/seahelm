@@ -300,7 +300,9 @@ fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcRes
         .filter(|b| !b.is_empty() && !b.contains("HEAD"))
         .collect();
     let base = ["main", "master"].into_iter().find(|b| branches.iter().any(|x| x == b)).map(str::to_string).or_else(|| branches.first().cloned()).unwrap_or_else(|| "main".into());
-    let issue = crate::first_mate::routing::linked_issue(&s(p,"prompt"), &crate::first_mate::routing::remotes(&main_repo));
+    let issue = if allow_hint && !s(p,"branch_hint").is_empty() { None } else {
+        crate::first_mate::routing::linked_issue(&s(p,"prompt"), &crate::first_mate::routing::remotes(&main_repo))
+    };
     let branch_template=core.memory_store().value(&main_repo,"branch naming");
     if let Some((_, n)) = &issue {
         if let Some(existing) = branches.iter().find(|b| crate::first_mate::routing::issue_branch_matches(b, *n,branch_template.as_deref())) {

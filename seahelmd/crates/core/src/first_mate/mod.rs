@@ -977,7 +977,7 @@ impl FirstMate {
         self.card_options.remove(payload);
         self.expiry.forget(payload);
         if let Some((repo, digest)) = self.memory_pending.remove(payload) {
-            let result = memory::answer_edit(&self.memory,&repo,&digest,option == Some(APPROVE));
+            let result = memory::answer_edit(&self.memory,&repo,&digest,option == Some("approve"));
             if let Err(e) = result { self.core.first_mate_line(lang::memory_failure(&e).get(self.config.language)); }
             return;
         }

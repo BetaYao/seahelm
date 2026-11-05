@@ -856,7 +856,7 @@ impl Book {
             .iter()
             .filter(|h| h.active() && matches!(h.act, Do::DeleteWorktree | Do::Route))
             .filter_map(|h| match self.level(h) {
-                HabitLevel::Suggest if (h.act == Do::Route && route_evidence(h.fresh_sources())) || gates_pass_n(h.fresh_sources(), &by_id, n.clamp(2,10)) => Some((h.id.clone(), HabitLevel::Ask)),
+                HabitLevel::Suggest if (h.act == Do::Route && route_evidence(h.fresh_sources(), n)) || gates_pass_n(h.fresh_sources(), &by_id, n.clamp(2,10)) => Some((h.id.clone(), HabitLevel::Ask)),
                 HabitLevel::Ask if h.evidence.streak >= m.clamp(3,20) && !h.when.admits_risk() => Some((h.id.clone(), HabitLevel::Auto)),
                 _ => None,
             })
@@ -978,11 +978,15 @@ impl Book {
 
     /// A user's routing choice is evidence; grants still use Offers and D1.
     pub fn route_pick(&mut self, words: &str, today: &str, source: &str) {
+        self.route_pick_with_n(words,today,source,tuning::N);
+    }
+
+    pub fn route_pick_with_n(&mut self, words: &str, today: &str, source: &str, n: usize) {
         let id = route_id(words);
         if self.get(&id).is_none() {
             let mut h = Habit::seed(today);
             h.id = id.clone(); h.about = format!("project.route:{words}"); h.act = Do::Route;
-            h.when = When(BTreeMap::from([(Fact::RequestWords, Cond::Text(words.into()))]));
+            h.when = When(BTreeMap::from([(Fact::RequestWords, Cond::Text(words.into()))]), None);
             h.level = HabitLevel::Observe; h.origin = Origin::Learned;
             self.habits.push(h);
         }
@@ -992,7 +996,7 @@ impl Book {
         if h.sources.contains(&source) { return; }
         h.sources.push(source); h.evidence.manual += 1;
         if h.level == HabitLevel::Ask { h.evidence.streak += 1; }
-        if h.level == HabitLevel::Observe && route_evidence(h.fresh_sources()) {
+        if h.level == HabitLevel::Observe && route_evidence(h.fresh_sources(), n) {
             h.level = HabitLevel::Suggest; self.caps.insert(id, HabitLevel::Suggest);
             h.evidence.fresh_from = h.sources.len();
         }
@@ -2282,6 +2286,18 @@ pub fn route_id(words: &str) -> String {
 mod routing_tests {
     use super::*;
     #[test]
+    fn routing_evidence_uses_the_tuned_threshold() {
+        let mut book=Book::empty("repo"); let id=route_id("fix login");
+        book.route_pick_with_n("fix login","2026-11-04","card-1",2);
+        book.route_pick_with_n("fix login","2026-11-05","card-2",2);
+        assert_eq!(book.level(book.get(&id).unwrap()),HabitLevel::Suggest);
+        book.route_pick_with_n("fix login","2026-11-06","card-3",2);
+        book.route_pick_with_n("fix login","2026-11-07","card-4",2);
+        assert_eq!(book.offers_with_thresholds(&[],2,5),vec![(id.clone(),HabitLevel::Ask)]);
+        assert!(book.offers_with_thresholds(&[],3,5).is_empty());
+    }
+
+    #[test]
     fn route_learning_never_grants_ask_or_auto_without_a_card() {
         let mut b = Book::empty("repo"); let id = route_id("fix login");
         for i in 0..tuning::N { b.route_pick("fix login", if i == 0 { "2026-11-04" } else { "2026-11-05" }, &format!("pick-{i}")); }
@@ -2304,7 +2320,7 @@ mod routing_tests {
     }
 }
 
-fn route_evidence(sources: &[String]) -> bool {
+fn route_evidence(sources: &[String], n: usize) -> bool {
     let days: std::collections::HashSet<_> = sources.iter().filter_map(|s| s.split_once('|').map(|(d, _)| d)).collect();
-    sources.len() >= tuning::N && days.len() >= tuning::MIN_DAYS
+    sources.len() >= n.clamp(2,10) && days.len() >= tuning::MIN_DAYS
 }

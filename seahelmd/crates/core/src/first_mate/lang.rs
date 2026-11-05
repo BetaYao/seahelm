@@ -139,6 +139,7 @@ pub fn habit_action(action: super::habits::Do, lang: Lang) -> &'static str {
     match action {
         super::habits::Do::DeleteWorktree => lang.pick("delete a worktree", "删除 worktree"),
         super::habits::Do::Keep => lang.pick("keep a worktree", "保留 worktree"),
+        super::habits::Do::Route => lang.pick("route a request to a project", "为请求选择项目"),
     }
 }
 

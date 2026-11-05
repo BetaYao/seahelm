@@ -252,7 +252,7 @@ impl FirstMate {
             }
         }
         let mut book = self.habits.load(&habits::repo_key(&repo), &today);
-        book.route_pick(&words(text), &today, card);
+        book.route_pick_with_n(&words(text), &today, card, self.budget.tuned.n);
         self.save_book(&book, now);
         self.learn(now);
         self.offer_alias(&repo, text, card, now);
@@ -406,7 +406,7 @@ impl FirstMate {
         let payload = self.mint("autopilot-alias");
         let message = super::lang::alias_offer(&alias, repo);
         self.put_card(
-            seahelm_core_registry::cards::CardKind::Proposal,
+            seahelm_core_registry::cards::CardKind::Approval,
             &payload,
             message.get(self.config.language).into(),
             vec![super::APPROVE.into(), super::REJECT.into()],
@@ -419,7 +419,7 @@ impl FirstMate {
         let Some((repo, alias, source)) = self.alias_pending.remove(payload) else {
             return false;
         };
-        if option != Some(super::APPROVE) {
+        if option != Some("approve") {
             return true;
         }
         let today = super::clock::Local::at(now).day_key();
@@ -567,9 +567,31 @@ mod gate_tests {
         let p = json!({"repo_path":repo,"prompt":"new feature"});
         fm.route_text = "官网 新功能".into();
         assert!(matches!(fm.route_gate(&p, 2.), Some(Gate::Queued(_))));
-        fm.answer_alias(&card, Some(APPROVE), 3.);
+        fm.answered(&card, Some(APPROVE), None, 3.);
         assert_eq!(fm.route_gate(&p, 4.), Some(Gate::Allow));
     }
+    #[test]
+    fn localized_memory_and_alias_cards_keep_their_approval_identity() {
+        let tmp=tempfile::tempdir().unwrap(); let (mut fm,repo)=fixture(tmp.path(),"project");
+        fm.config.language=super::super::lang::Lang::Zh;
+        fm.offer_alias(&repo,"官网","picked-project",1.);
+        let card=fm.alias_pending.keys().next().unwrap().clone();
+        let choices=&fm.card_options[&card];
+        assert_eq!(choices[0].key,"approve"); assert_eq!(choices[0].label,"批准");
+        let label=choices[0].label.clone(); fm.answered(&card,Some(&label),None,2.);
+        assert!(fm.alias_pending.is_empty());
+        fm.route_text="官网 新功能".into();
+        assert_eq!(fm.route_gate(&json!({"repo_path":repo,"prompt":"new feature"}),3.),Some(Gate::Allow));
+        fm.memory.note(&repo,"goal: trusted","user").unwrap();
+        let path=fm.memory.dir.join(format!("{}.md",habits::repo_key(&repo)));
+        let original=std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path,original.replace("trusted","confirmed")).unwrap();
+        fm.check_memory_edits(4.); let card=fm.memory_pending.keys().next().unwrap().clone();
+        let label=fm.card_options[&card][0].label.clone(); assert_eq!(label,"批准");
+        fm.answered(&card,Some(&label),None,5.);
+        assert!(fm.memory.context(&repo).contains("confirmed"));
+    }
+
     #[test]
     fn ranks_requested_then_alias_then_description_matches() {
         let projects = vec![

@@ -749,8 +749,8 @@ becomes offerable again. A first expiry holds the task for seven days, and a sec
 `task.passed`; successful creation produces `task.started`. Source removal and
 closed/disappeared fetched issues remove pending candidates. A task already
 started elsewhere is refused at click time. Issue text is labelled untrusted
-inside one delimited data block, including key, title and body, in the kickoff brief; the clear project-memory hook in `Task::params` is for
-phase 7 once that code is present on rebase.
+inside one delimited data block, including key, title and body, in the kickoff brief; the core action adds a project-memory pointer and SessionStart injects only the
+trusted project revision.
 
 Current bounds and follow-ups: each source's filter should select a modest
 backlog (50 returned issues); PR deduplication reads at most 100 open and 100 recently updated merged PRs.
