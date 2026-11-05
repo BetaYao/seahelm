@@ -37,7 +37,6 @@ use crate::rpc::{RpcError, RpcResult};
 use clock::Local;
 use cron::Cron;
 use engine::{Audit, Detector, Dispatch, Entry, Event, Ledger, Observation};
-use facts::Facts;
 use pane::Agent;
 use rules::{Action, Autonomy, Config, Level, Rule, Trigger};
 
@@ -455,9 +454,7 @@ impl FirstMate {
             }
         }
         if matches!(event.trigger, Trigger::PrMerged | Trigger::CiFailed) && event.facts.is_none() {
-            let mut f = Facts::probe(Path::new(&event.worktree));
-            f.busy_panes = self.core.busy_panes(&event.worktree);
-            event.facts = Some(f);
+            event.facts = Some(self.core.measure_worktree(&event.worktree, event.pr.as_ref()));
         }
         let config = match self.config_for(&event.repo) {
             Ok(c) => c,

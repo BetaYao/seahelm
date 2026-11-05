@@ -31,7 +31,7 @@ pub enum State {
 }
 
 impl State {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             State::Open => "open",
             State::Draft => "draft",
@@ -83,6 +83,12 @@ pub struct PrStatus {
     pub state: State,
     pub checks: Option<Checks>,
     pub review: Option<Review>,
+    /// The PR's head commit (`headRefOid`): what GitHub keeps under
+    /// `refs/pull/<n>/head` after the branch is gone, so a squash-merged
+    /// worktree's commits are not "on no remote".
+    pub head_oid: Option<String>,
+    /// When it merged (`mergedAt`), Unix seconds.
+    pub merged_at: Option<i64>,
 }
 
 impl PrStatus {
@@ -96,6 +102,12 @@ impl PrStatus {
     /// open / draft / merged / closed; checks and review only while live).
     pub fn to_json(&self) -> Value {
         let mut v = json!({"number": self.number, "url": self.url, "state": self.state.as_str()});
+        if let Some(o) = &self.head_oid {
+            v["head_oid"] = json!(o);
+        }
+        if let Some(t) = self.merged_at {
+            v["merged_at"] = json!(t);
+        }
         if self.is_live() {
             if let Some(c) = self.checks {
                 v["checks"] = json!(c.as_str());
@@ -141,7 +153,7 @@ pub const QUERY: &str = "query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {
     pullRequests(first: 30, orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes {
-        number url state isDraft headRefName reviewDecision
+        number url state isDraft headRefName headRefOid mergedAt reviewDecision
         headRepositoryOwner { login }
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       }
@@ -187,10 +199,49 @@ pub fn parse_statuses(response: &Value, owner: &str) -> HashMap<String, PrStatus
                 state,
                 checks: parse_checks(rollup),
                 review: parse_review(node.get("reviewDecision").and_then(Value::as_str)),
+                head_oid: node.get("headRefOid").and_then(Value::as_str).filter(|o| !o.is_empty()).map(str::to_string),
+                merged_at: node.get("mergedAt").and_then(Value::as_str).and_then(parse_iso8601).map(|t| t.floor() as i64),
             },
         );
     }
     by_branch
+}
+
+/// GitHub's `2026-11-04T10:20:30Z` (UTC, optional fraction or offset)
+/// into Unix seconds.
+pub fn parse_iso8601(raw: &str) -> Option<f64> {
+    let raw = raw.trim();
+    let (date, time) = raw.split_once('T')?;
+    let mut d = date.splitn(3, '-').map(|x| x.parse::<i64>().ok());
+    let (y, m, day) = (d.next()??, d.next()??, d.next()??);
+    // The offset: Z, +hh:mm or -hh:mm.
+    let (clock, offset) = if let Some(c) = time.strip_suffix('Z') {
+        (c, 0)
+    } else if let Some(i) = time.rfind(['+', '-']) {
+        let (c, o) = time.split_at(i);
+        let sign = if o.starts_with('-') { -1 } else { 1 };
+        let mut hm = o[1..].split(':').map(|x| x.parse::<i64>().ok());
+        let (h, mi) = (hm.next()??, hm.next().flatten().unwrap_or(0));
+        (c, sign * (h * 3600 + mi * 60))
+    } else {
+        (time, 0)
+    };
+    let mut t = clock.splitn(3, ':');
+    let h: i64 = t.next()?.parse().ok()?;
+    let mi: i64 = t.next()?.parse().ok()?;
+    let sec: f64 = t.next().unwrap_or("0").parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&day) {
+        return None;
+    }
+    // Days from the civil date (Howard Hinnant's algorithm).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some((days * 86_400 + h * 3600 + mi * 60 - offset) as f64 + sec)
 }
 
 pub fn parse_state(raw: Option<&str>, draft: bool) -> Option<State> {
@@ -327,6 +378,17 @@ impl PrStore {
         let repo = inner.remotes.get(worktree)?.as_ref()?;
         let branch = inner.branches.get(worktree)?;
         inner.repos.get(repo)?.by_branch.get(branch).cloned()
+    }
+
+    /// What is known of the worktree's PR: None when nothing was fetched
+    /// for its repository yet (or the fetch failed), Some(None) when the
+    /// branch has no PR among those fetched or the remote is not GitHub.
+    pub fn known(&self, worktree: &str) -> Option<Option<PrStatus>> {
+        let inner = self.lock();
+        let Some(repo) = inner.remotes.get(worktree)? else { return Some(None) };
+        let branch = inner.branches.get(worktree)?;
+        let entry = inner.repos.get(repo).filter(|e| e.ok)?;
+        Some(entry.by_branch.get(branch).cloned())
     }
 
     /// Every known worktree with a PR: `{worktree_path, repo, branch, pr}`.
@@ -555,7 +617,9 @@ mod tests {
                 url: "https://github.com/acme/app/pull/12".into(),
                 state: State::Open,
                 checks: Some(Checks::Passing),
-                review: Some(Review::Approved)
+                review: Some(Review::Approved),
+                head_oid: None,
+                merged_at: None,
             }
         );
         assert_eq!(by["feat/b"].state, State::Draft);
@@ -564,6 +628,22 @@ mod tests {
         assert_eq!(by["feat/c"].review, Some(Review::ChangesRequested));
         assert_eq!(by["feat/d"].state, State::Merged);
         assert_eq!(by["feat/d"].checks, None);
+    }
+
+    #[test]
+    fn reads_head_oid_and_merge_time() {
+        let mut n = node(40, "feat/m", "MERGED", false, "acme", None, None);
+        n["headRefOid"] = json!("abc123");
+        n["mergedAt"] = json!("2026-11-04T10:20:30Z");
+        let by = parse_statuses(&response(vec![n, node(41, "feat/o", "OPEN", false, "acme", None, None)]), "acme");
+        assert_eq!(by["feat/m"].head_oid.as_deref(), Some("abc123"));
+        assert_eq!(by["feat/m"].merged_at, Some(1_793_787_630));
+        assert_eq!(by["feat/o"].merged_at, None);
+        assert_eq!(by["feat/m"].to_json()["head_oid"], "abc123");
+        assert_eq!(parse_iso8601("1970-01-01T00:00:00Z"), Some(0.0));
+        assert_eq!(parse_iso8601("1970-01-02T01:00:00+01:00"), Some(86_400.0));
+        assert_eq!(parse_iso8601("2024-02-29T00:00:00.5Z"), Some(1_709_164_800.5));
+        assert_eq!(parse_iso8601("nonsense"), None);
     }
 
     /// Nodes come newest-updated first; a branch reopened as a new PR is that one.
@@ -596,12 +676,12 @@ mod tests {
 
     #[test]
     fn wire_drops_checks_and_review_once_the_pr_is_done() {
-        let merged = PrStatus { number: 1, url: "u".into(), state: State::Merged, checks: Some(Checks::Failing), review: Some(Review::Approved) };
+        let merged = PrStatus { number: 1, url: "u".into(), state: State::Merged, checks: Some(Checks::Failing), review: Some(Review::Approved), head_oid: None, merged_at: None };
         let w = merged.to_json();
         assert!(w.get("checks").is_none());
         assert!(w.get("review").is_none());
         assert_eq!(w["state"], "merged");
-        let open = PrStatus { number: 2, url: "u".into(), state: State::Open, checks: Some(Checks::Failing), review: None };
+        let open = PrStatus { number: 2, url: "u".into(), state: State::Open, checks: Some(Checks::Failing), review: None, head_oid: None, merged_at: None };
         assert_eq!(open.to_json()["checks"], "failing");
         assert_eq!(open.summary(), "PR #2 · open · checks failing");
     }
@@ -662,7 +742,7 @@ mod tests {
     }
 
     fn pr(n: u64) -> PrStatus {
-        PrStatus { number: n, url: "u".into(), state: State::Open, checks: Some(Checks::Passing), review: None }
+        PrStatus { number: n, url: "u".into(), state: State::Open, checks: Some(Checks::Passing), review: None, head_oid: None, merged_at: None }
     }
 
     #[test]

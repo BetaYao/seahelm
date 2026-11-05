@@ -269,8 +269,7 @@ impl Core {
                     // A card that would delete a worktree shows what is in it, as measured.
                     if action == first_mate::rules::Action::DeleteWorktree {
                         if let Some(path) = p.get("worktree_path").and_then(Value::as_str) {
-                            let mut f = first_mate::facts::Facts::probe(std::path::Path::new(path));
-                            f.busy_panes = self.busy_panes(path);
+                            let f = self.measure_worktree(path, None);
                             params["_facts"] = json!(f.summary());
                         }
                     }
@@ -965,6 +964,36 @@ impl Core {
     pub fn busy_panes(&self, worktree: &str) -> u32 {
         let st = self.lock();
         st.registry.panes().filter(|p| p.worktree_path == worktree && matches!(p.status, AgentStatus::Running | AgentStatus::Waiting)).count() as u32
+    }
+
+    /// The latest moment anything happened in the worktree's panes (a
+    /// prompt, a reply, an agent start), Unix seconds.
+    pub fn last_pane_activity(&self, worktree: &str) -> Option<f64> {
+        let st = self.lock();
+        st.registry
+            .panes()
+            .filter(|p| p.worktree_path == worktree)
+            .flat_map(|p| [p.last_user_prompt_at, p.last_assistant_message_at, p.started_at])
+            .flatten()
+            .fold(None, |a: Option<f64>, t| Some(a.map_or(t, |a| a.max(t))))
+    }
+
+    /// The worktree's facts with what the core knows beyond git: its PR
+    /// (`pr`, else the PR store's last answer), busy panes, pane activity.
+    /// Blocking: git, and maybe a fetch of the PR's head.
+    pub fn measure_worktree(&self, worktree: &str, pr: Option<&pr::PrStatus>) -> first_mate::facts::Facts {
+        use first_mate::facts::{Context, Facts, PrInfo};
+        let known = if pr.is_some() { None } else { self.prs.known(worktree) };
+        let info = match (pr, &known) {
+            (Some(p), _) => PrInfo::Some(p),
+            (None, Some(Some(p))) => PrInfo::Some(p),
+            (None, Some(None)) => PrInfo::None,
+            (None, None) => PrInfo::Unknown,
+        };
+        let mut ctx = Context::new(info, now());
+        ctx.busy_panes = self.busy_panes(worktree);
+        ctx.last_pane_activity = self.last_pane_activity(worktree);
+        Facts::measure(std::path::Path::new(worktree), &ctx)
     }
 
     /// Worktrees clients list plus those with panes.
