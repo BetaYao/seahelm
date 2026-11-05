@@ -180,7 +180,7 @@ impl Facts {
             (f.insertions, f.deletions) = parse_shortstat(&s);
         }
         if let Some(s) = git(worktree, &["status", "--porcelain=v1", "-z", "--ignored=traditional", "--untracked-files=normal"]) {
-            let kept = ignored_worth_keeping(&s);
+            let kept: Vec<String> = ignored_worth_keeping(&s).into_iter().filter(|p| !is_symlink(worktree, p)).collect();
             f.ignored = kept.len() as u32;
             f.ignored_files = kept.into_iter().take(IGNORED_NAMES_CAP).collect();
         }
@@ -309,7 +309,22 @@ fn ignored_worth_keeping(status_z: &str) -> Vec<String> {
 
 pub fn is_regenerable(path: &str) -> bool {
     let path = path.trim_end_matches('/');
-    path.split('/').any(|c| REGENERABLE.contains(&c)) || path.ends_with(".pyc")
+    path.split('/').any(|c| REGENERABLE.contains(&c))
+        || REGENERABLE_SUFFIXES.iter().any(|s| path.ends_with(s))
+        // Xcode's per-user state, and the workspace a generated project
+        // (xcodegen) carries inside its .xcodeproj.
+        || path.split('/').any(|c| c == "xcuserdata")
+        || (path.ends_with("project.xcworkspace") && path.contains(".xcodeproj/"))
+}
+
+/// Endings of files tools rewrite on every run.
+const REGENERABLE_SUFFIXES: &[&str] = &[".pyc", ".tsbuildinfo"];
+
+/// An ignored entry that is a symbolic link: removing the worktree removes
+/// the link, never what it points at (seahelm's own worktrees link
+/// GhosttyKit.xcframework into a shared cache).
+fn is_symlink(worktree: &Path, entry: &str) -> bool {
+    std::fs::symlink_metadata(worktree.join(entry.trim_end_matches('/'))).is_ok_and(|m| m.file_type().is_symlink())
 }
 
 fn parse_status(porcelain: &str) -> (u32, u32, u32) {
@@ -352,6 +367,28 @@ mod tests {
         assert_eq!(parse_status(" M a\nD  b\n?? c\n!! d\n"), (2, 1, 1));
         assert_eq!(parse_shortstat(" 3 files changed, 16 insertions(+), 47942 deletions(-)\n"), (16, 47942));
         assert_eq!(parse_shortstat(" 1 file changed, 1 deletion(-)\n"), (0, 1));
+    }
+
+    #[test]
+    fn generated_xcode_state_and_tsbuildinfo_are_regenerable() {
+        assert!(is_regenerable("seahelm.xcodeproj/project.xcworkspace/"));
+        assert!(is_regenerable("App.xcodeproj/xcuserdata/me.xcuserdatad/"));
+        assert!(is_regenerable("apps/api/.tsbuildinfo"));
+        assert!(!is_regenerable("project.xcworkspace/"), "a hand-made workspace at the root is kept");
+        assert!(!is_regenerable(".env"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_ignored_symlink_is_not_counted() {
+        let dir = std::env::temp_dir().join(format!("facts-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink("/nonexistent/target", dir.join("GhosttyKit.xcframework")).unwrap();
+        std::fs::write(dir.join(".env"), "x").unwrap();
+        assert!(is_symlink(&dir, "GhosttyKit.xcframework"));
+        assert!(!is_symlink(&dir, ".env"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

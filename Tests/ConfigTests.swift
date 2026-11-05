@@ -5,6 +5,17 @@ final class ConfigTests: XCTestCase {
 
     // MARK: - Default Config
 
+    func testSaveKeepsKeysOtherProgramsWrite() throws {
+        let existing = Data(#"{"first_mate_language": "zh", "first_mate_quiet_hours": "23:00-08:00", "telegram": {"token": "x"}, "workspace_paths": ["/old"]}"#.utf8)
+        let encoded = Data(#"{"workspace_paths": ["/new"]}"#.utf8)
+        let merged = try XCTUnwrap(JSONSerialization.jsonObject(with: Config.keepingForeignKeys(encoded, existing: existing)) as? [String: Any])
+        XCTAssertEqual(merged["first_mate_language"] as? String, "zh")
+        XCTAssertEqual(merged["first_mate_quiet_hours"] as? String, "23:00-08:00")
+        XCTAssertEqual(merged["workspace_paths"] as? [String], ["/new"], "the app's own keys win")
+        XCTAssertNil(merged["telegram"], "keys the gateway imported stay dropped")
+        XCTAssertEqual(Config.keepingForeignKeys(encoded, existing: nil), encoded)
+    }
+
     func testDefaultConfig() {
         let config = Config()
         XCTAssertTrue(config.workspacePaths.isEmpty)
