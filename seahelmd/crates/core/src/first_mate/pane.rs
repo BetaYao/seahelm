@@ -16,6 +16,21 @@ pub const PROJECT: &str = "First Mate";
 /// files.
 pub const VERSION: u32 = 4;
 
+/// A digest of the instructions (FNV-1a, stable across builds). In the
+/// managed files' marker and in the session stamp, so a change to
+/// `instructions.md` reaches First Mate by itself: the files are rewritten
+/// and its session replaced, without anyone remembering to bump `VERSION`
+/// (phases 5–9 changed the instructions and the deployed copy stayed at
+/// the one from before them).
+pub fn instructions_digest() -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in INSTRUCTIONS.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{:08x}", h >> 32)
+}
+
 pub const INSTRUCTIONS: &str = include_str!("instructions.md");
 
 pub fn dir() -> PathBuf {
@@ -63,7 +78,7 @@ impl Agent {
 /// core — the app's session has no `seahelm` shim on its PATH, so its First
 /// Mate would talk to an app that no longer runs it.
 pub fn stamp(agent: Agent) -> String {
-    format!("{VERSION}:{}:core", agent.raw())
+    format!("{VERSION}.{}:{}:core", instructions_digest(), agent.raw())
 }
 
 pub fn session_is_current(dir: &Path, agent: Agent) -> bool {
@@ -100,7 +115,7 @@ pub fn permissions() -> serde_json::Value {
 pub fn provision(dir: &Path, core_exe: &Path) {
     let _ = std::fs::create_dir_all(dir.join(".claude"));
     let _ = std::fs::create_dir_all(dir.join("bin"));
-    let marker = format!("<!-- seahelm-first-mate v{VERSION} -->");
+    let marker = format!("<!-- seahelm-first-mate v{VERSION} {} -->", instructions_digest());
     for name in ["CLAUDE.md", "AGENTS.md"] {
         let path = dir.join(name);
         if !std::fs::read_to_string(&path).is_ok_and(|t| t.contains(&marker)) {
@@ -178,7 +193,11 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         provision(d.path(), Path::new("/opt/seahelm-core"));
         let claude = std::fs::read_to_string(d.path().join("CLAUDE.md")).unwrap();
-        assert!(claude.starts_with("<!-- seahelm-first-mate v4 -->\n# You are First Mate"));
+        assert!(claude.starts_with(&format!("<!-- seahelm-first-mate v4 {} -->\n# You are First Mate", instructions_digest())));
+        // A copy written before an instructions change is replaced.
+        std::fs::write(d.path().join("CLAUDE.md"), "<!-- seahelm-first-mate v4 -->\n# old").unwrap();
+        provision(d.path(), Path::new("/opt/seahelm-core"));
+        assert!(std::fs::read_to_string(d.path().join("CLAUDE.md")).unwrap().contains("# You are First Mate"));
         std::fs::write(d.path().join("standing-orders.md"), "mine").unwrap();
         provision(d.path(), Path::new("/opt/seahelm-core"));
         assert_eq!(std::fs::read_to_string(d.path().join("standing-orders.md")).unwrap(), "mine");
