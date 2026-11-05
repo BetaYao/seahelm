@@ -29,6 +29,7 @@ use seahelm_core_scan::Snapshot;
 use seahelm_core_types::{now, AgentStatus, AgentType, Authority, EventKind, EventSource, NormalizedEvent, Timestamp};
 use seahelmd::proto::Msg;
 
+use crate::first_mate::lang::Text;
 use crate::first_mate::{self, policy as fm_policy};
 use crate::pr::{self, PrStore};
 use crate::rpc::{self, Dispatch, Reply, RpcError, RpcResult};
@@ -449,6 +450,15 @@ impl Core {
                     let channel = if desktop { first_mate::presence::Channel::Desktop } else { first_mate::presence::Channel::Web };
                     self.presence_signal(now, Some(channel));
                 }
+                Ok(json!({}))
+            }
+            // The user is using a client right now (keys or the mouse in its
+            // window; never what was typed). The app sends it at most once a
+            // minute (`first_mate::presence`).
+            "client.activity" => {
+                let client = str_param(&p, "client").unwrap_or_else(|| "default".into());
+                let channel = if client.starts_with("web") { first_mate::presence::Channel::Web } else { first_mate::presence::Channel::Desktop };
+                self.presence_signal(now, Some(channel));
                 Ok(json!({}))
             }
             "pane.seen" => {
@@ -1396,25 +1406,44 @@ impl Core {
                 // client shows without every answer adding a line.
                 let first = pid_n.is_none_or(|n| self.audited_clients.lock().unwrap_or_else(|e| e.into_inner()).insert(n));
                 if first {
-                    self.security(format!("{method} from {} (pid {pid}), which runs inside a pane: {why} (logged once per process)", client.as_str()), false);
+                    let en = format!("{method} from {} (pid {pid}), which runs inside a pane: {why} (logged once per process)", client.as_str());
+                    self.security(Text::new(en, ""), false);
                 }
             }
             Verdict::Client { .. } | Verdict::Outside => {}
             Verdict::InPane(why) | Verdict::Unknown(why) => {
                 if crate::peer::starts_inventory(method, p) {
-                    self.security(format!("Refused starting First Mate's inventory from pid {pid}: {why}. Only the user asks for it, through a seahelm client or their own terminal."), true);
+                    self.security(
+                        Text::new(
+                            format!("Refused starting First Mate's inventory from pid {pid}: {why}. Only the user asks for it, through a seahelm client or their own terminal."),
+                            format!("已拒绝 pid {pid} 发起 First Mate 盘点：{why}。只有你本人能通过 seahelm 客户端或自己的终端发起。"),
+                        ),
+                        true,
+                    );
                     return Err(RpcError::forbidden(format!(
                         "{method} refused: only the user starts the inventory, through a seahelm client; this caller is inside a seahelm pane or could not be identified ({why}). `preview: true` is read-only and allowed"
                     )));
                 }
                 if crate::peer::speaks_as_user(method) {
-                    self.security(format!("Refused {} from pid {pid}: {why}. Only the user speaks to First Mate as the user, through the app, the web or Telegram.", describe_speech(method)), true);
+                    self.security(
+                        Text::new(
+                            format!("Refused {} from pid {pid}: {why}. Only the user speaks to First Mate as the user, through the app, the web or Telegram.", describe_speech(method)),
+                            format!("已拒绝 pid {pid} 以你的名义对 First Mate 说话：{why}。只有你本人能通过 app、网页或 Telegram 这样做。"),
+                        ),
+                        true,
+                    );
                     return Err(RpcError::forbidden(format!(
                         "{method} refused: only the user speaks to First Mate as the user, through a seahelm client; this caller is inside a seahelm pane or could not be identified ({why})"
                     )));
                 }
                 let what = describe_guarded(method, p, &self.lock().cards);
-                self.security(format!("Refused {what} from pid {pid}: {why}. Only the user answers cards, through the app, the web or Telegram."), true);
+                self.security(
+                    Text::new(
+                        format!("Refused {what} from pid {pid}: {why}. Only the user answers cards, through the app, the web or Telegram."),
+                        format!("已拒绝 pid {pid} 的卡片操作（{what}）：{why}。只有你本人能通过 app、网页或 Telegram 回答卡片。"),
+                    ),
+                    true,
+                );
                 return Err(RpcError::forbidden(format!(
                     "{method} refused: only the user answers cards, through a seahelm client; this caller is inside a seahelm pane or could not be identified ({why})"
                 )));
@@ -1424,7 +1453,13 @@ impl Core {
             let payload = str_param(p, "payload").unwrap_or_default();
             let taken = !payload.is_empty() && self.lock().cards.list().iter().any(|c| c.payload.as_deref() == Some(payload.as_str()));
             if taken || CORE_PAYLOADS.iter().any(|pre| payload.starts_with(pre)) {
-                self.security(format!("Refused a raised card carrying payload {payload} (pid {pid}): that payload is the core's"), true);
+                self.security(
+                    Text::new(
+                        format!("Refused a raised card carrying payload {payload} (pid {pid}): that payload is the core's"),
+                        format!("已拒绝 pid {pid} 发起的一张卡片：它带的 payload {payload} 属于 core"),
+                    ),
+                    true,
+                );
                 return Err(RpcError::forbidden("cards.raise refused: that payload belongs to a card the core raised"));
             }
         }
@@ -1433,11 +1468,11 @@ impl Core {
 
     /// An audit line (and with `note`, a line in First Mate's conversation)
     /// about who was refused or what was put back.
-    pub fn security(&self, text: String, note: bool) {
-        eprintln!("seahelm-core: security: {text}");
+    pub fn security(&self, text: Text, note: bool) {
+        eprintln!("seahelm-core: security: {}", text.en);
         match self.first_mate.get() {
             Some(fm) => fm.send(first_mate::Msg::Security { text, note }),
-            None => first_mate::audit_directly(&self.audit_path, &text),
+            None => first_mate::audit_directly(&self.audit_path, &text.en),
         }
     }
 }
@@ -2395,6 +2430,15 @@ mod presence_tests {
         assert!(!core.presence().desktop_in_front);
         // The profile is on disk beside the audit log.
         assert!(tmp.path().join(crate::first_mate::presence::FILE_NAME).exists());
+    }
+
+    #[test]
+    fn activity_in_a_client_window_is_the_user() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let _ = core.clone().call("client.activity", json!({"client": "macos"}));
+        assert!(core.presence().profile.seen_on(Channel::Desktop) > 0.0);
+        assert!(core.presence().active(seahelm_core_types::now()));
     }
 
     #[test]

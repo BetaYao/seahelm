@@ -21,6 +21,7 @@ pub mod engine;
 pub mod facts;
 pub mod habits;
 pub mod inventory;
+pub mod lang;
 pub mod learning;
 pub mod observations;
 pub mod pane;
@@ -62,6 +63,12 @@ pub struct UserConfig {
     pub agent: Agent,
     pub defaults: Autonomy,
     pub agent_yolo: bool,
+    /// `first_mate_language`: what the brief and the core's note rows are
+    /// written in (`lang`).
+    pub language: lang::Lang,
+    /// `first_mate_quiet_hours` (`"23:00-08:00"`): the user's own, laid over
+    /// every repo's `quiet_hours` (either one holds things back).
+    pub quiet_hours: Option<rules::QuietHours>,
 }
 
 impl UserConfig {
@@ -83,6 +90,8 @@ impl UserConfig {
             agent: Agent::from_config(v.get("autopilot_agent").and_then(Value::as_str).unwrap_or("claudeCode")),
             defaults: rules::defaults_overriding(&autonomy),
             agent_yolo: b("agent_yolo"),
+            language: lang::Lang::parse(v.get("first_mate_language").and_then(Value::as_str)),
+            quiet_hours: v.get("first_mate_quiet_hours").and_then(Value::as_str).and_then(rules::QuietHours::parse),
         }
     }
 }
@@ -118,7 +127,7 @@ pub enum Msg {
     /// The core refused a caller or caught a change it did not make
     /// (`peer.rs`, `.granted.json`): an audit line, and with `note` a line
     /// in the conversation too.
-    Security { text: String, note: bool },
+    Security { text: lang::Text, note: bool },
     /// The user asked for the inventory again (`habits.inventory`).
     Inventory { reply: Sender<RpcResult> },
     /// The inventory measured and grouped the worktrees.
@@ -246,6 +255,10 @@ struct FirstMate {
     held: Vec<brief::Held>,
     expiry: budget::Expiry,
     expired_confirms: HashSet<(String, String, habits::HabitLevel)>,
+    /// Whether seahelm-gateway can reach Telegram now (`gateway.status`):
+    /// a brief for Telegram is only sent, and only counts, when it can.
+    telegram_ready: Box<dyn Fn() -> bool + Send>,
+    telegram_checked: Option<(Instant, bool)>,
 }
 
 /// Start First Mate's thread. It does nothing until the config gives it
@@ -301,6 +314,8 @@ impl FirstMate {
             held: Vec::new(),
             expiry: budget::Expiry::default(),
             expired_confirms: HashSet::new(),
+            telegram_ready: Box::new(brief::telegram_ready),
+            telegram_checked: None,
         }
     }
 }
@@ -373,9 +388,9 @@ impl FirstMate {
             Msg::HabitDeleted { routed, result } => self.habit_deleted(routed, result, now),
             Msg::Security { text, note } => {
                 if note {
-                    self.core.first_mate_line(&text);
+                    self.core.first_mate_line(text.get(self.config.language));
                 }
-                self.log(Entry::new(now, "security", text));
+                self.log(Entry::new(now, "security", text.en));
             }
             Msg::Inventory { reply } => {
                 let _ = reply.send(self.request_inventory(now));
@@ -392,8 +407,8 @@ impl FirstMate {
         // make was put back, and the user hears it here.
         self.habits.check_grants();
         for text in habits::take_tamper_reports(Some(&self.habits.dir)) {
-            self.core.first_mate_line(&text);
-            self.log(Entry::new(now, "security", text));
+            self.core.first_mate_line(text.get(self.config.language));
+            self.log(Entry::new(now, "security", text.en));
         }
         let config = UserConfig::load();
         if config.defaults != self.config.defaults {
@@ -586,7 +601,7 @@ impl FirstMate {
             }
         };
         let day = Local::at(now).day_key();
-        let quiet = config.settings.quiet_hours.is_some_and(|q| q.contains(&Local::at(now)));
+        let quiet = self.quiet_now(config.settings.quiet_hours, now);
         for d in engine::dispatches(&event, &config, &self.ledger, &day) {
             if let Some(pr) = &event.pr {
                 self.ledger.record_attempt(&d.rule.name, &event.repo, pr.number, &day);
@@ -629,6 +644,12 @@ impl FirstMate {
         loaded
     }
 
+    /// A repo's quiet hours, or the user's own (`first_mate_quiet_hours`).
+    fn quiet_now(&self, repo: Option<rules::QuietHours>, now: f64) -> bool {
+        let local = Local::at(now);
+        repo.is_some_and(|q| q.contains(&local)) || self.config.quiet_hours.is_some_and(|q| q.contains(&local))
+    }
+
     // MARK: delivery
 
     fn deliver_if_ready(&mut self, now: f64) {
@@ -642,7 +663,8 @@ impl FirstMate {
         let mut ready = Vec::new();
         let mut held = Vec::new();
         for d in std::mem::take(&mut self.queue) {
-            let quiet = self.config_for(&d.event.repo).ok().and_then(|c| c.settings.quiet_hours).is_some_and(|q| q.contains(&local));
+            let repo_quiet = self.config_for(&d.event.repo).ok().and_then(|c| c.settings.quiet_hours);
+            let quiet = repo_quiet.is_some_and(|q| q.contains(&local)) || self.config.quiet_hours.is_some_and(|q| q.contains(&local));
             if quiet {
                 held.push(d);
             } else {
@@ -742,8 +764,17 @@ impl FirstMate {
             Level::Ask => {
                 let id = self.mint("autopilot");
                 // The user's own request is waiting on it: up at once, not
-                // counted. A rule's own ask is First Mate's initiative.
-                let class = if self.user_spoke { budget::Class::Answering } else { budget::Class::Proactive };
+                // counted. So is a CI failure's (it cannot wait for the
+                // brief; seahelm-gateway sends every First Mate card to
+                // Telegram as it goes up). Any other rule's ask is First
+                // Mate's initiative.
+                let class = if self.user_spoke {
+                    budget::Class::Answering
+                } else if self.active_rules.iter().any(|(r, _)| r.trigger == Trigger::CiFailed) {
+                    budget::Class::TimeSensitive
+                } else {
+                    budget::Class::Proactive
+                };
                 self.put_card(CardKind::Approval, &id, format!("First Mate asks: {summary}"), vec![APPROVE.into(), REJECT.into()], class, now);
                 let mut e = Entry::new(now, "approval", summary.clone());
                 e.action = Some(action.as_str().into());
@@ -1028,6 +1059,18 @@ mod tests {
         assert_eq!(c.agent, Agent::Codex);
         assert_eq!(c.defaults.get(&Action::DeleteWorktree), Some(&Level::Deny));
         assert_eq!(c.defaults.get(&Action::MessagePane), Some(&Level::Auto));
+    }
+
+    #[test]
+    fn config_reads_language_and_the_users_quiet_hours() {
+        let c = UserConfig::parse(r#"{"first_mate_language": "zh", "first_mate_quiet_hours": "23:00-08:00"}"#);
+        assert_eq!(c.language, lang::Lang::Zh);
+        let q = c.quiet_hours.unwrap();
+        assert!(q.contains(&clock::Local::with_offset(1_793_577_600.0 + 23.5 * 3600.0, 0)));
+        assert!(!q.contains(&clock::Local::with_offset(1_793_577_600.0 + 12.0 * 3600.0, 0)));
+        let d = UserConfig::parse("{}");
+        assert_eq!((d.language, d.quiet_hours), (lang::Lang::En, None));
+        assert_eq!(UserConfig::parse(r#"{"first_mate_quiet_hours": "late"}"#).quiet_hours, None, "unreadable: none");
     }
 
     #[test]

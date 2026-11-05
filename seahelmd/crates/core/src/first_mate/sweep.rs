@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::facts::Facts;
 use super::habits::{self, Book, Decision, HabitLevel, Precedence};
+use super::lang::Text;
 use super::observations::{self, norm, Record};
 
 /// A live linked worktree, before it is measured.
@@ -141,17 +142,20 @@ pub fn run(p: Plan, deleter: &dyn Deleter) -> Report {
 }
 
 /// One line for First Mate's conversation (a `note` row: no model turn).
-pub fn line_deleted(items: &[Routed]) -> Option<String> {
+pub fn line_deleted(items: &[Routed]) -> Option<Text> {
     (!items.is_empty()).then(|| {
         let names: Vec<String> = items.iter().map(|r| format!("{} ({})", r.candidate.name(), r.decision.id)).collect();
-        format!("Deleted {} by habit: {}. Branches kept.", plural(items.len(), "worktree"), names.join(" · "))
+        Text::new(
+            format!("Deleted {} by habit: {}. Branches kept.", plural(items.len(), "worktree"), names.join(" · ")),
+            format!("按习惯删了 {} 个 worktree：{}。分支保留。", items.len(), names.join(" · ")),
+        )
     })
 }
 
-pub fn line_suggest(items: &[Routed]) -> Option<String> {
+pub fn line_suggest(items: &[Routed]) -> Option<Text> {
     (!items.is_empty()).then(|| {
         let names: Vec<String> = items.iter().map(|r| r.candidate.name()).collect();
-        format!("These look done: {}.", names.join(" · "))
+        Text::new(format!("These look done: {}.", names.join(" · ")), format!("这些看起来做完了：{}。", names.join(" · ")))
     })
 }
 
@@ -435,8 +439,9 @@ mod tests {
         let r = run(p, &d);
         assert_eq!(d.calls.borrow().clone(), vec![("/r/wt/old".to_string(), "habit:merged-long-ago".to_string())]);
         assert_eq!(names(&r.deleted), vec!["old"]);
-        assert_eq!(line_deleted(&r.deleted).unwrap(), "Deleted 1 worktree by habit: old (merged-long-ago). Branches kept.");
-        assert_eq!(line_suggest(&r.suggest).unwrap(), "These look done: closed.");
+        assert_eq!(line_deleted(&r.deleted).unwrap().en, "Deleted 1 worktree by habit: old (merged-long-ago). Branches kept.");
+        assert_eq!(line_deleted(&r.deleted).unwrap().zh, "按习惯删了 1 个 worktree：old (merged-long-ago)。分支保留。");
+        assert_eq!(line_suggest(&r.suggest).unwrap().en, "These look done: closed.");
     }
 
     #[test]

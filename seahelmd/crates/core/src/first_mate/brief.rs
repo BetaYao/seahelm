@@ -10,10 +10,12 @@
 //!
 //! Cards: every card First Mate raises goes through `put_card`, which puts
 //! it up now or holds it for the brief (`budget::State::route`); the brief
-//! puts everything held up with it. A card up for `CARD_EXPIRY` is
-//! withdrawn (`expire_cards`): a `card.expired` observation, an `ignored`
-//! in its habit's evidence (two in a row take the habit down,
-//! `Book::expired`).
+//! puts up to `BRIEF_CARDS` held cards up with it and lists the rest. A
+//! card up for `CARD_EXPIRY` is withdrawn (`expire_cards`): a
+//! `card.expired` observation, and for an action card (a sweep batch, a
+//! delete approval) an `ignored` in its habit's evidence (two in a row take
+//! the habit down, `Book::expired`); a level offer just waits for fresh
+//! evidence. Its text is in `first_mate_language` (`lang`).
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -25,11 +27,13 @@ use seahelm_core_registry::cards::{CardKind, Raise};
 use super::budget::{self, BriefChannel, Class, Due, Route};
 use super::engine::{iso8601, Entry};
 use super::habits::HabitLevel;
+use super::lang::{plural_en, Lang, Text};
 use super::{observations, pane, FirstMate};
 
 /// What goes into a brief.
 #[derive(Clone, Debug, Default)]
 pub struct Inputs {
+    pub lang: Lang,
     /// How long the user was away, when the brief meets an arrival.
     pub away: Option<f64>,
     /// Sent because the user had not arrived by their usual start.
@@ -37,27 +41,36 @@ pub struct Inputs {
     /// The audit since the last brief.
     pub entries: Vec<Entry>,
     /// The first line of each First Mate card waiting on the user, up or
-    /// held for this brief.
+    /// held.
     pub waiting: Vec<String>,
-    /// The sweep's `suggest` lines since the last brief.
+    /// Of those, the held ones that stay held after this brief (it puts up
+    /// `BRIEF_CARDS` at most): listed, their cards later.
+    pub later: usize,
+    /// Worktrees the sweep found at `suggest` since the last brief.
     pub suggest: Vec<String>,
+    /// Habit level changes since the last brief.
+    pub notes: Vec<Text>,
 }
 
-fn listed(items: &[String]) -> String {
+fn listed(items: &[String], lang: Lang) -> String {
     let n = budget::tuning::BRIEF_LISTED;
     let mut s = items.iter().take(n).cloned().collect::<Vec<_>>().join(" · ");
     if items.len() > n {
-        s += &format!(" · +{} more", items.len() - n);
+        s += &match lang {
+            Lang::En => format!(" · +{} more", items.len() - n),
+            Lang::Zh => format!(" · 另 {} 项", items.len() - n),
+        };
     }
     s
 }
 
-fn hours(secs: f64) -> String {
+fn away(secs: f64, lang: Lang) -> String {
     let h = (secs / 3600.0).round() as i64;
-    if h >= 48 {
-        format!("{} days", h / 24)
-    } else {
-        format!("{} h", h.max(1))
+    match (lang, h >= 48) {
+        (Lang::En, true) => format!("away {} days", h / 24),
+        (Lang::En, false) => format!("away {} h", h.max(1)),
+        (Lang::Zh, true) => format!("离开了 {} 天", h / 24),
+        (Lang::Zh, false) => format!("离开了 {} 小时", h.max(1)),
     }
 }
 
@@ -65,62 +78,119 @@ fn base_name(path: &str) -> String {
     Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path).to_string()
 }
 
+fn is_habit_auto(e: &Entry) -> bool {
+    e.rule.as_deref().is_some_and(|r| r.starts_with("habit:")) && e.level.as_deref() == Some("auto")
+}
+
+fn is_approved_delete(e: &Entry) -> bool {
+    e.action.as_deref() == Some("delete_worktree") && matches!(e.level.as_deref(), Some("approved" | "picked")) && e.worktree_path.is_some()
+}
+
 /// The brief's text: a title line, then one line per section that has
 /// something — done, waiting on you, could go, notes. None when every
-/// section is empty.
+/// section is empty. First Mate's own action descriptions (`policy::
+/// describe`) and the cards' words are quoted as they are (English).
 pub fn compose(i: &Inputs) -> Option<String> {
+    let l = i.lang;
     let actions: Vec<&Entry> = i.entries.iter().filter(|e| e.kind == "action").collect();
-    let by_habit: Vec<String> = actions
-        .iter()
-        .filter(|e| e.rule.as_deref().is_some_and(|r| r.starts_with("habit:")) && e.level.as_deref() == Some("auto"))
-        .map(|e| e.worktree_path.as_deref().map(base_name).unwrap_or_else(|| e.text.clone()))
-        .collect();
+    let name = |e: &&Entry| e.worktree_path.as_deref().map(base_name).unwrap_or_else(|| e.text.clone());
+    let by_habit: Vec<String> = actions.iter().filter(|e| is_habit_auto(e)).map(name).collect();
+    let approved: Vec<String> = actions.iter().filter(|e| !is_habit_auto(e) && is_approved_delete(e)).map(name).collect();
     let others: Vec<String> = actions
         .iter()
-        .filter(|e| !(e.rule.as_deref().is_some_and(|r| r.starts_with("habit:")) && e.level.as_deref() == Some("auto")))
+        .filter(|e| !is_habit_auto(e) && !is_approved_delete(e))
         .map(|e| match e.level.as_deref() {
-            Some("auto") => format!("{} (on my own)", e.text),
-            Some(l @ ("approved" | "picked")) => format!("{} ({l} by you)", e.text),
+            Some("auto") => format!("{}{}", e.text, l.pick(" (on my own)", "（自动）")),
+            Some("approved" | "picked") => format!("{}{}", e.text, l.pick(" (you approved)", "（你批准的）")),
             _ => e.text.clone(),
         })
         .collect();
     let mut done = Vec::new();
     if !by_habit.is_empty() {
-        let n = by_habit.len();
-        done.push(format!("deleted {n} worktree{} by habit — {}", if n == 1 { "" } else { "s" }, listed(&by_habit)));
+        done.push(match l {
+            Lang::En => format!("deleted {} by habit — {}", plural_en(by_habit.len(), "worktree"), listed(&by_habit, l)),
+            Lang::Zh => format!("按习惯删了 {} 个 worktree — {}", by_habit.len(), listed(&by_habit, l)),
+        });
+    }
+    if !approved.is_empty() {
+        done.push(match l {
+            Lang::En => format!("deleted {} you approved — {}", plural_en(approved.len(), "worktree"), listed(&approved, l)),
+            Lang::Zh => format!("删了你批准的 {} 个 worktree — {}", approved.len(), listed(&approved, l)),
+        });
     }
     if !others.is_empty() {
-        done.push(listed(&others));
+        done.push(listed(&others, l));
     }
-    let changes: Vec<String> = i.entries.iter().filter(|e| e.kind == "habit" && e.text.starts_with("Habit ")).map(|e| e.text.clone()).collect();
     let expired = i.entries.iter().filter(|e| e.kind == "expired").count();
-    let mut notes = changes;
+    let mut notes: Vec<String> = i.notes.iter().map(|t| t.get(l).to_string()).collect();
     if expired > 0 {
-        notes.push(format!("{expired} card{} withdrawn unanswered after {} days", if expired == 1 { "" } else { "s" }, (budget::tuning::CARD_EXPIRY / 86_400.0).round()));
+        let days = (budget::tuning::CARD_EXPIRY / 86_400.0).round();
+        notes.push(match l {
+            Lang::En => format!("{} withdrawn unanswered after {days} days", plural_en(expired, "card")),
+            Lang::Zh => format!("{expired} 张卡片 {days} 天没人回，已撤下"),
+        });
     }
     if done.is_empty() && i.waiting.is_empty() && i.suggest.is_empty() && notes.is_empty() {
         return None;
     }
     let title = match (i.away, i.fallback) {
-        (_, true) => "First Mate · daily brief (you have not been at the desk today)".to_string(),
-        (Some(a), false) => format!("First Mate · daily brief · away {}", hours(a)),
-        (None, false) => "First Mate · daily brief".to_string(),
+        (_, true) => l.pick("First Mate · daily brief (you have not been at the desk today)", "First Mate · 今日简报（你今天还没到电脑前）").to_string(),
+        (Some(a), false) => format!("{} · {}", l.pick("First Mate · daily brief", "First Mate · 今日简报"), away(a, l)),
+        (None, false) => l.pick("First Mate · daily brief", "First Mate · 今日简报").to_string(),
     };
+    let sep = l.pick("; ", "；");
     let mut out = vec![title];
     if !done.is_empty() {
-        out.push(format!("Done: {}", done.join("; ")));
+        out.push(format!("{}{}", l.pick("Done: ", "做了："), done.join(sep)));
     }
     if !i.waiting.is_empty() {
         let n = i.waiting.len();
-        out.push(format!("Waiting on you ({n} card{}): {}", if n == 1 { "" } else { "s" }, listed(&i.waiting)));
+        let mut line = match l {
+            Lang::En => format!("Waiting on you ({}): {}", plural_en(n, "card"), listed(&i.waiting, l)),
+            Lang::Zh => format!("等你处理（{n} 张卡片）：{}", listed(&i.waiting, l)),
+        };
+        if i.later > 0 {
+            line += &match l {
+                Lang::En => format!(" — {} of them come up as cards later", i.later),
+                Lang::Zh => format!(" — 其中 {} 张稍后再弹出", i.later),
+            };
+        }
+        out.push(line);
     }
     if !i.suggest.is_empty() {
-        out.push(format!("Could go (no card): {}", i.suggest.join(" ")));
+        out.push(format!("{}{}", l.pick("Could go (no card): ", "可以清理（不发卡）："), listed(&i.suggest, l)));
     }
     if !notes.is_empty() {
-        out.push(format!("Notes: {}", notes.join(" · ")));
+        out.push(format!("{}{}", l.pick("Notes: ", "备注："), notes.join(" · ")));
     }
     Some(out.join("\n"))
+}
+
+/// Whether seahelm-gateway can reach Telegram now: `gateway.status` says
+/// Telegram is on, has a token and is connected. No gateway: no.
+pub fn telegram_ready() -> bool {
+    crate::rpc::call_with_timeout(&gateway_socket(), "gateway.status", json!({}), std::time::Duration::from_secs(3)).is_ok_and(|v| ready_from_status(&v))
+}
+
+pub fn ready_from_status(v: &Value) -> bool {
+    let t = &v["telegram"];
+    let b = |k: &str| t.get(k).and_then(Value::as_bool).unwrap_or(false);
+    b("enabled") && b("configured") && b("connected")
+}
+
+/// seahelm-gateway's admin socket, as the gateway resolves it
+/// (`gateway/src/paths.rs`).
+fn gateway_socket() -> std::path::PathBuf {
+    if let Some(p) = std::env::var_os("SEAHELM_GATEWAY_SOCKET") {
+        return p.into();
+    }
+    #[cfg(windows)]
+    {
+        let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| "default".into());
+        return format!(r"\\.\pipe\seahelm-gateway-{user}").into();
+    }
+    #[cfg(not(windows))]
+    crate::rpc::config_dir().join("gateway.sock")
 }
 
 /// A card First Mate holds for the brief.
@@ -137,6 +207,9 @@ impl Held {
         self.message.lines().next().unwrap_or_default().trim_start_matches("First Mate: ").to_string()
     }
 }
+
+/// How long a "Telegram is not reachable" answer is trusted.
+const TELEGRAM_RECHECK: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 fn offset(now: f64) -> i64 {
     crate::usage::local_offset(now)
@@ -217,15 +290,35 @@ impl FirstMate {
         if self.any_quiet_hours(now) {
             return;
         }
+        let ready = due.channel() != BriefChannel::Telegram || self.telegram_ok();
+        let Some(channel) = due.settle(ready) else { return };
         let away = match due {
             Due::Arrival(_) => presence.profile.last_arrival.as_ref().and_then(|a| a.away),
             Due::Fallback => None,
         };
-        self.send_brief(due, away, now);
+        self.send_brief(due, channel, away, now);
     }
 
+    /// `telegram_ready`, asked at most every `TELEGRAM_RECHECK`: a fallback
+    /// that cannot go waits, and would otherwise ask every tick.
+    fn telegram_ok(&mut self) -> bool {
+        if let Some((at, ok)) = self.telegram_checked {
+            if at.elapsed() < TELEGRAM_RECHECK {
+                return ok;
+            }
+        }
+        let ok = (self.telegram_ready)();
+        self.telegram_checked = Some((std::time::Instant::now(), ok));
+        ok
+    }
+
+    /// Quiet hours: the user's own (`first_mate_quiet_hours`) or any known
+    /// repo's (the brief is about all of them).
     fn any_quiet_hours(&mut self, now: f64) -> bool {
         let local = super::clock::Local::at(now);
+        if self.config.quiet_hours.is_some_and(|q| q.contains(&local)) {
+            return true;
+        }
         self.core.repos().iter().any(|r| self.config_for(r).ok().and_then(|c| c.settings.quiet_hours).is_some_and(|q| q.contains(&local)))
     }
 
@@ -246,18 +339,26 @@ impl FirstMate {
         self.approvals.contains_key(payload) || self.proposals.contains_key(payload) || self.is_habit_card(payload)
     }
 
-    pub(super) fn send_brief(&mut self, due: Due, away: Option<f64>, now: f64) {
+    pub(super) fn send_brief(&mut self, due: Due, channel: BriefChannel, away: Option<f64>, now: f64) {
         let day = budget::brief_day(now, offset(now));
         let since = if self.budget.last_brief_at > 0.0 { self.budget.last_brief_at } else { now - 86_400.0 };
         let since_iso = iso8601(since);
         let entries: Vec<Entry> = self.audit.recent(5000).into_iter().filter(|e| e.at > since_iso).collect();
-        let inputs = Inputs { away, fallback: due == Due::Fallback, entries, waiting: self.waiting_lines(), suggest: self.budget.suggest.clone() };
+        let inputs = Inputs {
+            lang: self.config.language,
+            away,
+            fallback: due == Due::Fallback,
+            entries,
+            waiting: self.waiting_lines(),
+            later: self.held.len().saturating_sub(budget::tuning::BRIEF_CARDS),
+            suggest: self.budget.suggest.clone(),
+            notes: self.budget.notes.clone(),
+        };
         let Some(text) = compose(&inputs) else {
             self.budget.dealt_with(&day, None);
             self.save_budget();
             return;
         };
-        let channel = due.channel();
         self.core.first_mate_brief(&text);
         if channel == BriefChannel::Telegram {
             self.core.publish_event(json!({"type": "first_mate.brief", "text": text, "channel": channel.as_str()}));
@@ -267,8 +368,10 @@ impl FirstMate {
             Due::Fallback => "not arrived by the usual start",
         };
         self.log(Entry::new(now, "brief", format!("daily brief to {} ({why}) — {}", channel.as_str(), text.replace('\n', " / "))));
-        // What waited for the brief goes up with it, uncounted.
-        for h in std::mem::take(&mut self.held) {
+        // What waited for the brief goes up with it, uncounted, a few at
+        // a time: the rest are in its text and go up later by the usual rule.
+        let n = self.held.len().min(budget::tuning::BRIEF_CARDS);
+        for h in self.held.drain(..n).collect::<Vec<_>>() {
             self.raise_now(h, now);
         }
         self.budget.dealt_with(&day, Some(now));
@@ -323,7 +426,8 @@ impl FirstMate {
             }
             ("habit.item", format!("delete worktree {name}"), String::new(), String::new())
         } else if let Some(o) = self.offers.withdraw(payload) {
-            habits.push((o.key.clone(), o.id.clone()));
+            // A question about a level, not an action: withdrawn, asked again
+            // on fresh evidence; never `ignored`, never a demotion.
             if o.confirm {
                 // Not asked again until the file says something else.
                 self.expired_confirms.insert((o.key.clone(), o.id.clone(), o.level));
@@ -384,30 +488,50 @@ mod tests {
         assert_eq!(compose(&quiet), None);
     }
 
-    #[test]
-    fn the_brief_reads_done_waiting_could_go_notes() {
-        let i = Inputs {
+    fn sample(lang: Lang) -> Inputs {
+        let mut approved = action("Deleted worktree c (approved, habit h)", None, "approved", Some("/w/wt/c"));
+        approved.action = Some("delete_worktree".into());
+        Inputs {
+            lang,
             away: Some(13.0 * 3600.0),
             fallback: false,
             entries: vec![
                 action("Deleted worktree a by habit h — …", Some("habit:delete-merged-clean"), "auto", Some("/w/wt/feat-a")),
                 action("Deleted worktree b by habit h — …", Some("habit:delete-merged-clean"), "auto", Some("/w/wt/feat-b")),
                 action("sent to #7: fix CI", None, "auto", None),
-                action("Deleted worktree c (approved, habit h)", None, "approved", Some("/w/wt/c")),
-                Entry::new(1.0, "habit", "Habit closed-idle down from ask to suggest: two of its cards went unanswered"),
+                approved,
                 Entry::new(1.0, "expired", "withdrawn unanswered after 3 days: …"),
             ],
-            waiting: vec!["these 2 worktrees look done:".into()],
-            suggest: vec!["These look done: spike-x.".into()],
-        };
-        let text = compose(&i).unwrap();
+            waiting: vec!["these 2 worktrees look done:".into(), "First Mate asks: delete x".into()],
+            later: 1,
+            suggest: vec!["spike-x".into()],
+            notes: vec![Text::new("Habit closed-idle down from ask to suggest: two of its cards went unanswered", "习惯 closed-idle 从 ask 降到 suggest：它的卡片连续两次没人回")],
+        }
+    }
+
+    #[test]
+    fn the_brief_reads_done_waiting_could_go_notes() {
+        let text = compose(&sample(Lang::En)).unwrap();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines[0], "First Mate · daily brief · away 13 h");
-        assert_eq!(lines[1], "Done: deleted 2 worktrees by habit — feat-a · feat-b; sent to #7: fix CI (on my own) · Deleted worktree c (approved, habit h) (approved by you)");
-        assert_eq!(lines[2], "Waiting on you (1 card): these 2 worktrees look done:");
-        assert_eq!(lines[3], "Could go (no card): These look done: spike-x.");
+        assert_eq!(lines[1], "Done: deleted 2 worktrees by habit — feat-a · feat-b; deleted 1 worktree you approved — c; sent to #7: fix CI (on my own)");
+        assert_eq!(lines[2], "Waiting on you (2 cards): these 2 worktrees look done: · First Mate asks: delete x — 1 of them come up as cards later");
+        assert_eq!(lines[3], "Could go (no card): spike-x");
         assert_eq!(lines[4], "Notes: Habit closed-idle down from ask to suggest: two of its cards went unanswered · 1 card withdrawn unanswered after 3 days");
         assert_eq!(lines.len(), 5);
+    }
+
+    #[test]
+    fn the_brief_in_chinese() {
+        let text = compose(&sample(Lang::Zh)).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "First Mate · 今日简报 · 离开了 13 小时");
+        assert_eq!(lines[1], "做了：按习惯删了 2 个 worktree — feat-a · feat-b；删了你批准的 1 个 worktree — c；sent to #7: fix CI（自动）");
+        assert_eq!(lines[2], "等你处理（2 张卡片）：these 2 worktrees look done: · First Mate asks: delete x — 其中 1 张稍后再弹出");
+        assert_eq!(lines[3], "可以清理（不发卡）：spike-x");
+        assert_eq!(lines[4], "备注：习惯 closed-idle 从 ask 降到 suggest：它的卡片连续两次没人回 · 1 张卡片 3 天没人回，已撤下");
+        let fallback = compose(&Inputs { lang: Lang::Zh, fallback: true, suggest: vec!["a".into()], ..Inputs::default() }).unwrap();
+        assert!(fallback.starts_with("First Mate · 今日简报（你今天还没到电脑前）\n"), "{fallback}");
     }
 
     #[test]
@@ -542,7 +666,7 @@ mod tests {
         fm.release_held(now);
         assert_eq!(fm.held.len(), 2);
 
-        fm.send_brief(Due::Arrival(BriefChannel::Island), Some(10.0 * 3600.0), now);
+        fm.send_brief(Due::Arrival(BriefChannel::Island), BriefChannel::Island, Some(10.0 * 3600.0), now);
         assert!(fm.held.is_empty());
         assert!(core.has_card_payload(&early) && core.has_card_payload(&over), "the brief brings what waited for it");
         let snapshot = core.clone().call("message.snapshot", serde_json::json!({"pane_id": super::super::policy::SESSION}));
@@ -563,12 +687,94 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (core, mut fm) = first_mate(tmp.path());
         let now = seahelm_core_types::now();
-        fm.send_brief(Due::Fallback, None, now);
+        fm.send_brief(Due::Fallback, BriefChannel::Telegram, None, now);
         let crate::rpc::Reply::Value(Ok(v)) = core.clone().call("message.snapshot", serde_json::json!({"pane_id": super::super::policy::SESSION})) else { panic!() };
         assert!(v["messages"].as_array().unwrap().iter().all(|m| m["kind"] != "brief"));
         assert_eq!(fm.budget.brief_day, budget::brief_day(now, offset(now)));
         assert_eq!(fm.budget.last_brief_at, 0.0, "nothing went out");
         assert!(!audit_kinds(&fm).contains(&"brief".to_string()));
+    }
+
+
+    #[test]
+    fn an_expired_level_offer_is_only_withdrawn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (core, mut fm) = first_mate(tmp.path());
+        let now = seahelm_core_types::now();
+        let today = super::super::clock::Local::at(now).day_key();
+        fm.habits.ensure_seed(&today, now).unwrap();
+        core.presence_signal(now, Some(Channel::Desktop));
+        let offer = fm.offers.raise(GLOBAL, SEED_ID, HabitLevel::Auto, "n1");
+        fm.put_card(CardKind::Approval, &offer.payload, "First Mate: promote?".into(), offer.options(), Class::Proactive, now);
+        assert!(core.has_card_payload(&offer.payload));
+        fm.expire_cards(now + budget::tuning::CARD_EXPIRY);
+        assert!(!core.has_card_payload(&offer.payload) && !fm.offers.contains(&offer.payload));
+        assert_eq!(seed_level(&fm, &today), (HabitLevel::Ask, 0, 0), "a question about a level: no ignored, no demotion");
+        assert!(audit_kinds(&fm).contains(&"expired".to_string()));
+        // A hand-written level's confirmation: withdrawn, not asked again while the file says the same.
+        let c = fm.offers.raise_confirm(GLOBAL, SEED_ID, HabitLevel::Auto, "c1");
+        fm.put_card(CardKind::Approval, &c.payload, "First Mate: confirm?".into(), c.options(), Class::Answering, now);
+        fm.expire_cards(now + budget::tuning::CARD_EXPIRY);
+        assert!(fm.confirm_expired(GLOBAL, SEED_ID, HabitLevel::Auto));
+        assert_eq!(seed_level(&fm, &today), (HabitLevel::Ask, 0, 0));
+    }
+
+    #[test]
+    fn the_brief_puts_up_three_held_cards_and_lists_the_rest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (core, mut fm) = first_mate(tmp.path());
+        let now = seahelm_core_types::now();
+        let payloads: Vec<String> = (0..5)
+            .map(|i| {
+                let p = format!("proposal-{i}");
+                fm.put_card(CardKind::Proposal, &p, format!("First Mate suggests: {i}"), vec!["Go".into(), "Not now".into()], Class::Proactive, now);
+                p
+            })
+            .collect();
+        assert_eq!(fm.held.len(), 5, "nobody there: all held");
+        fm.send_brief(Due::Fallback, BriefChannel::Island, None, now);
+        let up = payloads.iter().filter(|p| core.has_card_payload(p)).count();
+        assert_eq!(up, budget::tuning::BRIEF_CARDS);
+        assert_eq!(fm.held.len(), 2, "the rest stay held for the usual rule");
+        let text = fm.audit.recent(50).into_iter().find(|e| e.kind == "brief").unwrap().text;
+        assert!(text.contains("Waiting on you (5 cards)") && text.contains("2 of them come up as cards later"), "{text}");
+        // Later, with the user there and room under the cap, they go up.
+        core.presence_signal(now + 60.0, Some(Channel::Desktop));
+        fm.release_held(now + 60.0);
+        assert!(fm.held.is_empty());
+        assert!(payloads.iter().all(|p| core.has_card_payload(p)));
+    }
+
+    #[test]
+    fn a_ci_failures_approval_goes_up_at_once_and_a_cleanup_waits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (core, mut fm) = first_mate(tmp.path());
+        let now = seahelm_core_types::now();
+        let config = super::super::rules::Config::built_in();
+        let rule = |trigger: super::super::rules::Trigger| config.rules.iter().find(|r| r.trigger == trigger).unwrap().clone();
+        let params = serde_json::json!({"worktree_path": "/nonexistent/wt/x"});
+        // Nobody there. A CI failure's ask: up now, uncounted.
+        fm.active_rules = vec![(rule(super::super::rules::Trigger::CiFailed), config.clone())];
+        let super::super::Gate::Queued(ci) = fm.gate(super::super::rules::Action::DeleteWorktree, "worktree.delete", &params, now) else { panic!() };
+        assert!(core.has_card_payload(&ci));
+        assert_eq!(fm.budget.cards_today, 0);
+        // cleanup-merged's: waits for the brief.
+        fm.active_rules = vec![(rule(super::super::rules::Trigger::PrMerged), config.clone())];
+        let super::super::Gate::Queued(cleanup) = fm.gate(super::super::rules::Action::DeleteWorktree, "worktree.delete", &params, now) else { panic!() };
+        assert!(!core.has_card_payload(&cleanup));
+        assert_eq!(fm.held.len(), 1);
+    }
+
+    #[test]
+    fn telegram_status_is_read_from_the_gateway() {
+        let ok = serde_json::json!({"telegram": {"enabled": true, "configured": true, "connected": true}});
+        assert!(ready_from_status(&ok));
+        for off in ["enabled", "configured", "connected"] {
+            let mut v = ok.clone();
+            v["telegram"][off] = serde_json::json!(false);
+            assert!(!ready_from_status(&v), "{off}");
+        }
+        assert!(!ready_from_status(&serde_json::json!({})));
     }
 
 }

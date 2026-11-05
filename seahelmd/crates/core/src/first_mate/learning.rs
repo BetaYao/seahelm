@@ -18,6 +18,7 @@ use super::clock::Local;
 use super::engine::Entry;
 use super::habits::{self, Book, Change, Decision, OfferAnswer, Precedence, Store, GLOBAL};
 use super::inventory::{self, Answer as InventoryAnswer};
+use super::lang::Text;
 use super::observations::{self, norm, By};
 use super::rules::{Action, Level};
 use super::sweep::{self, Batch, BatchAnswer, Candidate, Deleter, Routed};
@@ -172,14 +173,19 @@ impl FirstMate {
         }
     }
 
-    /// One line in First Mate's conversation, and the audit.
-    fn report(&mut self, kind: &str, text: &str, now: f64) {
-        self.core.first_mate_line(text);
-        self.log(Entry::new(now, kind, text));
+
+    /// A line in First Mate's conversation in the user's language
+    /// (`first_mate_language`); the audit keeps the English.
+    fn report_text(&mut self, kind: &str, t: &Text, now: f64) {
+        self.core.first_mate_line(t.get(self.config.language));
+        self.log(Entry::new(now, kind, t.en.clone()));
     }
 
+    /// A habit's level moved: a line now, and a note for the next brief.
     pub(super) fn report_change(&mut self, c: &Change, now: f64) {
-        self.report("habit", &c.line(), now);
+        let t = c.text();
+        self.report_text("habit", &t, now);
+        self.budget.note(t);
     }
 
     // MARK: the sweep
@@ -212,7 +218,7 @@ impl FirstMate {
         let repos = self.all_repos();
         for repo in repos.clone() {
             let Ok(config) = self.config_for(&repo) else { continue };
-            if config.settings.quiet_hours.is_some_and(|q| q.contains(&local)) {
+            if self.quiet_now(config.settings.quiet_hours, now) {
                 continue;
             }
             if !forced && !self.sweep_state.due(&repo, &day) {
@@ -331,7 +337,7 @@ impl FirstMate {
             });
         }
         if let Some(line) = sweep::line_deleted(&report.deleted) {
-            self.core.first_mate_line(&line);
+            self.core.first_mate_line(line.get(self.config.language));
         }
         for (r, why) in &report.failed {
             let mut e = Entry::new(now, "skipped", format!("{} not deleted by habit {} — {why}", r.candidate.name(), r.decision.id));
@@ -345,9 +351,10 @@ impl FirstMate {
             return;
         }
         if let Some(line) = sweep::line_suggest(&report.suggest) {
-            self.report("event", &line, now);
+            self.report_text("event", &line, now);
             // `suggest` is a line, never a card: it waits for the brief.
-            self.budget.note_suggest(&line);
+            let names: Vec<String> = report.suggest.iter().map(|r| r.candidate.name()).collect();
+            self.budget.note_suggest(&names);
         }
         if !report.ask.is_empty() {
             // One batched card per sweep: an older one still open is replaced.
@@ -469,7 +476,11 @@ impl FirstMate {
             OfferAnswer::Declined { confirm: true, .. } => {
                 if let Some((written, granted)) = b.revert(&id) {
                     self.save_book(&b, now);
-                    self.report("habit", &format!("Habit {id} put back to {} in the file (it said {})", granted.as_str(), written.as_str()), now);
+                    let t = Text::new(
+                        format!("Habit {id} put back to {} in the file (it said {})", granted.as_str(), written.as_str()),
+                        format!("习惯 {id} 在文件里改回了 {}（原来写的是 {}）", granted.as_str(), written.as_str()),
+                    );
+                    self.report_text("habit", &t, now);
                 }
             }
             OfferAnswer::Declined { .. } => {
@@ -594,9 +605,13 @@ impl FirstMate {
                 e.level = Some("approved".into());
                 e.worktree_path = Some(r.candidate.path.clone());
                 self.log(e);
-                self.core.first_mate_line(&format!("Deleted {}. Branch kept.", r.candidate.name()));
+                let n = r.candidate.name();
+                self.core.first_mate_line(Text::new(format!("Deleted {n}. Branch kept."), format!("删了 {n}。分支保留。")).get(self.config.language));
             }
-            Err(why) => self.report("skipped", &format!("Did not delete {}: {why}", r.candidate.name()), now),
+            Err(why) => {
+                let n = r.candidate.name();
+                self.report_text("skipped", &Text::new(format!("Did not delete {n}: {why}"), format!("没有删 {n}：{why}")), now);
+            }
         }
     }
 
@@ -708,7 +723,7 @@ impl FirstMate {
         if !self.running {
             return;
         }
-        self.report("event", &inventory::line_raised(measured, &groups), now);
+        self.report_text("event", &inventory::line_raised(measured, &groups), now);
         let nonce = self.mint("inv");
         let (cards, old) = self.inventory.raise(&nonce, groups);
         for p in old {
@@ -770,7 +785,7 @@ impl FirstMate {
         if !written.is_empty() || superseded {
             self.save_book(&book, now);
         }
-        self.report("habit", &inventory::line_answered(&a.card, answer, &written), now);
+        self.report_text("habit", &inventory::line_answered(&a.card, answer, &written), now);
         for c in &changes {
             self.report_change(c, now);
         }
@@ -803,7 +818,7 @@ impl FirstMate {
             e.worktree_path = Some(c.path.clone());
             self.log(e);
         }
-        self.core.first_mate_line(&inventory::line_deleted(group, &report));
+        self.core.first_mate_line(inventory::line_deleted(group, &report).get(self.config.language));
     }
 }
 

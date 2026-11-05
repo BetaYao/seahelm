@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::clock::Local;
+use super::lang::Text;
 use super::presence::{self, Channel, Snapshot};
 
 /// Every threshold of the budget, in one place: phase 6 tunes them within
@@ -32,6 +33,9 @@ pub mod tuning {
     pub const CARD_EXPIRY: f64 = 3.0 * 86_400.0;
     /// Proactive cards a day; beyond it they wait for the next brief.
     pub const DAILY_CARD_CAP: u32 = 3;
+    /// Held cards the brief puts up with it at most; the rest are only
+    /// listed in it and go up later by the usual rule.
+    pub const BRIEF_CARDS: usize = 3;
     /// Telegram is where the user answers if they did within this long.
     pub const TELEGRAM_RECENT: f64 = 14.0 * 86_400.0;
     /// The activity profile: each weekday's buckets decay by this a week…
@@ -87,6 +91,20 @@ impl Due {
             Due::Fallback => BriefChannel::Telegram,
         }
     }
+
+    /// Where it goes once we know whether Telegram can be reached: an
+    /// arrival meant for Telegram falls back to the timeline; a fallback
+    /// brief is not sent at all (and does not count), so it waits for the
+    /// user to come back.
+    pub fn settle(self, telegram_ready: bool) -> Option<BriefChannel> {
+        match (self.channel(), telegram_ready) {
+            (BriefChannel::Telegram, true) | (BriefChannel::Island, _) => Some(self.channel()),
+            (BriefChannel::Telegram, false) => match self {
+                Due::Arrival(_) => Some(BriefChannel::Island),
+                Due::Fallback => None,
+            },
+        }
+    }
 }
 
 /// `first-mate/budget.json`.
@@ -104,9 +122,12 @@ pub struct State {
     pub cards_day: String,
     #[serde(default)]
     pub cards_today: u32,
-    /// `suggest`-level matches since the last brief, one line per sweep.
+    /// Worktrees the sweep found at `suggest` since the last brief.
     #[serde(default)]
     pub suggest: Vec<String>,
+    /// Habit level changes since the last brief, in both languages.
+    #[serde(default)]
+    pub notes: Vec<Text>,
 }
 
 impl State {
@@ -134,6 +155,7 @@ impl State {
         if let Some(at) = sent_at {
             self.last_brief_at = at;
             self.suggest.clear();
+            self.notes.clear();
         }
     }
 
@@ -149,7 +171,7 @@ impl State {
     /// or held for the brief.
     pub fn route(&mut self, class: Class, day: &str, user_active: bool) -> Route {
         match class {
-            Class::Answering => Route::Now,
+            Class::Answering | Class::TimeSensitive => Route::Now,
             Class::Proactive => {
                 if user_active && self.cards_on(day) < tuning::DAILY_CARD_CAP {
                     self.cards_today += 1;
@@ -161,10 +183,16 @@ impl State {
         }
     }
 
-    pub fn note_suggest(&mut self, line: &str) {
-        if !self.suggest.iter().any(|l| l == line) {
-            self.suggest.push(line.to_string());
+    pub fn note_suggest(&mut self, names: &[String]) {
+        for n in names {
+            if !self.suggest.contains(n) {
+                self.suggest.push(n.clone());
+            }
         }
+    }
+
+    pub fn note(&mut self, t: Text) {
+        self.notes.push(t);
     }
 }
 
@@ -180,6 +208,10 @@ pub enum Class {
     /// a rule's approval or a proposal when the user said nothing. Counted
     /// against the cap; up now only while the user is active.
     Proactive,
+    /// A rule's approval that cannot wait for the brief (a CI failure's):
+    /// up at once whether the user is there or not, not counted. Every
+    /// First Mate card reaches Telegram through seahelm-gateway as it goes up.
+    TimeSensitive,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -413,6 +445,7 @@ mod tests {
         assert_eq!(s.route(Class::Proactive, day, true), Route::Hold, "over the cap");
         assert_eq!(s.route(Class::Answering, day, true), Route::Now, "answering the user is not counted");
         assert_eq!(s.route(Class::Answering, day, false), Route::Now);
+        assert_eq!(s.route(Class::TimeSensitive, day, false), Route::Now, "a CI failure's approval: now, away or not");
         assert_eq!(s.cards_today, tuning::DAILY_CARD_CAP);
         assert_eq!(s.route(Class::Proactive, "2026-11-24", true), Route::Now, "a new day");
         assert_eq!(s.cards_today, 1);
@@ -435,15 +468,26 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = State::path(tmp.path());
         let mut s = State::default();
-        s.note_suggest("These look done: a.");
-        s.note_suggest("These look done: a.");
-        assert_eq!(s.suggest.len(), 1);
+        s.note_suggest(&["a".to_string()]);
+        s.note_suggest(&["a".to_string(), "b".to_string()]);
+        assert_eq!(s.suggest, vec!["a", "b"]);
+        s.note(Text::new("Habit h down", "习惯 h 降"));
         s.save(&path);
         assert_eq!(State::load(&path), s);
         s.dealt_with("2026-11-02", None);
-        assert_eq!(s.suggest.len(), 1, "nothing was sent");
+        assert_eq!(s.suggest.len(), 2, "nothing was sent");
         s.dealt_with("2026-11-03", Some(5.0));
-        assert!(s.suggest.is_empty());
+        assert!(s.suggest.is_empty() && s.notes.is_empty());
         assert_eq!((s.brief_day.as_str(), s.last_brief_at), ("2026-11-03", 5.0));
+    }
+
+    #[test]
+    fn a_brief_for_telegram_needs_telegram() {
+        let arrival = Due::Arrival(BriefChannel::Telegram);
+        assert_eq!(arrival.settle(true), Some(BriefChannel::Telegram));
+        assert_eq!(arrival.settle(false), Some(BriefChannel::Island), "the timeline has it; the user reads it there");
+        assert_eq!(Due::Fallback.settle(true), Some(BriefChannel::Telegram));
+        assert_eq!(Due::Fallback.settle(false), None, "not sent, not counted: it waits for the user to come back");
+        assert_eq!(Due::Arrival(BriefChannel::Island).settle(false), Some(BriefChannel::Island));
     }
 }

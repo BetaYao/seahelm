@@ -52,6 +52,12 @@ class TabCoordinator {
     /// Per-worktree signature of the last-persisted pane titles, so the display
     /// rebuild only re-saves a layout when a pane's title actually changed.
     private var lastSavedPaneTitles: [String: [String]] = [:]
+    /// Keys or the mouse in one of this app's windows (a local monitor:
+    /// nothing system-wide, no Accessibility permission), told to the core
+    /// at most once a minute as `client.activity` — that something happened,
+    /// never what. It times First Mate's daily brief.
+    private var activityMonitor: Any?
+    private var activityThrottle = ActivityThrottle()
 
     // References provided by MainWindowController
     var terminalCoordinator: TerminalCoordinator!
@@ -162,6 +168,10 @@ class TabCoordinator {
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             self?.markVisiblePanesSeen()
+        }
+        activityMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]) { [weak self] event in
+            self?.noteUserActivity()
+            return event
         }
         // Leaving the app makes nothing on screen: finished turns stay unseen.
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification,
@@ -1730,6 +1740,11 @@ class TabCoordinator {
         reportVisibility()
     }
 
+    private func noteUserActivity() {
+        guard activityThrottle.shouldReport(at: Date()) else { return }
+        DispatchQueue.global(qos: .utility).async { _ = CoreSocketClient.call("client.activity", ["client": "macos"]) }
+    }
+
     /// Tell the core what is on screen (`client.visible`): it marks a pane's
     /// finished turn unseen only when its worktree is not, and clears the mark
     /// once it is shown in front.
@@ -2084,5 +2099,17 @@ extension TabCoordinator {
                 }
                 return dict
             }
+    }
+}
+
+/// At most one `client.activity` a minute. Pure, for tests.
+struct ActivityThrottle {
+    static let interval: TimeInterval = 60
+    private(set) var lastReported: Date?
+
+    mutating func shouldReport(at now: Date) -> Bool {
+        if let last = lastReported, now.timeIntervalSince(last) < Self.interval { return false }
+        lastReported = now
+        return true
     }
 }
