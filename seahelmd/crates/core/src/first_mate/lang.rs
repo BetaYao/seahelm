@@ -168,7 +168,7 @@ pub fn route_unknown() -> Text { Text::new("Project is unknown or its rules cann
 pub fn memory_failure(detail: &str) -> Text { Text::new(format!("Could not complete the request: {detail}"), format!("未能完成请求：{detail}")) }
 
 pub fn memory_full(total: usize) -> Text { Text::new(format!("Project memory uses {total}/2000 characters; over capacity. Only complete priority entries and newest notes are injected."),format!("项目记忆 {total}/2000 字，已超出容量；仅注入完整的优先条目和最新笔记。")) }
-pub fn memory_refused(method: &str) -> Text { Text::new(format!("{method} refused: memory note/undo require the user or the kernel-identified First Mate session; confirmation requires the user."),format!("已拒绝 {method}：记忆写入和撤销仅限你本人或内核识别的 First Mate 会话，确认外部编辑仅限你本人。")) }
+pub fn memory_refused(method: &str) -> Text { Text::new(format!("{method} refused: memory notes require the user or the kernel-identified First Mate session; undo and confirmation require the user."),format!("已拒绝 {method}：记忆写入仅限你本人或内核识别的 First Mate 会话，撤销及确认外部编辑仅限你本人。")) }
 pub fn alias_offer(alias: &str, repo: &str) -> Text { Text::new(format!("Use “{alias}” as a short project name for {repo}?"),format!("将“{alias}”作为 {repo} 的项目简称吗？")) }
 
 pub fn memory_display(verb: &str, shown: &serde_json::Value) -> Text {

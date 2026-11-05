@@ -301,13 +301,14 @@ fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcRes
         .collect();
     let base = ["main", "master"].into_iter().find(|b| branches.iter().any(|x| x == b)).map(str::to_string).or_else(|| branches.first().cloned()).unwrap_or_else(|| "main".into());
     let issue = crate::first_mate::routing::linked_issue(&s(p,"prompt"), &crate::first_mate::routing::remotes(&main_repo));
+    let branch_template=core.memory_store().value(&main_repo,"branch naming");
     if let Some((_, n)) = &issue {
-        if let Some(existing) = branches.iter().find(|b| crate::first_mate::routing::issue_number_in(b, *n)) {
+        if let Some(existing) = branches.iter().find(|b| crate::first_mate::routing::issue_branch_matches(b, *n,branch_template.as_deref())) {
             return Ok(json!({"existing": existing, "issue": n, "created": false}));
         }
     }
     let branch = if let Some((_, n)) = issue {
-        issue_branch(n, &s(p, "prompt"), core.memory_store().value(&main_repo, "branch naming").as_deref())
+        issue_branch(n, &s(p, "prompt"), branch_template.as_deref())
     } else { creation_branch(&s(p, "prompt"), p, &branches, allow_hint) };
     if git(&repo, &["check-ref-format", "--branch", &branch]).is_none() { return Err(RpcError::invalid_params("invalid branch naming convention")); }
     let name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
@@ -617,6 +618,20 @@ fn issue_branch(n: u64, task: &str, template: Option<&str>) -> String {
 #[cfg(test)]
 mod issue_branch_tests {
     use super::*;
+    #[test]
+    fn learned_branch_template_dedupes_before_creating_or_launching() {
+        let tmp=tempfile::tempdir().unwrap(); let repo=tmp.path().join("repo"); std::fs::create_dir(&repo).unwrap();
+        for args in [vec!["init","-b","main"],vec!["-c","user.name=Test","-c","user.email=test@example.invalid","commit","--allow-empty","-m","init"],vec!["remote","add","origin","https://github.com/o/r.git"],vec!["branch","bug/42-login"]] {
+            assert!(std::process::Command::new("git").arg("-C").arg(&repo).args(args).output().unwrap().status.success());
+        }
+        let core=Core::for_test(tmp.path());
+        let root=crate::first_mate::routing::main_repo(repo.to_str().unwrap());
+        core.memory_store().note(&root,"branch naming: bug/{n}-{slug}","user").unwrap();
+        let result=worktree_create(&core,&json!({"repo_path":repo,"prompt":"https://github.com/o/r/issues/42 login"})).unwrap();
+        assert_eq!(result["created"],false); assert_eq!(result["existing"],"bug/42-login");
+        assert!(core.live_worktrees().is_empty());
+    }
+
     #[test] fn issue_branch_uses_the_learned_template_or_default() {
         assert_eq!(issue_branch(42, "login crashes", None), "fix/42-login-crashes");
         assert_eq!(issue_branch(42, "login crashes", Some("bug/{n}/{slug}")), "bug/42/login-crashes");

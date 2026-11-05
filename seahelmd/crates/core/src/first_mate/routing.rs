@@ -49,6 +49,24 @@ pub fn issue_number_in(name: &str, n: u64) -> bool {
         .unwrap_or(tail);
     token.strip_prefix(&n.to_string()).is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
 }
+/// Derive the issue position from the learned template, escaping every literal.
+/// A template without {n} cannot identify an issue; {slug} follows branch_name's vocabulary.
+pub fn issue_branch_matches(name: &str, n: u64, template: Option<&str>) -> bool {
+    if issue_number_in(name, n) {
+        return true;
+    }
+    let Some(template) = template.filter(|t| t.contains("{n}")) else {
+        return false;
+    };
+    let pattern = regex::escape(template)
+        .replace(r"\{n\}", &n.to_string())
+        .replace(r"\{slug\}", r"[a-z0-9]+(?:-[a-z0-9]+)*");
+    let Ok(re) = regex::Regex::new(&format!("^(?:{pattern})$")) else {
+        return false;
+    };
+    let name = name.trim().trim_start_matches("refs/heads/").trim_start_matches("refs/remotes/");
+    re.is_match(name.strip_prefix("origin/").unwrap_or(name))
+}
 pub fn remotes(repo: &str) -> Vec<String> {
     super::facts::git(Path::new(repo), &["remote", "-v"])
         .unwrap_or_default()
@@ -64,13 +82,13 @@ fn closes(body: &str, n: u64) -> bool {
     let found = re.captures_iter(body).any(|c| c[1].parse::<u64>().ok() == Some(n));
     found
 }
-pub fn duplicate_issue(repo: &str, n: u64, branches: &str, worktrees: &str, prs: &[Value]) -> Option<String> {
+pub fn duplicate_issue(repo: &str, n: u64, branches: &str, worktrees: &str, prs: &[Value], template: Option<&str>) -> Option<String> {
     for wt in crate::discovery::parse_porcelain(worktrees) {
-        if let Some(b) = wt.branch.filter(|b| issue_number_in(b, n)) {
+        if let Some(b) = wt.branch.filter(|b| issue_branch_matches(b, n, template)) {
             return Some(format!("{} ({b})", wt.path));
         }
     }
-    if let Some(branch) = branches.lines().find(|b| issue_number_in(b, n)) {
+    if let Some(branch) = branches.lines().find(|b| issue_branch_matches(b, n, template)) {
         return Some(branch.into());
     }
     for row in prs {
@@ -175,7 +193,14 @@ impl FirstMate {
         if let Some((owner_repo, n)) = linked_issue(&self.route_text, &remotes) {
             let branches = super::facts::git(Path::new(&repo), &["branch", "-a", "--format=%(refname:short)"]).unwrap_or_default();
             let worktrees = super::facts::git(Path::new(&repo), &["worktree", "list", "--porcelain"]).unwrap_or_default();
-            if let Some(place) = duplicate_issue(&owner_repo, n, &branches, &worktrees, &self.core.known_prs()) {
+            if let Some(place) = duplicate_issue(
+                &owner_repo,
+                n,
+                &branches,
+                &worktrees,
+                &self.core.known_prs(),
+                self.memory.value(&repo, "branch naming").as_deref(),
+            ) {
                 let t = super::lang::issue_existing(n, &place);
                 self.core.first_mate_line(t.get(self.config.language));
                 return Some(Gate::Deny(t.get(self.config.language).into()));
@@ -249,33 +274,130 @@ mod tests {
 }
 
 /// A hypothesis only: the user must approve the short name on its own card.
-fn short_alias(text: &str, repo: &str) -> Option<String> {
+fn alias_matches_project(alias: &str, project: &Value) -> bool {
+    let name = project["name"].as_str().unwrap_or_default().to_lowercase();
+    name.split(|c: char| !c.is_alphanumeric()).any(|part| part == alias)
+        || names(&name, alias)
+        || names(project["description"].as_str().unwrap_or_default(), alias)
+        || project["aliases"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .any(|a| names(a, alias))
+}
+fn short_alias(text: &str, repo: &str, projects: &[Value]) -> Option<String> {
     let stop = [
-        "fix", "the", "a", "an", "please", "add", "in", "to", "for", "and", "login", "bug", "修复", "添加", "帮我",
+        "fix",
+        "fixes",
+        "update",
+        "updates",
+        "add",
+        "adds",
+        "change",
+        "changes",
+        "make",
+        "makes",
+        "create",
+        "build",
+        "implement",
+        "remove",
+        "delete",
+        "improve",
+        "refactor",
+        "repair",
+        "new",
+        "please",
+        "help",
+        "the",
+        "a",
+        "an",
+        "in",
+        "to",
+        "for",
+        "and",
+        "with",
+        "from",
+        "this",
+        "that",
+        "its",
+        "our",
+        "your",
+        "my",
+        "their",
+        "some",
+        "all",
+        "can",
+        "could",
+        "should",
+        "would",
+        "login",
+        "bug",
+        "issue",
+        "error",
+        "feature",
+        "code",
+        "test",
+        "tests",
+        "dependencies",
+        "dependency",
+        "version",
+        "readme",
+        "修复",
+        "更新",
+        "修改",
+        "添加",
+        "帮我",
+        "增加",
+        "新增",
+        "实现",
+        "创建",
+        "删除",
+        "调整",
+        "优化",
+        "一下",
+        "这个",
+        "功能",
+        "问题",
     ];
-    let text = words(text);
-    let text = text.replace([',', '，', '。'], " ");
-    text.split_whitespace()
+    let text = words(text).replace([',', '，', '。'], " ");
+    let mut candidates: Vec<_> = text
+        .split_whitespace()
+        .filter(|s| !s.contains(['\'', '’']) && !s.contains("://"))
         .map(|s| {
-            let cut = ["修复", "新增", "添加", "增加", "加个", "的", "登录"]
+            let cut = ["修复", "新增", "添加", "增加", "加个", "更新", "修改", "的", "登录"]
                 .iter()
                 .filter_map(|v| s.find(v))
                 .min()
                 .unwrap_or(s.len());
-            &s[..cut]
+            s[..cut].trim_matches(|c: char| !c.is_alphanumeric() && c != '-').to_string()
         })
-        .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '-').to_string())
-        .find(|s| {
-            (2..=16).contains(&s.chars().count())
-                && !s.contains("://")
+        .filter(|s| {
+            let len = s.chars().count();
+            (2..=16).contains(&len)
+                && (!s.is_ascii() || len >= 3)
                 && !s.chars().all(|c| c.is_ascii_digit())
                 && !stop.contains(&s.as_str())
-                && s != &super::short(repo)
+                && s != &super::short(repo).to_lowercase()
+                && projects.iter().filter(|p| alias_matches_project(s, p)).take(2).count() <= 1
         })
+        .collect();
+    // Prefer a name component or noun grounded in the target's description.
+    candidates.sort_by_key(|s| {
+        std::cmp::Reverse(
+            projects
+                .iter()
+                .any(|p| p["repo"].as_str().is_some_and(|r| super::same_path(r, repo)) && alias_matches_project(s, p)),
+        )
+    });
+    candidates.into_iter().next()
 }
 impl FirstMate {
     pub(super) fn offer_alias(&mut self, repo: &str, text: &str, source: &str, now: f64) {
-        let Some(alias) = short_alias(text, repo) else { return };
+        let projects = self.project_list();
+        let Some(alias) = short_alias(text, repo, projects.as_array().map(Vec::as_slice).unwrap_or_default()) else {
+            return;
+        };
         let book = self.habits.load(&habits::repo_key(repo), &super::clock::Local::at(now).day_key());
         let id = format!("alias-{}", habits::route_id(&alias));
         if book.get(&id).is_some() || self.alias_pending.values().any(|(r, a, _)| r == repo && a == &alias) {
@@ -461,7 +583,58 @@ mod gate_tests {
             ranked.iter().map(|p| p["repo"].as_str().unwrap()).collect::<Vec<_>>(),
             vec!["/nonexistent/d", "/nonexistent/b", "/nonexistent/c"]
         );
-        assert_eq!(short_alias("官网加个页面", "/nonexistent/d").as_deref(), Some("官网"));
+        assert_eq!(short_alias("官网加个页面", "/nonexistent/d", &[]).as_deref(), Some("官网"));
+    }
+
+    #[test]
+    fn learned_templates_identify_the_issue_position_without_digit_false_positives() {
+        for (template, branch) in [
+            ("bug/{n}-{slug}", "bug/42-login"),
+            ("work/issue-{n}/{slug}", "work/issue-42/login"),
+            ("bug.v2/{slug}-{n}", "bug.v2/login-42"),
+        ] {
+            assert!(issue_branch_matches(branch, 42, Some(template)));
+            assert!(!issue_branch_matches(branch, 142, Some(template)));
+            assert!(!issue_branch_matches(&branch.replace("42", "142"), 42, Some(template)));
+        }
+        assert!(!issue_branch_matches("bugXv2/login-42", 42, Some("bug.v2/{slug}-{n}")));
+        assert!(!issue_branch_matches("release/v42", 42, Some("release/{slug}")));
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut fm, repo) = fixture(tmp.path(), "project");
+        let root = main_repo(&repo);
+        fm.memory.note(&root, "branch naming: bug/{n}-{slug}", "user").unwrap();
+        git(Path::new(&repo), &["branch", "bug/42-login"]);
+        fm.route_text = "https://github.com/org/repo/issues/42".into();
+        assert!(matches!(fm.route_gate(&json!({"repo_path":repo,"prompt":fm.route_text}),1.),Some(Gate::Deny(place)) if place.contains("bug/42-login")));
+        let worktrees = "worktree /scratch/real-place\nHEAD 42abc\nbranch refs/heads/bug/42-login\n";
+        assert!(duplicate_issue("org/repo", 42, "", worktrees, &[], Some("bug/{n}-{slug}"))
+            .unwrap()
+            .contains("/scratch/real-place"));
+    }
+
+    #[test]
+    fn alias_guesses_skip_verbs_possessives_short_and_ambiguous_words() {
+        let projects = vec![
+            json!({"repo":"/nonexistent/shop","name":"team-storefront","description":"commerce checkout shared"}),
+            json!({"repo":"/nonexistent/docs","name":"documentation","description":"shared manuals"}),
+        ];
+        assert!(short_alias("update fix add change make seahelm's ui it go", "/nonexistent/shop", &projects).is_none());
+        assert_eq!(
+            short_alias("change shared storefront", "/nonexistent/shop", &projects).as_deref(),
+            Some("storefront")
+        );
+        assert!(short_alias("shared", "/nonexistent/shop", &projects).is_none());
+        assert_eq!(short_alias("fix unknown checkout", "/nonexistent/shop", &projects).as_deref(), Some("checkout"));
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut fm, repo) = fixture(tmp.path(), "project");
+        let other = tmp.path().join("other");
+        std::fs::create_dir(&other).unwrap();
+        std::fs::write(Path::new(&repo).join("README.md"), "shared commerce").unwrap();
+        std::fs::write(other.join("README.md"), "shared documentation").unwrap();
+        fm.test_repos = Some(vec![repo.clone(), other.to_string_lossy().into_owned()]);
+        fm.offer_alias(&repo, "shared", "model-option", 1.);
+        fm.offer_alias(&repo, "update seahelm’s ui", "model-option", 2.);
+        assert!(fm.alias_pending.is_empty());
     }
 
     #[test]
@@ -489,16 +662,16 @@ mod gate_tests {
             assert!(!issue_number_in(branch, 42));
         }
         let porcelain = "worktree /scratch/42\nHEAD 42abcdef\nbranch refs/heads/main\n";
-        assert!(duplicate_issue("o/r", 42, "v42.0", porcelain, &[]).is_none());
+        assert!(duplicate_issue("o/r", 42, "v42.0", porcelain, &[], None).is_none());
         let pr = json!({"repo":"o/r","pr":{"number":99,"state":"open","body":"Closes #42","url":"https://github.com/o/r/pull/99"}});
-        assert!(duplicate_issue("o/r", 42, "", porcelain, &[pr.clone()]).unwrap().contains("PR #99"));
-        assert!(duplicate_issue("other/r", 42, "", "", &[pr.clone()]).is_none());
+        assert!(duplicate_issue("o/r", 42, "", porcelain, &[pr.clone()], None).unwrap().contains("PR #99"));
+        assert!(duplicate_issue("other/r", 42, "", "", &[pr.clone()], None).is_none());
         let mut closed = pr.clone();
         closed["pr"]["state"] = json!("closed");
-        assert!(duplicate_issue("o/r", 42, "", "", &[closed]).is_none());
+        assert!(duplicate_issue("o/r", 42, "", "", &[closed], None).is_none());
         let mut unrelated = pr;
         unrelated["pr"]["body"] = json!("Discuss #42, fixes #142");
-        assert!(duplicate_issue("o/r", 42, "", "", &[unrelated]).is_none());
+        assert!(duplicate_issue("o/r", 42, "", "", &[unrelated], None).is_none());
         assert!(linked_issue("https://github.com/other/r/issues/42", &["o/r".into()]).is_none());
     }
 }

@@ -50,10 +50,11 @@ final: report it, do not look for another way to do the same thing.
   The core posts “记下了：…” / “Noted: …” after saving; never manufacture that row.
   `seahelm memory show <repo>` shows provenance, pending external edits and the
   total/injected character gauge. Goal, milestone and don'ts precede newest notes;
-  entries are included whole. Over capacity is reported. Use
-  `seahelm memory undo <repo>` when the user asks to restore the previous version. The user can also
-  use `/memory show @repo` and `/memory undo @repo` directly in the island,
-  web or Telegram, without a model turn. Only the user confirms external edits;
+  entries are included whole. Over capacity is reported. Undo belongs to the user:
+  direct them to `/memory undo @repo` in the island, web or Telegram, or to
+  `seahelm memory undo <repo>` in their outside terminal. Do not call undo yourself:
+  a previous note may contain the user's restriction. `/memory show @repo` also
+  works directly without a model turn. Only the user confirms external edits;
   rejecting that card restores the core's remembered revision.
 - Read project memory before acting. Project events and SessionStart hooks include
   trusted content; new-agent briefs carry only its location. Use memory show for detail.
@@ -63,7 +64,8 @@ final: report it, do not look for another way to do the same thing.
   Otherwise offer 2–3 candidate projects with `seahelm propose`; put your requested
   repo first. The pick teaches routing. Offer a short project alias separately
   (an option may include `"alias":"website"`); the core asks the user to confirm it.
-  Never turn a whole request into a project nickname. A learned routing habit may become automatic only through its promotion card.
+  Avoid generic verbs, possessives, very short words and names shared by multiple
+  repos/descriptions. Prefer a distinctive project noun. Never turn a whole request into a project nickname. A learned routing habit may become automatic only through its promotion card.
 - For an issue link, inspect `gh issue view` first. Closed issues, questions and
   discussions: explain briefly and stop. Check pane/worktree lists, git branches,
   and PR titles/bodies for that issue number (including `Closes #n`); report where

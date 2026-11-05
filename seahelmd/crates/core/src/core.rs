@@ -2307,7 +2307,7 @@ mod peer_gate_tests {
 
     #[cfg(unix)]
     #[test]
-    fn real_pid_first_mate_can_note_and_undo_but_never_confirm() {
+    fn real_pid_first_mate_can_note_but_cannot_undo_or_confirm() {
         use std::io::{Write, BufRead};
         use std::process::{Command, Stdio};
         struct ChildGuard(std::process::Child);
@@ -2322,18 +2322,23 @@ mod peer_gate_tests {
         let mut ready=String::new(); std::io::BufReader::new(child.0.stdout.take().unwrap()).read_line(&mut ready).unwrap(); assert_eq!(ready.trim(),"ready");
         let pid=child.0.id();
         assert!(crate::peer::first_mate_memory("memory.note",Some(pid)));
-        assert!(crate::peer::first_mate_memory("memory.undo",Some(pid)));
+        assert!(!crate::peer::first_mate_memory("memory.undo",Some(pid)));
         assert!(!crate::peer::first_mate_memory("memory.confirm",Some(pid)));
         let core=Core::for_test(tmp.path());
         let repo=tmp.path().join("repo");
-        for text in ["goal: old","goal: new"] {
+        for text in ["goal: old","don'ts: never deploy"] {
             let p=json!({"repo":repo,"text":text,"_meta":{"caller":fm_policy::SESSION}});
             assert!(value(core.clone().call_checked("memory.note",p,Some(pid),agent)).is_ok());
         }
-        assert!(value(core.clone().call_checked("memory.undo",json!({"repo":repo,"_meta":{"caller":fm_policy::SESSION}}),Some(pid),agent)).is_ok());
+        let err=value(core.clone().call_checked("memory.undo",json!({"repo":repo,"_meta":{"caller":fm_policy::SESSION}}),Some(pid),agent)).unwrap_err();
+        assert_eq!(err.code,rpc::FORBIDDEN);
+        assert!(core.memory_store().context(repo.to_str().unwrap()).contains("never deploy"));
+        // An outside terminal's request still restores the previous revision.
+        assert!(value(core.clone().call_checked("memory.undo",json!({"repo":repo}),Some(std::process::id()),|| Verdict::Outside)).is_ok());
         assert!(core.memory_store().context(repo.to_str().unwrap()).contains("old"));
+        assert!(!core.memory_store().context(repo.to_str().unwrap()).contains("never deploy"));
         let err=value(core.clone().call_checked("memory.confirm",json!({"repo":repo,"digest":"forged","_meta":{"caller":fm_policy::SESSION}}),Some(pid),agent)).unwrap_err();
-        assert_eq!(err.code,rpc::FORBIDDEN); assert!(err.message.contains("confirmation requires the user") || err.message.contains("确认外部编辑仅限"));
+        assert_eq!(err.code,rpc::FORBIDDEN); assert!(err.message.contains("undo and confirmation require the user") || err.message.contains("撤销及确认外部编辑仅限"));
         let err=value(core.clone().call_checked("memory.note",json!({"repo":repo,"text":"evil","_meta":{"caller":fm_policy::SESSION}}),Some(std::process::id()),agent)).unwrap_err();
         assert_eq!(err.code,rpc::FORBIDDEN); assert!(!err.message.contains("answers cards"));
     }

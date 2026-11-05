@@ -665,8 +665,8 @@ includes active entries only, capped at 2,000 Unicode characters; `memory.show`
 returns used/capacity and trust state. External edits raise a user confirmation
 card tied to the exact digest and stay out of context meanwhile. The CLI exposes
 `memory note`, `memory show`, `memory undo`, and `memory confirm` (the latter
-requires the digest returned by show). Confirmation is user-only; note and undo admit the user and the
-kernel-identified First Mate session. `/memory show @repo` and `/memory undo @repo`
+requires the digest returned by show). Undo and confirmation are user-only: restoring an older note can remove a user's
+restriction. Only note-writing admits the kernel-identified First Mate session. `/memory show @repo` and `/memory undo @repo`
 run directly through core-command from the island, web or Telegram. Rejection
 restores the remembered revision and clears the pending card; stale confirmations
 cannot approve a newer edit. The core writes
@@ -699,6 +699,17 @@ then rank alias/description matches. Alias suggestions are short names, approved
 on their own card; First Mate may also suggest one with an option's `alias` field.
 A start reservation is released on failure and spent on successful creation,
 including starts approved under a repo's ask rule; another start asks on a card.
+
+
+Final phase 7 review: memory undo is exclusively the user's, even when requested
+by a kernel-identified First Mate process. The island/web/Telegram command and
+outside-terminal CLI remain available. PR bodies stay out of public `pr.list`
+and status payloads; the internal routing accessor alone includes them. Issue
+branch matching derives a literal-escaped issue pattern from the learned
+`branch naming` template, as well as recognizing the default issue tokens.
+Alias suggestions skip generic verbs, possessives and very short words, prefer
+target-project name components or distinctive description nouns, and reject any
+word shared by multiple known projects' names/descriptions.
 
 
 ### Task sources: local operations (phase 8)

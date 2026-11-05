@@ -113,7 +113,7 @@ impl PrStatus {
     /// (`{number, url, state, checks?, review?}`, state one of
     /// open / draft / merged / closed; checks and review only while live).
     pub fn to_json(&self) -> Value {
-        let mut v = json!({"number": self.number, "url": self.url, "body":self.body, "state": self.state.as_str()});
+        let mut v = json!({"number": self.number, "url": self.url, "state": self.state.as_str()});
         if let Some(o) = &self.head_oid {
             v["head_oid"] = json!(o);
         }
@@ -129,6 +129,13 @@ impl PrStatus {
             }
         }
         v
+    }
+
+    /// PR prose is internal routing data, never part of the polled status wire shape.
+    fn routing_json(&self) -> Value {
+        let mut value=self.to_json();
+        value["body"]=json!(self.body);
+        value
     }
 
     /// One sentence for a tooltip or a screen reader.
@@ -525,11 +532,11 @@ impl PrStore {
         let mut rows=std::collections::BTreeMap::new();
         for (repo,entry) in &inner.repos {
             for (branch,pr) in &entry.by_branch {
-                rows.insert((repo.clone(),pr.number),json!({"repo":repo,"branch":branch,"pr":pr.to_json()}));
+                rows.insert((repo.clone(),pr.number),json!({"repo":repo,"branch":branch,"pr":pr.routing_json()}));
             }
         }
         for ((repo,branch),entry) in &inner.branch_prs {
-            if let Some(pr)=&entry.pr { rows.entry((repo.clone(),pr.number)).or_insert_with(||json!({"repo":repo,"branch":branch,"pr":pr.to_json()})); }
+            if let Some(pr)=&entry.pr { rows.entry((repo.clone(),pr.number)).or_insert_with(||json!({"repo":repo,"branch":branch,"pr":pr.routing_json()})); }
         }
         rows.into_values().collect()
     }
@@ -1162,9 +1169,17 @@ mod routing_cache_tests {
         let store=PrStore::new(Box::new(Live));
         store.lock().repos.insert("o/r".into(),RepoEntry{by_branch:parsed,at:Instant::now(),ok:true});
         assert!(store.list().is_empty());
+        {
+            let mut inner=store.lock();
+            inner.branches.insert("/scratch/repo".into(),"fix-login".into());
+            inner.remotes.insert("/scratch/repo".into(),Some("o/r".into()));
+        }
+        let polled=store.list(); assert_eq!(polled.len(),1);
+        assert!(polled[0]["pr"].get("body").is_none());
+        assert!(store.status("/scratch/repo").unwrap().to_json().get("body").is_none());
         let rows=store.routing_list(); assert_eq!(rows.len(),1); assert!(rows[0].get("worktree_path").is_none());
         assert_eq!(rows[0]["pr"]["body"],"Resolves #42");
-        assert!(crate::first_mate::routing::duplicate_issue("o/r",42,"","",&rows).unwrap().contains("PR #99"));
+        assert!(crate::first_mate::routing::duplicate_issue("o/r",42,"","",&rows,None).unwrap().contains("PR #99"));
         assert!(QUERY.contains("body")); assert!(branch_query(1).contains("body"));
     }
 }

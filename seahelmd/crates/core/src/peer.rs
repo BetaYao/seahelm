@@ -416,7 +416,7 @@ mod tests {
     }
 }
 
-/// Only the kernel-observed First Mate session gets the write/restore exception.
+/// Only the kernel-observed First Mate session gets the note exception; undo belongs to the user.
 pub fn first_mate_memory(method: &str, pid: Option<u32>) -> bool {
-    matches!(method, "memory.note" | "memory.undo") && pid.is_some_and(|pid| gather(pid).chain.iter().any(|p| session_of(p).as_deref() == Some(crate::first_mate::policy::SESSION)))
+    method == "memory.note" && pid.is_some_and(|pid| gather(pid).chain.iter().any(|p| session_of(p).as_deref() == Some(crate::first_mate::policy::SESSION)))
 }
