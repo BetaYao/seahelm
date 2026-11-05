@@ -89,7 +89,24 @@ pub fn created_worktree(event: WebhookEventType, data: &Map, cwd: &str, home: &s
     if tool != "Bash" {
         return None;
     }
-    let command = input.get("command")?.as_str()?;
+    git_worktree_target(input.get("command")?.as_str()?, "add", cwd, home)
+}
+
+/// The worktree a tool call removes: `git worktree remove [-f] <path>`
+/// anywhere in a shell command, resolved like `created_worktree`'s. The
+/// tool has only started, so the removal may still fail; whoever reads
+/// this checks that the worktree is gone.
+pub fn removed_worktree(event: WebhookEventType, data: &Map, cwd: &str, home: &str) -> Option<String> {
+    let (tool, input) = tool_call(event, data)?;
+    if tool != "Bash" {
+        return None;
+    }
+    git_worktree_target(input.get("command")?.as_str()?, "remove", cwd, home)
+}
+
+/// The path argument of the first `git [-C dir] worktree <verb> [options] <path>`
+/// in a shell command, a `cd` or `-C` before it resolving a relative path.
+fn git_worktree_target(command: &str, verb: &str, cwd: &str, home: &str) -> Option<String> {
     let mut dir = cwd.to_string();
     for segment in command.split([';', '&', '|', '\n']) {
         let mut words = shell_words(segment);
@@ -106,7 +123,7 @@ pub fn created_worktree(event: WebhookEventType, data: &Map, cwd: &str, home: &s
             base = paths::resolve(&words[1], &base, home);
             words.drain(..2);
         }
-        if words.len() <= 2 || words[0] != "worktree" || words[1] != "add" {
+        if words.len() <= 2 || words[0] != "worktree" || words[1] != verb {
             continue;
         }
         let mut args = words[2..].iter();
@@ -231,6 +248,23 @@ mod tests {
         assert_eq!(created("git worktree remove ../repo-x"), None);
         assert_eq!(created("echo git worktree add ../x"), None);
         assert_eq!(created("git worktree add"), None);
+    }
+
+    #[test]
+    fn test_git_worktree_remove_names_the_worktree_it_removes() {
+        let removed = |c: &str| {
+            removed_worktree(
+                WebhookEventType::ToolUseStart,
+                &data(json!({"tool_name": "Bash", "tool_input": {"command": c}})),
+                "/r/repo",
+                HOME,
+            )
+        };
+        assert_eq!(removed("git worktree remove ../repo-x").as_deref(), Some("/r/repo-x"));
+        assert_eq!(removed("git worktree remove --force /w/x && git branch -D x").as_deref(), Some("/w/x"));
+        assert_eq!(removed("git -C /r/other worktree remove -f wt").as_deref(), Some("/r/other/wt"));
+        assert_eq!(removed("git worktree add ../repo-x"), None);
+        assert_eq!(removed("git worktree list"), None);
     }
 
     #[test]
