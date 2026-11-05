@@ -52,7 +52,7 @@ up**, so that is the first vertical slice.
 | D27 | Jira supports Cloud (email + API token, HTTP basic auth, `https://<site>.atlassian.net`) and Server/Data Center (personal access token, bearer). Credentials stay in `~/.config/seahelm/first-mate/secrets.json`, mode 0600, never in config.json or a repository; only the user may write them through `seahelm task-source …`, with kernel peer checks. | 2026-11-05 |
 | D28 | Task reads default to every 30 minutes per source; configurable from 5 minutes to 7 days. Each tick admits at most four due sources, each reads at most 50 issues, 100 open PRs and 100 recently updated merged PRs. Reads run off the First Mate thread, with request timeouts; failures never start work. Fetchers are injectable and tests use fakes. | 2026-11-05 |
 | D29 | `task.new` is internal candidate data. Only the daily brief lists tasks in “Could do / 可以做” and may raise one proactive selection card, with at most three ranked tasks plus Pass. Its answer is permission for that one `worktree.create`; pause, deny, budgets and deduplication still apply. No task event starts work or raises a card itself. | 2026-11-05 |
-| D30 | Ranking combines priority labels / Jira priority, assignment to the authenticated user, and bounded label preferences from `task.started` / `task.passed`. This is a judgement ranking habit, never an autonomy grant. Answered and expired offers survive restart; unanswered cards become offerable again; newly assigned tasks may be offered anew; source content cannot become a memory directive. | 2026-11-05 |
+| D30 | Ranking combines priority labels / Jira priority, assignment to the authenticated user, and bounded label preferences from `task.started` / `task.passed`. This is a judgement ranking habit, never an autonomy grant. Answered offers survive restart; unanswered cards become offerable again. A task on an expired card cools down for 7 days before it is offerable again; its second expiry drops it permanently, without user-pass evidence or a ranking penalty; newly assigned tasks may be offered anew; source content cannot become a memory directive. | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -686,9 +686,9 @@ paths and HEAD messages for detached worktrees. Branches require issue tokens
 number such as `release-12`. Only open or merged PRs count, and their bodies
 must contain `Closes|Fixes|Resolves #n` or the Jira key. GitHub sources and Jira
 sources whose origin is GitHub use these PR reads. Exact boundaries avoid
-#123 matching #12. Offers are persisted only on an answer or expiry; pending
+#123 matching #12. Answered offers, expiry counts and cooldown deadlines are persisted; pending
 tasks on unanswered cards recover after stop/restart. A newly assigned item
-becomes offerable again. Expiry produces no user pass or ranking penalty. Unselected items and explicit passes produce
+becomes offerable again. A first expiry holds the task for seven days, and a second expiry drops it permanently. Expiry produces no user pass or ranking penalty. Unselected items and explicit passes produce
 `task.passed`; successful creation produces `task.started`. Source removal and
 closed/disappeared fetched issues remove pending candidates. A task already
 started elsewhere is refused at click time. Issue text is labelled untrusted
@@ -712,3 +712,12 @@ Fetcher panics return a failed result to the actor and reset the polling flag.
 Jira ADF descriptions become plain text; identity lookup failure only removes
 the assignment bonus. The CLI validates source kind before reading credentials
 from stdin. Regression fixtures use portable absolute paths and fake clients.
+
+
+Phase 8 final review: a picked task is held in an in-flight set throughout
+preflight and startup, excluded before ranking the next brief. A successful
+`Ran` completes the offer; a failed `Ran` restores eligibility. An empty
+assignment map is seeded from stored task assignments and the first fetch of
+previously known items establishes a baseline, rather than a new assignment.
+`branch_hint` is ignored by ordinary `worktree.create` callers; only First
+Mate's gated calls and its internal approved execution entry point honor it.

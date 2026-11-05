@@ -487,7 +487,7 @@ impl FirstMate {
         for note in notes { self.log(Entry::new(now, "tuning", note.en.clone())); self.budget.note(note); }
         self.save_budget();
         self.core.drop_card_payload(payload);
-        if self.task_cards.contains_key(payload) { self.expire_task(payload); return; }
+        if self.task_cards.contains_key(payload) { self.expire_task(payload, now); return; }
         let today = super::clock::Local::at(now).day_key();
         let s = |p: &Value, k: &str| p.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
         let mut habits: Vec<(String, String)> = Vec::new();

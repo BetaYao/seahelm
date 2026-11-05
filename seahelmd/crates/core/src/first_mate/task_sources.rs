@@ -85,6 +85,13 @@ impl Task {
     }
 }
 #[derive(Default, Serialize, Deserialize)]
+struct TaskExpiry {
+    count: u8,
+    until: f64,
+}
+const TASK_COOLDOWN: f64 = 7.0 * 86400.0;
+
+#[derive(Default, Serialize, Deserialize)]
 pub struct State {
     #[serde(default)]
     checked: BTreeMap<String, f64>,
@@ -94,6 +101,8 @@ pub struct State {
     offered: BTreeSet<String>,
     #[serde(default)]
     assigned: BTreeMap<String, bool>,
+    #[serde(default)]
+    expired: BTreeMap<String, TaskExpiry>,
     #[serde(default)]
     pub pending: Vec<Task>,
     /// Judgement ranking only: never grants permission to act.
@@ -701,6 +710,11 @@ fn description(v: &Value) -> String {
 impl State {
     pub fn load(dir: &Path) -> Self {
         let mut state: Self = read(&dir.join("tasks.json"));
+        if state.assigned.is_empty() {
+            for task in &state.pending {
+                state.assigned.insert(task.identity(), task.assigned);
+            }
+        }
         // Migrate pre-review state: pending tasks were marked offered at raise time.
         for task in &state.pending {
             state.offered.remove(&task.identity());
@@ -718,7 +732,11 @@ impl State {
                 self.pending.retain(|p| p.identity() != id);
                 continue;
             }
-            let newly_assigned = t.assigned && self.assigned.get(&id) != Some(&true);
+            // An absent entry is an upgrade baseline, not an assignment transition.
+            let newly_assigned = t.assigned && self.assigned.get(&id) == Some(&false);
+            if self.expired.get(&id).is_some_and(|e| e.count >= 2) {
+                continue;
+            }
             self.assigned.insert(id.clone(), t.assigned);
             if newly_assigned {
                 self.offered.remove(&id);
@@ -735,11 +753,23 @@ impl State {
         }
         new
     }
+    #[cfg(test)]
     fn ranked(&self) -> Vec<Task> {
+        self.ranked_at(seahelm_core_types::now(), &BTreeSet::new())
+    }
+    fn ranked_at(&self, now: f64, in_flight: &BTreeSet<String>) -> Vec<Task> {
         let mut v: Vec<_> = self
             .pending
             .iter()
-            .filter(|t| !self.offered.contains(&t.identity()))
+            .filter(|t| {
+                let id = t.identity();
+                !self.offered.contains(&id)
+                    && !in_flight.contains(&id)
+                    && self
+                        .expired
+                        .get(&id)
+                        .is_none_or(|e| e.count < 2 && now >= e.until)
+            })
             .cloned()
             .collect();
         v.sort_by_key(|t| {
@@ -829,7 +859,7 @@ impl FirstMate {
         self.tasks
             .pending
             .retain(|t| active.iter().any(|s| s.repo == t.repo && s.id == t.source));
-        let tasks = self.tasks.ranked();
+        let tasks = self.tasks.ranked_at(now, &self.task_in_flight);
         let lines = tasks.iter().map(Task::label).collect();
         if !tasks.is_empty() && self.task_cards.is_empty() {
             let id = self.mint("task-start");
@@ -892,6 +922,7 @@ impl FirstMate {
                 .unwrap_or_default()
                 .get(&secret_key(&source))
                 .cloned();
+            self.task_in_flight.insert(t.identity());
             let tx = self.tx.clone();
             let card = payload.to_string();
             std::thread::spawn(move || {
@@ -901,7 +932,7 @@ impl FirstMate {
                 }) {
                     let _ = tx.send(Msg::TaskReady { task: t, card });
                 } else {
-                    let _ = tx.send(Msg::TaskUnavailable);
+                    let _ = tx.send(Msg::TaskUnavailable { task: t });
                 }
             });
         } else {
@@ -932,6 +963,7 @@ impl FirstMate {
                 .iter()
                 .any(|s| s.repo == task.repo && s.id == task.source)
         {
+            self.task_in_flight.remove(&task.identity());
             self.task_refused();
             return;
         }
@@ -952,10 +984,27 @@ impl FirstMate {
         self.tasks.offered.insert(t.identity());
         self.tasks.pending.retain(|p| p.identity() != t.identity());
     }
-    pub(super) fn expire_task(&mut self, payload: &str) {
+    pub(super) fn task_finished(&mut self, task: &Task, success: bool, now: f64) {
+        self.task_in_flight.remove(&task.identity());
+        if success {
+            self.complete_offer(task);
+            self.task_observation(task, true, now);
+        }
+        self.save_tasks();
+    }
+    pub(super) fn task_unavailable(&mut self, task: &Task) {
+        self.task_in_flight.remove(&task.identity());
+        self.core.first_mate_line(self.config.language.pick("Could not start that task: it is already in hand, unavailable, or the source could not be read", "未能开始该任务：可能已有工作、任务已不可用，或来源读取失败"));
+    }
+    pub(super) fn expire_task(&mut self, payload: &str, now: f64) {
         if let Some(tasks) = self.task_cards.remove(payload) {
             for task in tasks {
-                self.complete_offer(&task);
+                let expiry = self.tasks.expired.entry(task.identity()).or_default();
+                expiry.count = expiry.count.saturating_add(1);
+                expiry.until = now + TASK_COOLDOWN;
+                if expiry.count >= 2 {
+                    self.complete_offer(&task);
+                }
             }
             self.withdraw(payload);
             self.save_tasks();
@@ -1200,15 +1249,95 @@ mod tests {
         assert_eq!(fm.task_cards.len(), 1);
     }
     #[test]
+    fn expiry_cools_for_seven_days_then_drops_after_second_expiry() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fm = fixture(dir.path());
+        let now = 1000.0;
+        fm.task_brief(now);
+        let id = fm.task_cards.keys().next().unwrap().clone();
+        fm.expire_task(&id, now);
+        let state = State::load(dir.path());
+        assert!(state
+            .ranked_at(now + TASK_COOLDOWN - 1.0, &BTreeSet::new())
+            .is_empty());
+        assert_eq!(
+            state.ranked_at(now + TASK_COOLDOWN, &BTreeSet::new()).len(),
+            1
+        );
+        fm.task_brief(now + TASK_COOLDOWN);
+        let id = fm.task_cards.keys().next().unwrap().clone();
+        fm.expire_task(&id, now + TASK_COOLDOWN);
+        let mut state = State::load(dir.path());
+        let mut t = task("#1");
+        t.repo = dir.path().join("repo").to_string_lossy().into();
+        t.source = "backlog".into();
+        t.assigned = true;
+        assert!(state.accept(vec![t], &[]).is_empty());
+        assert!(state
+            .ranked_at(now + 100.0 * TASK_COOLDOWN, &BTreeSet::new())
+            .is_empty());
+        assert!(fm.tasks.preference.is_empty());
+    }
+    #[test]
+    fn in_flight_tasks_are_hidden_until_ran_and_return_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fm = fixture(dir.path());
+        let task = fm.tasks.pending[0].clone();
+        for success in [false, true] {
+            fm.task_in_flight.insert(task.identity());
+            assert!(fm.task_brief(1.0).is_empty());
+            assert!(fm.task_cards.is_empty());
+            let mut params = task.params();
+            params["_task"] = serde_json::to_value(&task).unwrap();
+            fm.handle(Msg::Ran {
+                action: Action::StartAgent,
+                what: task.label(),
+                level: "picked",
+                params,
+                result: if success {
+                    Ok(json!({}))
+                } else {
+                    Err("injected failure".into())
+                },
+            });
+            assert!(fm.task_in_flight.is_empty());
+            assert_eq!(fm.tasks.ranked().len(), usize::from(!success));
+        }
+    }
+    #[test]
+    fn upgrade_seeds_assignment_without_reoffering_old_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut t = task("#12");
+        t.assigned = true;
+        let mut state = State::default();
+        state.seen.insert(t.identity());
+        state.offered.insert(t.identity());
+        state.save(dir.path()).unwrap();
+        let mut loaded = State::load(dir.path());
+        assert!(loaded.accept(vec![t.clone()], &[]).is_empty());
+        assert!(loaded.ranked().is_empty());
+        assert_eq!(loaded.assigned[&t.identity()], true);
+        state.pending.push(t.clone());
+        state.save(dir.path()).unwrap();
+        let loaded = State::load(dir.path());
+        assert_eq!(loaded.assigned[&t.identity()], true);
+        // A measured false -> true change after the baseline still raises an event.
+        let mut loaded = loaded;
+        t.assigned = false;
+        loaded.accept(vec![t.clone()], &[]);
+        t.assigned = true;
+        assert_eq!(loaded.accept(vec![t], &[]).len(), 1);
+    }
+    #[test]
     fn expiration_is_not_a_user_pass() {
         let dir = tempfile::tempdir().unwrap();
         let mut fm = fixture(dir.path());
         fm.tasks.pending[0].labels = vec!["high".into()];
         fm.task_brief(1.0);
         let id = fm.task_cards.keys().next().unwrap().clone();
-        fm.expire_task(&id);
+        fm.expire_task(&id, 1.0);
         assert!(fm.tasks.preference.is_empty());
-        assert!(fm.tasks.ranked().is_empty());
+        assert!(fm.tasks.ranked_at(1.0, &BTreeSet::new()).is_empty());
     }
     #[test]
     fn refused_pick_keeps_task_and_writes_note() {
