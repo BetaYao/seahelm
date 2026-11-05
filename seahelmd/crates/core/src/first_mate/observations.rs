@@ -59,9 +59,8 @@ pub mod kind {
     pub const WORKTREE_CREATED: &str = "worktree.created";
     /// One of First Mate's cards (approval or proposal) answered or dismissed.
     pub const CARD_ANSWERED: &str = "card.answered";
-    /// Defined for the interruption budget (phase 5); unused while cards
-    /// have no expiry in the core.
-    #[allow(dead_code)]
+    /// One of First Mate's cards withdrawn unanswered after
+    /// `budget::tuning::CARD_EXPIRY` (phase 5).
     pub const CARD_EXPIRED: &str = "card.expired";
 }
 
@@ -436,6 +435,9 @@ pub enum Msg {
         repo: String,
         habit: Option<String>,
     },
+    /// One of First Mate's cards expired unanswered and was withdrawn.
+    /// `habit`: the habits it counted as ignored (`<key>/<id>`, comma-joined).
+    CardExpired { card_kind: &'static str, card: String, summary: String, worktree: String, repo: String, habit: Option<String> },
 }
 
 #[derive(Clone)]
@@ -570,6 +572,16 @@ impl Observer {
                         r.repo = k.repo.clone();
                     }
                 }
+                self.write(now, r);
+            }
+            Msg::CardExpired { card_kind, card, summary, worktree, repo, habit } => {
+                // Nobody answered: `by` is the user, who let it go.
+                let mut r = Record::new(kind::CARD_EXPIRED, By::User).with("card_kind", json!(card_kind)).with("card", json!(card)).with("summary", json!(summary));
+                if let Some(h) = habit {
+                    r = r.with("habit", json!(h));
+                }
+                r.worktree = worktree;
+                r.repo = repo;
                 self.write(now, r);
             }
         }
@@ -902,6 +914,28 @@ mod tests {
         assert_eq!(rs[0].fields["habit"], "_global/delete-merged-clean");
         assert!(!rs[1].fields.contains_key("habit"));
         assert_eq!(rs[1].fields["option"], Value::Null);
+    }
+
+    #[test]
+    fn expiries_are_recorded_with_their_habits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut o = observer(tmp.path());
+        o.handle(
+            Msg::CardExpired {
+                card_kind: "habit.sweep",
+                card: "habit.sweep:s1".into(),
+                summary: "First Mate: these 2 worktrees look done:".into(),
+                worktree: String::new(),
+                repo: String::new(),
+                habit: Some("_global/delete-merged-clean".into()),
+            },
+            NOW,
+        );
+        let rs = records(tmp.path());
+        assert_eq!((rs[0].kind.as_str(), rs[0].by.as_str()), (kind::CARD_EXPIRED, "user"));
+        assert_eq!(rs[0].fields["card_kind"], "habit.sweep");
+        assert_eq!(rs[0].fields["habit"], "_global/delete-merged-clean");
+        assert!(!rs[0].fields.contains_key("option"), "nothing was answered");
     }
 
     #[test]

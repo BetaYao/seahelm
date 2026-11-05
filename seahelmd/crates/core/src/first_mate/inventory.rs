@@ -330,6 +330,11 @@ impl Cards {
         self.open.clear();
     }
 
+    /// Take a card down unanswered (it expired): nothing is learned.
+    pub fn withdraw(&mut self, payload: &str) -> Option<Card> {
+        self.open.remove(payload)
+    }
+
     /// The user's answer. Only an option the card offered grants anything.
     pub fn answer(&mut self, payload: &str, option: Option<&str>, today: &str) -> Option<Answered> {
         let card = self.open.remove(payload)?;

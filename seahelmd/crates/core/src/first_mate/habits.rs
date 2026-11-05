@@ -64,7 +64,6 @@ pub mod tuning {
     /// First Mate deleting it on its own undoes that deletion.
     pub const UNDO_WINDOW_DAYS: f64 = 7.0;
     /// Unanswered expiries in a row that take a habit down a level.
-    #[allow(dead_code)]
     pub const EXPIRIES_TO_DEMOTE: u32 = 2;
     /// Branch names kept as examples.
     pub const EXAMPLES_CAP: usize = 8;
@@ -747,9 +746,8 @@ impl Book {
         self.demote(id, &format!("the user checked {branch} out again after First Mate deleted it"))
     }
 
-    /// One of this habit's cards expired unanswered (phase 5 raises the
-    /// expiries; the hook is here). The second in a row takes it down.
-    #[allow(dead_code)]
+    /// One of this habit's cards expired unanswered (`brief::expire`):
+    /// counted as ignored; the second in a row takes it down.
     pub fn expired(&mut self, id: &str) -> Option<Change> {
         let i = self.index(id)?;
         let e = &mut self.habits[i].evidence;
@@ -1063,6 +1061,11 @@ impl Offers {
 
     pub fn clear(&mut self) {
         self.open.clear();
+    }
+
+    /// Take an offer down unanswered (it expired): no grant, no decline.
+    pub fn withdraw(&mut self, payload: &str) -> Option<Offer> {
+        self.open.remove(payload)
     }
 
     /// The user's answer to a card (None: dismissed). Only the yes option

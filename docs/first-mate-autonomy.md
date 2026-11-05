@@ -1,6 +1,6 @@
 # First Mate autonomy: learning to take over the chores
 
-Status: design, under discussion (2026-11-05). Nothing here is built yet.
+Status: phases 1–5 built (2026-11-05); the rest is design.
 Builds on `docs/first-mate-core.md` (First Mate lives in seahelm-core) and
 `docs/superpowers/specs/2026-11-04-first-mate-surfaces-design.md` (the island).
 
@@ -41,6 +41,10 @@ up**, so that is the first vertical slice.
 | D12 | A habit level raised by hand in its YAML file, above what the core granted, is neither applied nor silently undone: the core raises a confirmation card (the habit, the granted level, the written level, the evidence). Yes records the written level as granted; no writes the granted level back into the file. Until the user answers, the granted level applies. | 2026-11-05 |
 | D13 | One approval of a batched card counts as one approval of each habit on it, however many worktrees it covered: M approvals means M taps, not M worktrees. | 2026-11-05 |
 | D14 | Only the user answers cards or speaks to First Mate as the user. The core checks who is on the other end of the socket (the kernel's peer pid, not what the call says about itself), refuses a caller inside a seahelm pane, and seals `.granted.json`. Not a sandbox: see "Who may answer a card". | 2026-11-05 |
+| D15 | Presence is read from moments, never from states: a desktop client coming to the front or changing what it shows while in front, the user's prompt in a pane (unless something typed into that pane within 90 s), a card answer, words to First Mate, a command line, typing into a pane from a chat. An app left in front overnight is not a user at the desk. The brief's day starts at 04:00 local, so a late night belongs to the day before. | 2026-11-05 |
+| D16 | The brief is always written into First Mate's timeline (a `brief` row); Telegram gets it too when that is the channel. Channel order: arrived on Telegram → Telegram; a desktop client in front → the island; answered on Telegram within 14 days (and more recently than on the web) → Telegram; otherwise the timeline only. Quiet hours are any known repo's. The fallback needs a learned usual start; a profile that knows nothing never falls back. | 2026-11-05 |
+| D17 | Cards are *answering* (an approval or proposal while the user spoke this turn, the per-worktree cards after "Let me pick", a level written by hand (D12), the inventory (D6)) — up at once, never counted — or *proactive* (the sweep's batch, promotion offers, a rule's own approval, an unprompted proposal) — up only while the user is active and under the day's cap, else held. The brief puts everything held up with it, uncounted; later that day, held cards go up as the user is active, within the cap. | 2026-11-05 |
+| D18 | A card expires 3 days after it went up (time held for the brief does not count). Each expired card is one `ignored` for each habit it was about (a batch: once per habit on it), and a promotion offer that expires also waits for fresh evidence, like "not yet". An expired confirmation (D12) is not asked again until the file says something else. Item cards, inventory cards, proposals and non-delete approvals teach no habit. A habit's automatic actions no longer ping Telegram one by one: they are the brief's. | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -356,6 +360,38 @@ weekday, and:
 
 Where they open it (and whether they act on it) is evidence for the next day's
 choice.
+
+### As built (phase 5)
+
+- **Presence** (`first_mate/presence.rs`, D15): the core records each signal
+  into `first-mate/activity.json` — per weekday, 96 quarter-hour buckets,
+  each the count of days the user was active then, decayed by 0.8 a week;
+  the last moment seen overall and per channel (`desktop`, `telegram`,
+  `web`); the last arrival. Recorded whether First Mate is on or not.
+  `presence.state` shows it (read-only). The usual start of a weekday is the
+  first bucket from 04:00 on at half the busiest bucket's weight; a weekday
+  never seen takes the other days' average.
+- **When** (`first_mate/budget.rs`): on arrival — the first signal after 4 h
+  without one, still active (a signal in the last 20 min), this brief day;
+  else, with no signal at all this brief day, at the usual start + 1 h, to
+  Telegram (`Due::Fallback`). Once a brief day, never in quiet hours, never
+  while paused. Every number is in `budget::tuning`, for phase 6.
+- **What** (`first_mate/brief.rs`, deterministic, no model turn): a title
+  (how long the user was away, or that they have not been at the desk), then
+  one line each — *Done* (the audit's actions since the last brief, a
+  habit's deletions grouped), *Waiting on you* (First Mate's cards up or
+  held), *Could go* (the sweep's `suggest` lines), *Notes* (habit level
+  changes, cards withdrawn unanswered). Nothing to say: no brief, and the day
+  counts as dealt with.
+- **Where** (D16): a `brief` row in First Mate's timeline (the island draws a
+  block, the web a boxed paragraph); for Telegram the core also publishes
+  `first_mate.brief {text, channel}` and seahelm-gateway sends it to the
+  default chat. The gateway no longer forwards audit lines with
+  `rule: habit:<id>`.
+- **Cards** (D17, D18): every card First Mate raises goes through
+  `put_card`; held cards are listed in `autopilot.state` as `held` (a count)
+  and are not in `pending`. Expiry is in memory, like the cards themselves:
+  a core restart drops both.
 
 ## Prior art: Hermes Agent, OpenClaw, Meta Muse
 
