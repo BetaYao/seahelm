@@ -62,10 +62,34 @@ private struct CodeEditorSwiftUIView: View {
 /// its overlay scrollers inherit macOS's auto-hide behavior. Keep the horizontal
 /// thumb visible so long configuration lines remain discoverable and draggable.
 final class CodeEditorScrollCoordinator: TextViewCoordinator {
-    func prepareCoordinator(controller: TextViewController) {}
+    /// The editor's controller, for replacing its text from outside: the
+    /// `SourceEditor` string binding only flows up, from the view.
+    private(set) weak var controller: TextViewController?
+
+    func prepareCoordinator(controller: TextViewController) {
+        self.controller = controller
+    }
 
     func controllerDidAppear(controller: TextViewController) {
+        self.controller = controller
         Self.configure(controller.scrollView)
+    }
+
+    /// Replace the whole text, keeping the scroll offset. Returns false while
+    /// the editor has not been built yet.
+    @discardableResult
+    func replaceText(_ text: String) -> Bool {
+        guard let controller else { return false }
+        let clip = controller.scrollView.contentView
+        let origin = clip.bounds.origin
+        controller.textView.setText(text)
+        // setText lays out on its own schedule; restore once it has.
+        DispatchQueue.main.async {
+            let maxY = max(0, (controller.scrollView.documentView?.frame.height ?? 0) - clip.bounds.height)
+            clip.scroll(to: NSPoint(x: origin.x, y: min(origin.y, maxY)))
+            controller.scrollView.reflectScrolledClipView(clip)
+        }
+        return true
     }
 
     static func configure(_ scrollView: NSScrollView) {
@@ -87,6 +111,8 @@ final class CodeEditorView: NSView {
     private var hosting: NSHostingView<CodeEditorSwiftUIView>!
     private var previewView: PreviewWebView?
     private(set) var isPreviewing = false
+    private var watcher: FileChangeWatcher?
+    private var conflictBanner: ExternalChangeBanner?
 
     /// Invoked whenever the dirty state changes, so the host chrome can update.
     var onDirtyChange: ((Bool) -> Void)?
@@ -121,6 +147,7 @@ final class CodeEditorView: NSView {
         self.hosting = hosting
 
         observeDirty()
+        watcher = FileChangeWatcher(path: fileURL.path) { [weak self] in self?.fileChangedOnDisk() }
 
         // WebKit process launch used to sit on the open path via prewarm().
         // Defer until after the first frame so the editor can paint first.
@@ -156,12 +183,7 @@ final class CodeEditorView: NSView {
         isPreviewing.toggle()
         if isPreviewing {
             let preview = makePreviewView()
-            let directory = model.fileURL.deletingLastPathComponent()
-            if isHTML {
-                preview.renderHTML(model.text, baseURL: directory)
-            } else {
-                preview.render(markdown: model.text, baseDirectory: directory)
-            }
+            renderPreview(preview, keepScroll: false)
             preview.isHidden = false
             hosting.isHidden = true
         } else {
@@ -171,10 +193,95 @@ final class CodeEditorView: NSView {
         return isPreviewing
     }
 
+    private func renderPreview(_ preview: PreviewWebView, keepScroll: Bool) {
+        let directory = model.fileURL.deletingLastPathComponent()
+        if isHTML {
+            preview.renderHTML(model.text, baseURL: directory, keepScroll: keepScroll)
+        } else {
+            preview.render(markdown: model.text, baseDirectory: directory, keepScroll: keepScroll)
+        }
+    }
+
+    // MARK: - Changes on disk
+
+    /// The file changed on disk (an agent writing it, `git checkout`). Read it
+    /// off main, then follow `ExternalChange`: show it when the buffer holds
+    /// no edits, keeping the editor's and the preview's scroll offsets; ask
+    /// when it does.
+    private func fileChangedOnDisk() {
+        let path = model.fileURL.path
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let disk = FileContentView.readContent(at: path)
+            DispatchQueue.main.async { self?.apply(disk: disk) }
+        }
+    }
+
+    private func apply(disk: String?) {
+        switch ExternalChange.decide(disk: disk, buffer: model.text, saved: model.savedText) {
+        case .ignore:
+            break
+        case .adopt:
+            model.savedText = model.text
+            onDirtyChange?(false)
+            hideConflictBanner()
+        case .reload:
+            if let disk { showDiskText(disk) }
+        case .conflict:
+            showConflictBanner()
+        }
+    }
+
+    /// Put `disk` in the editor (and the preview, if it is showing) as the saved
+    /// text, keeping both scroll offsets.
+    private func showDiskText(_ disk: String) {
+        model.savedText = disk
+        model.text = disk
+        model.scrollCoordinator.replaceText(disk)
+        onDirtyChange?(false)
+        hideConflictBanner()
+        if isPreviewing, let previewView { renderPreview(previewView, keepScroll: true) }
+    }
+
+    private func showConflictBanner() {
+        guard conflictBanner == nil else { return }
+        let banner = ExternalChangeBanner(
+            onReload: { [weak self] in
+                guard let self else { return }
+                let path = self.model.fileURL.path
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let disk = FileContentView.readContent(at: path)
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        if let disk { self.showDiskText(disk) } else { self.hideConflictBanner() }
+                    }
+                }
+            },
+            onKeep: { [weak self] in self?.hideConflictBanner() })
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(banner, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            banner.topAnchor.constraint(equalTo: topAnchor),
+            banner.leadingAnchor.constraint(equalTo: leadingAnchor),
+            banner.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+        conflictBanner = banner
+    }
+
+    private func hideConflictBanner() {
+        conflictBanner?.removeFromSuperview()
+        conflictBanner = nil
+    }
+
+    var isShowingConflictBannerForTesting: Bool { conflictBanner != nil }
+    func applyDiskTextForTesting(_ disk: String?) { apply(disk: disk) }
+    var bufferTextForTesting: String { model.text }
+    func typeForTesting(_ text: String) { model.text = text }
+
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
     deinit {
         cancellable?.cancel()
+        watcher?.stop()
     }
 
     private var cancellable: AnyCancellableBox?
@@ -205,6 +312,60 @@ final class CodeEditorView: NSView {
             return false
         }
     }
+}
+
+// MARK: - Changed-on-disk banner
+
+/// Across the top of an editor whose file changed on disk while it held
+/// unsaved edits: reload the disk's version, or keep editing (a save then
+/// overwrites the disk).
+final class ExternalChangeBanner: NSView {
+    private let onReload: () -> Void
+    private let onKeep: () -> Void
+
+    init(onReload: @escaping () -> Void, onKeep: @escaping () -> Void) {
+        self.onReload = onReload
+        self.onKeep = onKeep
+        super.init(frame: .zero)
+        wantsLayer = true
+
+        let label = NSTextField(labelWithString: "This file changed on disk.")
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .labelColor
+        let reload = NSButton(title: "Reload", target: self, action: #selector(reloadTapped))
+        let keep = NSButton(title: "Keep My Edits", target: self, action: #selector(keepTapped))
+        for button in [reload, keep] {
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.font = .systemFont(ofSize: 11)
+        }
+        let stack = NSStackView(views: [label, NSView(), keep, reload])
+        stack.orientation = .horizontal
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+        setAccessibilityIdentifier("editor.external-change-banner")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = SemanticColors.attention.withAlphaComponent(0.18).cgColor
+        }
+    }
+
+    @objc private func reloadTapped() { onReload() }
+    @objc private func keepTapped() { onKeep() }
 }
 
 // MARK: - Loading placeholder
