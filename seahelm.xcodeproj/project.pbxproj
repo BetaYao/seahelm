@@ -364,6 +364,7 @@
 		CA52C85A65D3725357E07FDB /* PaneTitleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6192629F1DE8EF1143009BEE /* PaneTitleResolver.swift */; };
 		CB59F8C8679406EDFAC5F203 /* SeahelmdChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A66C9BD218DD45B791BE9D4 /* SeahelmdChannel.swift */; };
 		CBB8B4ECA774CBFE1EF1A070 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E004E8B96865467209D3F2D /* Theme.swift */; };
+		CD68B1C3BDD05694F2E0F51A /* WindowResizeResyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3692F5822CA65F9E7C420C1 /* WindowResizeResyncTests.swift */; };
 		CE2F476AAE8E4F1A63F506EC /* TelegramRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 588A37DABECC74B634A5E45A /* TelegramRulesView.swift */; };
 		CECDE06AB48C038C87A37076 /* SplitNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7FF8E6F2D2E5EC4963C627 /* SplitNode.swift */; };
 		D001B4255A3A312583AF966C /* SessionTitleLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFDE609B6678D11A208461F /* SessionTitleLookup.swift */; };
@@ -811,6 +812,7 @@
 		D0D0A2190D518447C76BAB37 /* GitDiffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiffTests.swift; sourceTree = "<group>"; };
 		D18A2E8441934257374C57B2 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
 		D241FA217901216F43E4BDBE /* DashboardFocusController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardFocusController.swift; sourceTree = "<group>"; };
+		D3692F5822CA65F9E7C420C1 /* WindowResizeResyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowResizeResyncTests.swift; sourceTree = "<group>"; };
 		D43DCAEEFB34DDC4D03467C3 /* CodeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeEditorView.swift; sourceTree = "<group>"; };
 		D4654BF3F481B948A5543307 /* TerminalHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalHeaderView.swift; sourceTree = "<group>"; };
 		D553E5D75113DBE6A01760E0 /* UnattendedDeleteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnattendedDeleteTests.swift; sourceTree = "<group>"; };
@@ -1423,6 +1425,7 @@
 				7C531E689A224A4F23A2C32F /* VolumeDropRecoveryTests.swift */,
 				D8B9C4CC61EFF38937C86A54 /* WebhookEventTests.swift */,
 				54322E1FB43B65F94D1AAC20 /* WebhookSuggestEventTests.swift */,
+				D3692F5822CA65F9E7C420C1 /* WindowResizeResyncTests.swift */,
 				28A21327F80611EDF5E558A2 /* WorkspaceManagerTests.swift */,
 				42CF4AFB6294DD79DF57446C /* WorktreeCleanupTests.swift */,
 				C0A028D76F177CA1C4379BC3 /* WorktreeCreatorEnvCopyTests.swift */,
@@ -1971,6 +1974,7 @@
 				BEE7582E24B886424C7B2C80 /* VolumeDropRecoveryTests.swift in Sources */,
 				731E2F002EF8752F8E5F5241 /* WebhookEventTests.swift in Sources */,
 				5F16B6F4A4D85F5E6F515A4E /* WebhookSuggestEventTests.swift in Sources */,
+				CD68B1C3BDD05694F2E0F51A /* WindowResizeResyncTests.swift in Sources */,
 				530E129D3A9FD6FF86F57C94 /* WorkspaceManagerTests.swift in Sources */,
 				06C7A49B721C8DDA99DF3A07 /* WorktreeCleanupTests.swift in Sources */,
 				7839409D46CC0B8E4810B869 /* WorktreeCreatorEnvCopyTests.swift in Sources */,
@@ -2307,7 +2311,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.80;
+				MARKETING_VERSION = 2.0.81;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",
@@ -2544,7 +2548,7 @@
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.0.80;
+				MARKETING_VERSION = 2.0.81;
 				OTHER_LDFLAGS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a",
 					"-lc++",

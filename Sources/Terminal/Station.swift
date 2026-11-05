@@ -143,6 +143,9 @@ class Station {
     /// - Parameter initialFrame: When set (split create), embed with frame layout at
     ///   this rect and size the PTY to it immediately — avoids Auto Layout fill of the
     ///   full container (which used to SIGWINCH the sibling pane mid-create).
+    /// An attach is on its way (`create`'s deferred path): no second one.
+    private(set) var surfaceCreationPending = false
+
     func create(
         in container: NSView,
         workingDirectory: String? = nil,
@@ -164,10 +167,20 @@ class Station {
                 // process calls, so defer to a background thread and attach on
                 // main.
                 if let resumeCmd = agentSessionRef?.resumeCommandLine(), let cwd = workingDirectory {
+                    // One attach at a time. Until it lands `surface` is nil, so a
+                    // second embed in that window (launch restores the selected
+                    // worktree more than once) used to attach again: two surfaces
+                    // on one session, the hidden one pinning the session to its
+                    // old, smaller size — a full-screen pane drew its old grid.
+                    guard !surfaceCreationPending else { return true }
+                    surfaceCreationPending = true
                     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                         SeahelmdSessionRecovery.seedSessionIfMissing(name: paneSessionKey, cwd: cwd, agentCommandLine: resumeCmd)
                         DispatchQueue.main.async {
                             guard let self else { return }
+                            self.surfaceCreationPending = false
+                            // Something else gave it a surface meanwhile.
+                            guard self.surface == nil else { completion?(); return }
                             self.attachSeahelmd(
                                 app: app,
                                 container: container,

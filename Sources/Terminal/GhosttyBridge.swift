@@ -62,6 +62,16 @@ class GhosttyBridge {
         suppressSurfaceGridResize = false
     }
 
+    /// The window changed size without a live drag (full screen, zoom): what a
+    /// drag's end does. Lift the sidebar-drag suppression, then size every
+    /// terminal to its view (`Station.syncSize` also lifts a split's freeze).
+    func resyncAfterWindowResize() {
+        clearSurfaceGridResizeSuppression()
+        for station in StationRegistry.shared.allStations() {
+            station.syncSize()
+        }
+    }
+
     func initialize() {
         guard !isInitialized else { return }
 

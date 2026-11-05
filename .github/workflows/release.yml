@@ -209,15 +209,131 @@ jobs:
             dist/appcast-${{ matrix.arch }}.xml
           if-no-files-found: error
 
+  # The GPUI client (clients/gpui) with the daemons it starts beside it:
+  # seahelmd, seahelm-core, seahelm-gateway, the seahelm CLI and seahelm-hook.
+  # The client finds them in its own directory, so each platform ships as one
+  # folder. Unsigned: these are for testing, and a failure here does not hold
+  # back the macOS app's release (see publish).
+  gpui:
+    name: GPUI ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runner: macos-14
+            zig_target: aarch64-macos
+            vt_slice: libghostty-vt
+            exe: ""
+          - name: windows-x86_64
+            runner: windows-latest
+            zig_target: x86_64-windows-msvc
+            vt_slice: libghostty-vt-windows-x86_64
+            exe: ".exe"
+          - name: linux-x86_64
+            runner: ubuntu-22.04
+            zig_target: x86_64-linux-gnu
+            vt_slice: libghostty-vt-linux-x86_64
+            exe: ""
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve Ghostty commit
+        id: vt
+        run: |
+          c=$(sed -n 's/^COMMIT="\${GHOSTTY_COMMIT:-\([0-9a-f]*\)}"$/\1/p' seahelmd/vendor/build-vt.sh)
+          [ -n "$c" ] || { echo "no pinned commit in build-vt.sh" >&2; exit 1; }
+          echo "commit=$c" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libghostty-vt
+        id: vtcache
+        uses: actions/cache@v5
+        with:
+          # keep-vt's default slice for the target: no KEEP_GHOSTTY_VT_DIR, so
+          # no Windows drive path goes through Git Bash.
+          path: seahelmd/vendor/${{ matrix.vt_slice }}
+          key: gpui-libghostty-vt-${{ matrix.name }}-${{ steps.vt.outputs.commit }}
+
+      - name: Install Zig
+        if: steps.vtcache.outputs.cache-hit != 'true'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build libghostty-vt
+        if: steps.vtcache.outputs.cache-hit != 'true'
+        run: seahelmd/vendor/build-vt.sh ${{ matrix.zig_target }} seahelmd/vendor/${{ matrix.vt_slice }}
+
+      # What GPUI needs on Linux to build: X11/Wayland, xkbcommon, Vulkan,
+      # fontconfig, ALSA.
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config clang cmake libasound2-dev libfontconfig-dev libfreetype-dev \
+            libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libvulkan-dev libssl-dev libzstd-dev
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: gpui-${{ matrix.name }}
+          workspaces: |
+            seahelmd
+            clients/gpui
+
+      - name: Build the daemons
+        working-directory: seahelmd
+        run: >
+          cargo build --release --locked
+          -p seahelmd -p seahelm-core -p seahelm-cli -p seahelm-gateway -p seahelm-core-hooks
+          --bin seahelmd --bin seahelm-core --bin seahelm --bin seahelm-gateway --bin seahelm-hook
+
+      - name: Build the client
+        working-directory: clients/gpui
+        run: cargo build --release --locked
+
+      - name: Package
+        run: |
+          name="seahelm-gpui-${{ matrix.name }}"
+          mkdir -p "dist/$name"
+          for bin in seahelmd seahelm-core seahelm seahelm-gateway seahelm-hook; do
+            cp "seahelmd/target/release/$bin${{ matrix.exe }}" "dist/$name/"
+          done
+          cp "clients/gpui/target/release/seahelm-gpui${{ matrix.exe }}" "dist/$name/"
+          cp clients/gpui/README.md "dist/$name/README.md"
+          cd dist
+          case "${{ runner.os }}" in
+            Windows) 7z a -tzip "$name.zip" "$name" >/dev/null; echo "file=dist/$name.zip" >> "$GITHUB_ENV" ;;
+            macOS)   ditto -c -k --keepParent "$name" "$name.zip"; echo "file=dist/$name.zip" >> "$GITHUB_ENV" ;;
+            *)       tar -czf "$name.tar.gz" "$name"; echo "file=dist/$name.tar.gz" >> "$GITHUB_ENV" ;;
+          esac
+          ls -la
+
+      - name: Upload package
+        uses: actions/upload-artifact@v6
+        with:
+          name: gpui-${{ matrix.name }}
+          path: ${{ env.file }}
+          if-no-files-found: error
+
   publish:
     name: Publish release
-    needs: build
+    needs: [build, gpui]
     runs-on: ubuntu-latest
     # Only publish for real tag pushes. On workflow_dispatch (or any branch run)
     # github.ref_name is the branch, and action-gh-release defaults tag_name to
     # it — which would mint a bogus "main" release. Dispatch still builds both
     # arches for verification; it just stops before publishing.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # The macOS app must have built; a GPUI platform that failed is left out.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' }}
 
     steps:
       - name: Download packaged apps
@@ -225,6 +341,14 @@ jobs:
         with:
           path: dist
           pattern: release-*
+          merge-multiple: true
+
+      - name: Download GPUI packages
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          path: dist
+          pattern: gpui-*
           merge-multiple: true
 
       - name: Create or update GitHub release
@@ -235,6 +359,8 @@ jobs:
             dist/seahelm-macos-x86_64.zip
             dist/appcast-arm64.xml
             dist/appcast-x86_64.xml
+            dist/seahelm-gpui-*
+          fail_on_unmatched_files: false
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
@@ -258,5 +384,13 @@ jobs:
                xattr -dr com.apple.quarantine /Applications/Seahelm.app
                ```
             4. Launch Seahelm
+
+            ### GPUI client (macOS, Windows, Linux) — preview
+
+            `seahelm-gpui-<platform>` holds the GPUI client and the daemons it starts
+            (seahelmd, seahelm-core, seahelm-gateway, seahelm, seahelm-hook). Unpack it
+            and run `seahelm-gpui` from that folder. These builds are unsigned: on macOS
+            run `xattr -dr com.apple.quarantine <folder>` first; on Windows SmartScreen
+            asks once.
 
             Artifacts are notarized when the required Apple signing secrets are configured in this repository; the quarantine step is only needed for un-notarized builds.
