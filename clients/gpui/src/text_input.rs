@@ -57,6 +57,9 @@ pub struct TextInput {
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
+    /// A secret (a bot token): drawn as one `MASK` per character, and never
+    /// copied out.
+    masked: bool,
 }
 
 impl EventEmitter<Submitted> for TextInput {}
@@ -79,7 +82,26 @@ impl TextInput {
             last_layout: None,
             last_bounds: None,
             is_selecting: false,
+            masked: false,
         }
+    }
+
+    /// Draw the text as bullets and refuse copy and cut, as a password
+    /// field does.
+    pub fn set_masked(&mut self, masked: bool, cx: &mut Context<Self>) {
+        if self.masked != masked {
+            self.masked = masked;
+            cx.notify();
+        }
+    }
+
+    /// A text offset as an offset into what is drawn, and back.
+    fn display_offset(&self, offset: usize) -> usize {
+        to_display(&self.content, offset, self.masked)
+    }
+
+    fn text_offset(&self, offset: usize) -> usize {
+        from_display(&self.content, offset, self.masked)
     }
 
     pub fn text(&self) -> &str {
@@ -188,13 +210,13 @@ impl TextInput {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.selected_range.is_empty() {
+        if !self.selected_range.is_empty() && !self.masked {
             cx.write_to_clipboard(ClipboardItem::new_string(self.content[self.selected_range.clone()].to_string()));
         }
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.selected_range.is_empty() {
+        if !self.selected_range.is_empty() && !self.masked {
             cx.write_to_clipboard(ClipboardItem::new_string(self.content[self.selected_range.clone()].to_string()));
             self.replace_text_in_range(None, "", window, cx)
         }
@@ -224,7 +246,7 @@ impl TextInput {
         if position.y > bounds.bottom() {
             return self.content.len();
         }
-        line.closest_index_for_x(position.x - bounds.left())
+        self.text_offset(line.closest_index_for_x(position.x - bounds.left()))
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -358,8 +380,8 @@ impl EntityInputHandler for TextInput {
         let last_layout = self.last_layout.as_ref()?;
         let range = self.range_from_utf16(&range_utf16);
         Some(Bounds::from_corners(
-            point(bounds.left() + last_layout.x_for_index(range.start), bounds.top()),
-            point(bounds.left() + last_layout.x_for_index(range.end), bounds.bottom()),
+            point(bounds.left() + last_layout.x_for_index(self.display_offset(range.start)), bounds.top()),
+            point(bounds.left() + last_layout.x_for_index(self.display_offset(range.end)), bounds.bottom()),
         ))
     }
 
@@ -367,7 +389,7 @@ impl EntityInputHandler for TextInput {
         let line_point = self.last_bounds?.localize(&point)?;
         let last_layout = self.last_layout.as_ref()?;
         let utf8_index = last_layout.index_for_x(point.x - line_point.x)?;
-        Some(self.offset_to_utf16(utf8_index))
+        Some(self.offset_to_utf16(self.text_offset(utf8_index)))
     }
 }
 
@@ -425,13 +447,20 @@ impl Element for TextElement {
     ) -> Self::PrepaintState {
         let input = self.input.read(cx);
         let content = input.content.clone();
-        let selected_range = input.selected_range.clone();
-        let cursor = input.cursor_offset();
+        // Offsets into what is drawn, which for a masked field is bullets.
+        let selected_range = input.display_offset(input.selected_range.start)..input.display_offset(input.selected_range.end);
+        let cursor = input.display_offset(input.cursor_offset());
+        let marked_range = input.marked_range.as_ref().map(|m| input.display_offset(m.start)..input.display_offset(m.end));
         let style = window.text_style();
-        let (display_text, text_color) =
-            if content.is_empty() { (input.placeholder.clone(), tokens::ink_faint().into()) } else { (content, style.color) };
+        let (display_text, text_color) = if content.is_empty() {
+            (input.placeholder.clone(), tokens::ink_faint().into())
+        } else if input.masked {
+            (masked_text(&content).into(), style.color)
+        } else {
+            (content, style.color)
+        };
         let run = TextRun { len: display_text.len(), font: style.font(), color: text_color, background_color: None, underline: None, strikethrough: None };
-        let runs = match input.marked_range.as_ref() {
+        let runs = match marked_range.as_ref() {
             Some(marked) => vec![
                 TextRun { len: marked.start, ..run.clone() },
                 TextRun {
@@ -536,9 +565,49 @@ impl Render for TextInput {
     }
 }
 
+/// What a masked field draws for each character.
+const MASK: char = '•';
+
+fn masked_text(content: &str) -> String {
+    std::iter::repeat_n(MASK, content.chars().count()).collect()
+}
+
+/// A byte offset into `content` as one into what is drawn for it.
+fn to_display(content: &str, offset: usize, masked: bool) -> usize {
+    if !masked {
+        return offset;
+    }
+    content[..offset.min(content.len())].chars().count() * MASK.len_utf8()
+}
+
+/// A byte offset into what is drawn as one into `content`, on a character
+/// boundary.
+fn from_display(content: &str, offset: usize, masked: bool) -> usize {
+    if !masked {
+        return offset;
+    }
+    let n = offset / MASK.len_utf8();
+    content.char_indices().nth(n).map(|(i, _)| i).unwrap_or(content.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn masked_offsets_map_through_the_bullets() {
+        // "a", "é" (2 bytes), "1".
+        let s = "aé1";
+        assert_eq!(masked_text(s), "•••");
+        assert_eq!([0, 1, 3, 4].map(|i| to_display(s, i, true)), [0, 3, 6, 9]);
+        assert_eq!([0, 3, 6, 9].map(|i| from_display(s, i, true)), [0, 1, 3, 4]);
+        // A point inside a bullet lands on that character's start.
+        assert_eq!(from_display(s, 4, true), 1);
+        assert_eq!(from_display(s, 99, true), s.len());
+        // Unmasked, offsets pass straight through.
+        assert_eq!(to_display(s, 3, false), 3);
+        assert_eq!(from_display(s, 3, false), 3);
+    }
 
     #[test]
     fn boundaries_step_whole_characters() {
