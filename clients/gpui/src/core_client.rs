@@ -62,8 +62,17 @@ pub fn call(method: &str, params: Value) -> Result<Value, String> {
 /// One newline-delimited JSON-RPC call on `path` (the core's socket, or
 /// seahelm-gateway's admin one): the result, or the error as text.
 pub fn call_at(path: &std::path::Path, method: &str, params: Value) -> Result<Value, String> {
+    call_at_for(path, method, params, Duration::from_secs(5))
+}
+
+/// `call`, for one that takes a while (`git worktree add`).
+pub fn call_slow(method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+    call_at_for(&socket(), method, params, timeout)
+}
+
+fn call_at_for(path: &std::path::Path, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
     let mut stream = crate::platform::connect(path).map_err(|e| e.to_string())?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
     let mut line = serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
         .map_err(|e| e.to_string())?;
     line.push(b'\n');
@@ -72,9 +81,24 @@ pub fn call_at(path: &std::path::Path, method: &str, params: Value) -> Result<Va
     BufReader::new(stream).read_line(&mut reply).map_err(|e| e.to_string())?;
     let mut v: Value = serde_json::from_str(&reply).map_err(|e| e.to_string())?;
     if let Some(e) = v.get("error") {
-        return Err(e.to_string());
+        // The message, as a person reads it; the whole error if it has none.
+        return Err(e.get("message").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| e.to_string()));
     }
     Ok(v.get_mut("result").map(Value::take).unwrap_or(Value::Null))
+}
+
+/// A new worktree off `repo`'s trunk, with `agent` (`claudeCode`, `codex`)
+/// started on `task` in a held session (`worktree.create`). Its path.
+pub fn create_worktree(repo: &str, task: &str, agent: &str) -> Result<String, String> {
+    let v = call_slow("worktree.create", json!({"repo_path": repo, "prompt": task, "agent_type": agent}), Duration::from_secs(120))?;
+    v.get("worktree_path").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "the core gave no path".into())
+}
+
+/// End the worktree's sessions and `git worktree remove` it; refused, with
+/// nothing ended, while it has uncommitted work. The branch stays
+/// (`worktree.delete`).
+pub fn delete_worktree(path: &str) -> Result<(), String> {
+    call_slow("worktree.delete", json!({"worktree_path": path}), Duration::from_secs(60)).map(|_| ())
 }
 
 /// What the core says about one worktree.

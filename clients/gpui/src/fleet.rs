@@ -26,11 +26,16 @@ pub struct Item {
     pub last_activity_at: Option<f64>,
     pub running_since: Option<f64>,
     pub unseen: bool,
+    /// The project's main checkout, which is never deleted.
+    pub is_main: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Group {
     pub title: String,
+    /// The project's main checkout, for a group that is one project
+    /// (grouped by repository); empty otherwise.
+    pub path: String,
     pub items: Vec<Item>,
 }
 
@@ -176,6 +181,13 @@ pub fn add_project(path: &str) -> Result<(), String> {
     std::fs::write(projects_file(), text).map_err(|e| e.to_string())
 }
 
+/// Take a project off the list (its worktrees stay on disk).
+pub fn remove_project(path: &str) -> Result<(), String> {
+    let list: Vec<String> = projects().into_iter().filter(|p| p != path).collect();
+    let text = serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?;
+    std::fs::write(projects_file(), text).map_err(|e| e.to_string())
+}
+
 /// `git worktree list --porcelain`: each worktree's path and branch.
 pub fn parse_worktrees(porcelain: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
@@ -226,11 +238,12 @@ pub fn read() -> Snapshot {
                 branch: branch.clone(),
                 repository: name.clone(),
                 worktree_path: path,
+                is_main: i == 0,
                 ..Item::default()
             })
             .collect();
         let items = by_creation(items);
-        groups.push(Group { title: name, items });
+        groups.push(Group { title: name, path: project.clone(), items });
     }
     Snapshot { groups, error: None }
 }
@@ -269,7 +282,7 @@ pub fn regroup(groups: &[Group], mode: Grouping, now: f64) -> Vec<Group> {
             },
         }
     };
-    let mut out: Vec<Group> = titles.iter().map(|t| Group { title: t.to_string(), items: Vec::new() }).collect();
+    let mut out: Vec<Group> = titles.iter().map(|t| Group { title: t.to_string(), path: String::new(), items: Vec::new() }).collect();
     for item in items {
         let b = bucket(&item);
         out[b].items.push(item);
@@ -360,6 +373,7 @@ mod tests {
     #[test]
     fn grouping_by_status_follows_the_apps_order() {
         let groups = vec![Group {
+            path: String::new(),
             title: "p".into(),
             items: vec![
                 item("idle", "Idle", false, Some(10.0)),
@@ -389,6 +403,7 @@ mod tests {
     fn grouping_by_activity_buckets_by_age() {
         let now = 10.0 * 86400.0;
         let groups = vec![Group {
+            path: String::new(),
             title: "p".into(),
             items: vec![
                 item("hour", "", false, Some(now - 60.0)),

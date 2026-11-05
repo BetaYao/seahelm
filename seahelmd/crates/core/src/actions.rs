@@ -369,6 +369,16 @@ pub fn worktree_delete(core: &Core, p: &Value) -> RpcResult {
     if same_dir(&main, dir) {
         return Err(RpcError::invalid_params("the main checkout is not deleted"));
     }
+    // `git worktree remove` refuses a worktree with uncommitted work; ask
+    // first, so a refusal leaves its sessions (and the agents in them)
+    // running instead of ending them for nothing.
+    let dirty = git(dir, &["status", "--porcelain"]).map(|s| s.lines().filter(|l| !l.trim().is_empty()).count()).unwrap_or(0);
+    if dirty > 0 {
+        return Err(RpcError::invalid_params(format!(
+            "{dirty} uncommitted change{} in {path}: commit or discard them first",
+            if dirty == 1 { "" } else { "s" }
+        )));
+    }
     let mut sessions = core.panes_in_worktree(&path);
     let own = gpui_session_name(&path);
     if !sessions.contains(&own) {
