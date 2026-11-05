@@ -48,6 +48,7 @@ pub struct Inputs {
     pub later: usize,
     /// Worktrees the sweep found at `suggest` since the last brief.
     pub suggest: Vec<String>,
+    pub tasks: Vec<String>,
     /// Habit level changes since the last brief.
     pub notes: Vec<Text>,
 }
@@ -207,7 +208,7 @@ pub fn compose(i: &Inputs) -> Option<String> {
             Lang::Zh => format!("{expired} 张卡片没人回，已撤下"),
         });
     }
-    if done.is_empty() && i.waiting.is_empty() && i.suggest.is_empty() && notes.is_empty() {
+    if done.is_empty() && i.waiting.is_empty() && i.suggest.is_empty() && i.tasks.is_empty() && notes.is_empty() {
         return None;
     }
     let title = match (i.away, i.fallback) {
@@ -237,6 +238,7 @@ pub fn compose(i: &Inputs) -> Option<String> {
     if !i.suggest.is_empty() {
         out.push(format!("{}{}", l.pick("Could go (no card): ", "可以清理（不发卡）："), listed(&i.suggest, l)));
     }
+    if !i.tasks.is_empty() { out.push(format!("{}{}", l.pick("Could do: ", "可以做："), listed(&i.tasks, l))); }
     if !notes.is_empty() {
         out.push(format!("{}{}", l.pick("Notes: ", "备注："), notes.join(" · ")));
     }
@@ -423,7 +425,7 @@ impl FirstMate {
     }
 
     fn is_first_mates(&self, payload: &str) -> bool {
-        self.approvals.contains_key(payload) || self.proposals.contains_key(payload) || self.is_habit_card(payload)
+        self.task_cards.contains_key(payload) || self.approvals.contains_key(payload) || self.proposals.contains_key(payload) || self.is_habit_card(payload)
     }
 
     pub(super) fn send_brief(&mut self, due: Due, channel: BriefChannel, away: Option<f64>, now: f64) {
@@ -431,6 +433,7 @@ impl FirstMate {
         let since = if self.budget.last_brief_at > 0.0 { self.budget.last_brief_at } else { now - 86_400.0 };
         let since_iso = iso8601(since);
         let entries: Vec<Entry> = self.audit.recent(5000).into_iter().filter(|e| e.at > since_iso).collect();
+        let tasks = self.task_brief(now);
         let inputs = Inputs {
             lang: self.config.language,
             away,
@@ -439,6 +442,7 @@ impl FirstMate {
             waiting: self.waiting_lines(),
             later: self.held.len().saturating_sub(budget::tuning::BRIEF_CARDS),
             suggest: self.budget.suggest.clone(),
+            tasks,
             notes: self.budget.notes.clone(),
         };
         let Some(text) = compose(&inputs) else {
@@ -483,6 +487,7 @@ impl FirstMate {
         for note in notes { self.log(Entry::new(now, "tuning", note.en.clone())); self.budget.note(note); }
         self.save_budget();
         self.core.drop_card_payload(payload);
+        if self.task_cards.contains_key(payload) { self.expire_task(payload, now); return; }
         let today = super::clock::Local::at(now).day_key();
         let s = |p: &Value, k: &str| p.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
         let mut habits: Vec<(String, String)> = Vec::new();
@@ -627,6 +632,7 @@ mod tests {
             waiting: vec!["these 2 worktrees look done:".into(), "First Mate asks: delete x".into()],
             later: 1,
             suggest: vec!["spike-x".into()],
+            tasks: vec![],
             notes: vec![Text::new("Habit closed-idle down from ask to suggest: two of its cards went unanswered", "习惯 closed-idle 从 ask 降到 suggest：它的卡片连续两次没人回")],
         }
     }

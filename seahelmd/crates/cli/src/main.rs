@@ -42,6 +42,17 @@ fn main() {
     cli.run(group, rest);
 }
 
+fn task_source_params(raw:&str,repo:&str,read:impl FnOnce()->Result<String,String>)->Result<Value,String>{
+    let mut source:Value=serde_json::from_str(raw).map_err(|_|"invalid source JSON")?;
+    let kind=source["kind"].as_str().ok_or("source kind required")?;
+    if !["github","jira-cloud","jira-server"].contains(&kind){return Err("invalid source kind".into())}
+    let jira=kind!="github";
+    source["repo"]=json!(repo);
+    let mut params=json!({"repo":repo,"source":source});
+    if jira{params["credential"]=serde_json::from_str(&read()?).map_err(|_|"invalid credential JSON")?;}
+    Ok(params)
+}
+
 struct Cli {
     note: Option<String>,
 }
@@ -79,6 +90,7 @@ impl Cli {
             "wait" => self.wait(a),
             "worktree" => self.worktree(a),
             "habit" => self.habit(a),
+            "task-source" => self.task_source(a),
             "pane" => self.pane(a),
             other => die(&format!("unknown command: {other}"), 2),
         }
@@ -154,6 +166,21 @@ impl Cli {
     /// First Mate's habits: `seahelm habit list [--repo <path>] [--json]`
     /// (read-only), and `seahelm habit inventory [--preview] [--json]` — take
     /// the inventory again (one card per group; `--preview` only shows the groups).
+    fn task_source(&self, a: &[String]) {
+        let sub = first(a).unwrap_or("");
+        if !["add", "list", "remove", "test"].contains(&sub) { die("usage: seahelm task-source <add|list|remove|test> --repo PATH [--id ID] [--json SOURCE]; add reads credential JSON from stdin for Jira", 2); }
+        let repo = opt(a, "--repo").map(|r| absolute(&r)).unwrap_or_default();
+        let mut params = json!({"repo":repo,"id":opt(a,"--id")});
+        if sub == "add" {
+            let raw=opt(a,"--json").unwrap_or_else(||die("--json SOURCE required",2));
+            params=task_source_params(&raw,&repo,||{
+                use std::io::Read;
+                let mut text=String::new();std::io::stdin().read_to_string(&mut text).map_err(|_|"cannot read credential JSON".to_string())?;Ok(text)
+            }).unwrap_or_else(|e|die(&e,2));
+        }
+        pretty(&self.call(&format!("task-source.{sub}"),params,120.0,&[]));
+    }
+
     fn habit(&self, a: &[String]) {
         match first(a) {
             Some("list") => {
@@ -438,7 +465,7 @@ fn route(method: &str) -> &'static [Side] {
         }
         "worktree.create" | "worktree.delete" | "pane.close" => &[Side::App, Side::Core],
         // First Mate's habits live in the core alone.
-        "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
+        "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" | "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
         _ => &[Side::App],
     }
 }
@@ -637,6 +664,13 @@ impl TakeOrArray for Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_source_validates_kind_before_reading_stdin(){
+        for raw in ["{}",r#"{"kind":"unknown"}"#,"null"]{assert!(task_source_params(raw,"repo",||panic!("must not read stdin")).is_err());}
+        assert!(task_source_params(r#"{"kind":"github"}"#,"repo",||panic!("GitHub needs no credential")).is_ok());
+        assert!(task_source_params(r#"{"kind":"jira-cloud"}"#,"repo",||Ok(r#"{"token":"fake"}"#.into())).is_ok());
+    }
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()

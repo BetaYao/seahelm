@@ -416,6 +416,7 @@ pub fn removed_record(path: &str, known: &Known, by: By, fields: Map<String, Val
 
 /// What the rest of the core tells the observer.
 pub enum Msg {
+    Task { record: Record, at: f64 },
     /// A core-performed `worktree.create` / `worktree.delete` succeeded.
     /// `how`: `auto`, `approved` or `picked` for First Mate's.
     Performed { method: String, params: Value, result: Value, by: By, how: Option<String>, card: Option<String>, pane: Option<String> },
@@ -510,6 +511,7 @@ impl Observer {
 
     fn handle(&mut self, m: Msg, now: f64) {
         match m {
+            Msg::Task { record, at } => self.write(at, record),
             Msg::Performed { method, params, result, by, how, card, pane } => {
                 let mut fields = Map::new();
                 if let Some(h) = how {

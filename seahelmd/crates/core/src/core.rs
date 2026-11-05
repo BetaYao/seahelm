@@ -542,6 +542,7 @@ impl Core {
             "pane.read" | "pane.run" | "pane.send_text" | "pane.send_keys" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
+            "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" => first_mate::task_sources::rpc(method, &p),
             "habits.list" => Ok(first_mate::learning::rpc(method, &p).unwrap_or_default()),
             // When the user is there, as the brief's timing reads it (read-only).
             "presence.state" => Ok(self.presence().to_json(now, crate::usage::local_offset(now))),
@@ -1424,7 +1425,7 @@ impl Dispatch for Core {
 /// proposals and habit cards): a card raised over the socket may not carry
 /// one, or the user's answer to it would reach First Mate as the answer to
 /// the real card.
-const CORE_PAYLOADS: [&str; 3] = ["habit.", "autopilot-", "proposal-"];
+const CORE_PAYLOADS: [&str; 4] = ["habit.", "autopilot-", "proposal-", "task-start-"];
 
 impl Core {
     /// A socket call, after the peer check for the guarded methods. The
@@ -1458,6 +1459,10 @@ impl Core {
             }
             Verdict::Client { .. } | Verdict::Outside => {}
             Verdict::InPane(why) | Verdict::Unknown(why) => {
+                if method.starts_with("task-source.") {
+                    self.security(Text::new("Refused task source access from a pane or unidentified caller", "已拒绝窗格内进程或身份未知的调用方访问任务来源"), true);
+                    return Err(RpcError::forbidden(first_mate::UserConfig::load().language.pick("Only the user may manage task sources", "只有你本人能管理任务来源")));
+                }
                 if crate::peer::starts_inventory(method, p) {
                     self.security(
                         Text::new(
@@ -2254,6 +2259,15 @@ mod peer_gate_tests {
 
     fn audit(dir: &std::path::Path) -> String {
         std::fs::read_to_string(dir.join("audit.jsonl")).unwrap_or_default()
+    }
+
+    #[test]
+    fn task_source_commands_refuse_agents_and_unidentified_peers() {
+        let tmp=tempfile::tempdir().unwrap();let core=Core::for_test(tmp.path());
+        for method in ["task-source.add","task-source.list","task-source.remove","task-source.test"] {
+            assert_eq!(value(core.clone().call_checked(method,json!({}),Some(1),agent)).unwrap_err().code,-32003);
+            assert_eq!(value(core.clone().call_checked(method,json!({}),None,||Verdict::Unknown("unreadable".into()))).unwrap_err().code,-32003);
+        }
     }
 
     #[test]

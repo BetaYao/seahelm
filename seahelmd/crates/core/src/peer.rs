@@ -227,7 +227,7 @@ pub fn guarded(method: &str) -> bool {
 /// inventory (`habits.inventory` without `preview`), which puts cards in
 /// front of the user in First Mate's name. The read-only preview is not.
 pub fn guarded_call(method: &str, params: &serde_json::Value) -> bool {
-    guarded(method) || starts_inventory(method, params)
+    method.starts_with("task-source.") || guarded(method) || starts_inventory(method, params)
 }
 
 pub fn starts_inventory(method: &str, params: &serde_json::Value) -> bool {

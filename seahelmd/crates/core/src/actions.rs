@@ -257,6 +257,27 @@ fn shell_quote(s: &str) -> String {
 /// in a seahelmd session the core watches. The repo's `.seahelm/setup.sh`
 /// runs first, and a failed setup leaves the shell with its error.
 pub fn worktree_create(core: &Core, p: &Value) -> RpcResult {
+    worktree_create_with_hint(core, p, crate::first_mate::policy::is_first_mate(p))
+}
+
+/// Only First Mate's approved execution path calls this entry point.
+pub(crate) fn worktree_create_first_mate(core: &Core, p: &Value) -> RpcResult {
+    worktree_create_with_hint(core, p, true)
+}
+
+fn creation_branch(task: &str, p: &Value, existing: &[String], allow_hint: bool) -> String {
+    let hint = s(p, "branch_hint");
+    branch_name(
+        if allow_hint && !hint.is_empty() {
+            &hint
+        } else {
+            task
+        },
+        existing,
+    )
+}
+
+fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcResult {
     let repo = PathBuf::from(s(p, "repo_path"));
     let task = s(p, "prompt");
     if repo.as_os_str().is_empty() || task.is_empty() {
@@ -276,7 +297,7 @@ pub fn worktree_create(core: &Core, p: &Value) -> RpcResult {
         .filter(|b| !b.is_empty() && !b.contains("HEAD"))
         .collect();
     let base = ["main", "master"].into_iter().find(|b| branches.iter().any(|x| x == b)).map(str::to_string).or_else(|| branches.first().cloned()).unwrap_or_else(|| "main".into());
-    let branch = branch_name(&task, &branches);
+    let branch = creation_branch(&task, p, &branches, allow_hint);
     let name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
     let path = repo.parent().unwrap_or(&repo).join(format!("{name}-worktrees")).join(&branch);
     if path.exists() {
@@ -412,6 +433,19 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_hints_require_first_mate_execution() {
+        let params = json!({"branch_hint":"12 login","_task":{"key":"#12"}});
+        assert_eq!(
+            creation_branch("ordinary task", &params, &[], false),
+            branch_name("ordinary task", &[])
+        );
+        assert_eq!(
+            creation_branch("ordinary task", &params, &[], true),
+            branch_name("12 login", &[])
+        );
+    }
 
     #[test]
     fn branch_names_from_tasks() {

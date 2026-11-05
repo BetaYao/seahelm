@@ -31,6 +31,7 @@ pub mod policy;
 pub mod presence;
 pub mod rules;
 pub mod sweep;
+pub mod task_sources;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -108,6 +109,9 @@ pub enum Gate {
 }
 
 pub enum Msg {
+    TaskUnavailable { task: task_sources::Task },
+    TasksFetched { results: Vec<task_sources::Fetched> },
+    TaskReady { task: task_sources::Task, card: String },
     Gate { action: Action, method: String, params: Value, reply: Sender<Gate> },
     HabitPropose { habit: Value, reply: Sender<RpcResult> },
     Propose { summary: String, options: Vec<Value>, reply: Sender<RpcResult> },
@@ -213,6 +217,10 @@ struct ProposalOption {
 }
 
 struct FirstMate {
+    tasks: task_sources::State,
+    tasks_running: bool,
+    task_cards: HashMap<String, Vec<task_sources::Task>>,
+    task_in_flight: std::collections::BTreeSet<String>,
     core: Arc<Core>,
     tx: Sender<Msg>,
     dir: PathBuf,
@@ -288,6 +296,10 @@ impl FirstMate {
         let audit = Audit::open(dir.join("audit.jsonl"));
         let latest = audit.recent(50).into_iter().rev().find(Entry::is_notable).map(|e| (e.headline(), e.at));
         FirstMate {
+            tasks: task_sources::State::load(&dir),
+            tasks_running: false,
+            task_cards: HashMap::new(),
+            task_in_flight: std::collections::BTreeSet::new(),
             core,
             tx,
             ledger: Ledger::open(dir.join("state.json")),
@@ -356,6 +368,9 @@ impl FirstMate {
     fn handle(&mut self, m: Msg) {
         let now = seahelm_core_types::now();
         match m {
+            Msg::TaskUnavailable { task } => self.task_unavailable(&task),
+            Msg::TasksFetched { results } => self.tasks_fetched(results),
+            Msg::TaskReady { task, card } => self.start_task_ready(task, card),
             Msg::Gate { action, method, params, reply } => {
                 let _ = reply.send(self.gate(action, &method, &params, now));
             }
@@ -383,6 +398,9 @@ impl FirstMate {
             Msg::Answered { payload, option, via } => self.answered(&payload, option.as_deref(), via, now),
             Msg::DidRun { method, result } => self.did_run(&method, &result),
             Msg::Ran { action, what, level, params, result } => {
+                if let Some(task) = params.get("_task").and_then(|v| serde_json::from_value(v.clone()).ok()) {
+                    self.task_finished(&task, result.is_ok(), now);
+                }
                 let outcome = match &result {
                     Ok(r) => {
                         if let Some(m) = r.get("_method").and_then(Value::as_str) {
@@ -457,6 +475,7 @@ impl FirstMate {
         self.maybe_sweep(now);
         self.check_hand_edits(now);
         self.expire_cards(now);
+        self.poll_tasks(now);
         self.maybe_brief(now);
         self.release_held(now);
         if self.awaiting_since.is_some_and(|t| t.elapsed() > Duration::from_secs(120)) {
@@ -489,6 +508,8 @@ impl FirstMate {
         for id in ids {
             self.core.drop_card_payload(&id);
         }
+        for id in std::mem::take(&mut self.task_cards).keys() { self.core.drop_card_payload(id); }
+        self.task_in_flight.clear();
         self.approvals.clear();
         self.proposals.clear();
         self.habit_proposals.clear();
@@ -925,6 +946,7 @@ impl FirstMate {
             }
             return;
         }
+        if self.answer_task(payload, option, now) { return; }
         if self.answered_habit(payload, option, via.clone(), now) {
             return;
         }
@@ -1037,7 +1059,11 @@ impl FirstMate {
         let tx = self.tx.clone();
         let card = card.to_string();
         std::thread::spawn(move || {
-            let result = core.act(&method, &policy::as_user(&params));
+            let result = if method == "worktree.create" {
+                crate::actions::worktree_create_first_mate(&core, &policy::as_user(&params))
+            } else {
+                core.act(&method, &policy::as_user(&params))
+            };
             if let Ok(r) = &result {
                 core.note_performed(&method, &params, r, observations::By::FirstMate, Some(level), Some(&card), None);
             }
