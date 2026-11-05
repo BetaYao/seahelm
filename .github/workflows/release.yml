@@ -211,13 +211,17 @@ jobs:
 
   # The GPUI client (clients/gpui) with the daemons it starts beside it:
   # seahelmd, seahelm-core, seahelm-gateway, the seahelm CLI and seahelm-hook.
-  # The client finds them in its own directory, so each platform ships as one
-  # folder. Unsigned: these are for testing, and a failure here does not hold
-  # back the macOS app's release (see publish).
+  # The client finds them in its own directory. macOS ships "Seahelm GPUI.app"
+  # (all of them in Contents/MacOS), signed and notarized; Windows and Linux
+  # ship one unsigned folder. A failure here does not hold back the macOS
+  # app's release (see publish).
   gpui:
     name: GPUI ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      HAS_CERTIFICATE_SECRETS: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_DEVELOPER_IDENTITY != '' }}
+      HAS_NOTARY_SECRETS: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -300,7 +304,50 @@ jobs:
         working-directory: clients/gpui
         run: cargo build --release --locked
 
+      # macOS: "Seahelm GPUI.app", signed and notarized like the AppKit app.
+      - name: Import Developer ID certificate
+        if: ${{ runner.os == 'macOS' && env.HAS_CERTIFICATE_SECRETS == 'true' }}
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/seahelm-signing.keychain-db"
+          openssl base64 -d -A -out "$CERT_PATH" <<< "$APPLE_CERTIFICATE_P12"
+          security create-keychain -p "" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+      - name: Configure notarytool credentials
+        if: ${{ runner.os == 'macOS' && env.HAS_NOTARY_SECRETS == 'true' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool store-credentials "seahelm-notarytool" \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID"
+
+      - name: Package the macOS app
+        if: runner.os == 'macOS'
+        env:
+          DAEMON_DIR: seahelmd/target/release
+          GPUI_BIN: clients/gpui/target/release/seahelm-gpui
+          OUTPUT_PATH: dist/seahelm-gpui-${{ matrix.name }}.zip
+          RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          SIGN_IDENTITY: ${{ env.HAS_CERTIFICATE_SECRETS == 'true' && secrets.APPLE_DEVELOPER_IDENTITY || '' }}
+          ENABLE_NOTARIZATION: ${{ env.HAS_CERTIFICATE_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && '1' || '0' }}
+          NOTARYTOOL_PROFILE: seahelm-notarytool
+        run: |
+          scripts/package_gpui_macos.sh
+          echo "file=$OUTPUT_PATH" >> "$GITHUB_ENV"
+
       - name: Package
+        if: runner.os != 'macOS'
         run: |
           name="seahelm-gpui-${{ matrix.name }}"
           mkdir -p "dist/$name"
@@ -309,19 +356,50 @@ jobs:
           done
           cp "clients/gpui/target/release/seahelm-gpui${{ matrix.exe }}" "dist/$name/"
           cp clients/gpui/README.md "dist/$name/README.md"
+          # Linux keeps the release profile's debug info inside the binaries
+          # (macOS and Windows keep it beside them): 70 MB of a tarball that
+          # needs a fraction of that to run.
+          if [ "${{ runner.os }}" = Linux ]; then
+            strip --strip-debug dist/$name/seahelm*
+            du -sh "dist/$name"
+          fi
           cd dist
           case "${{ runner.os }}" in
             Windows) 7z a -tzip "$name.zip" "$name" >/dev/null; echo "file=dist/$name.zip" >> "$GITHUB_ENV" ;;
-            macOS)   ditto -c -k --keepParent "$name" "$name.zip"; echo "file=dist/$name.zip" >> "$GITHUB_ENV" ;;
             *)       tar -czf "$name.tar.gz" "$name"; echo "file=dist/$name.tar.gz" >> "$GITHUB_ENV" ;;
           esac
           ls -la
+
+      # Windows: also a setup.exe (Inno Setup, per-user, Start menu entry,
+      # uninstaller) built from the same folder.
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        env:
+          # Git Bash rewrites arguments that start with "/" as paths, which
+          # turns ISCC's /D switches into extra script names.
+          MSYS_NO_PATHCONV: "1"
+        run: |
+          choco install innosetup -y --no-progress
+          version="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}"
+          version="${version#v}"
+          [ -n "$version" ] || version="$(sed -n 's/.*MARKETING_VERSION: "\(.*\)"/\1/p' project.yml | head -1)"
+          src="$(cygpath -w "$PWD/dist/seahelm-gpui-${{ matrix.name }}")"
+          out="$(cygpath -w "$PWD/dist")"
+          cd clients/gpui/packaging/windows
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+            "/DSourceDir=$src" "/DAppVersion=$version" "/DOutputDir=$out" \
+            "/DOutputBaseName=seahelm-gpui-${{ matrix.name }}-setup" seahelm-gpui.iss
+          echo "setup=dist/seahelm-gpui-${{ matrix.name }}-setup.exe" >> "$GITHUB_ENV"
+          ls -la "$GITHUB_WORKSPACE/dist"
 
       - name: Upload package
         uses: actions/upload-artifact@v6
         with:
           name: gpui-${{ matrix.name }}
-          path: ${{ env.file }}
+          # No setup outside Windows: the package twice is the same file once.
+          path: |
+            ${{ env.file }}
+            ${{ env.setup || env.file }}
           if-no-files-found: error
 
   publish:
@@ -387,10 +465,14 @@ jobs:
 
             ### GPUI client (macOS, Windows, Linux) — preview
 
-            `seahelm-gpui-<platform>` holds the GPUI client and the daemons it starts
-            (seahelmd, seahelm-core, seahelm-gateway, seahelm, seahelm-hook). Unpack it
-            and run `seahelm-gpui` from that folder. These builds are unsigned: on macOS
-            run `xattr -dr com.apple.quarantine <folder>` first; on Windows SmartScreen
-            asks once.
+            - macOS: `seahelm-gpui-macos-arm64.zip` holds `Seahelm GPUI.app`. Unpack it,
+              drag it into Applications, open it.
+            - Windows: run `seahelm-gpui-windows-x86_64-setup.exe` (installs for you only,
+              no administrator rights; Start menu entry and uninstaller). Unsigned, so
+              SmartScreen asks once ("More info" → "Run anyway"). The `.zip` beside it is
+              the same files without an installer.
+            - Linux: `seahelm-gpui-linux-x86_64.tar.gz` is a folder with the GPUI client and
+              the daemons it starts (seahelmd, seahelm-core, seahelm-gateway, seahelm,
+              seahelm-hook). Unpack it and run `seahelm-gpui` from that folder.
 
             Artifacts are notarized when the required Apple signing secrets are configured in this repository; the quarantine step is only needed for un-notarized builds.

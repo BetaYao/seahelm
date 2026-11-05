@@ -5,6 +5,12 @@
 //! Attaches to (creating if needed) one seahelmd session and draws it.
 //! `SEAHELM_GPUI_STATS=1` prints frame times and input throughput.
 
+// A release build on Windows is a window, not a console program: started from
+// the Start menu it would otherwise open a console beside itself. Its child
+// processes are started with `platform::command`, which keeps them from
+// opening consoles of their own.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod assets;
 mod core_client;
 mod fleet;

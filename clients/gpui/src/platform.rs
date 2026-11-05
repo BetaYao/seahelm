@@ -59,6 +59,22 @@ pub fn core_socket() -> PathBuf {
 /// A companion binary (`seahelmd`, `seahelm-core`): `$<env>`, else the one
 /// beside this executable (how a packaged client ships them), else the
 /// one cargo built in this checkout, else whatever PATH finds.
+/// A command that opens no console window on Windows. The release client has
+/// no console (`windows_subsystem = "windows"`), so every console program it
+/// runs — seahelm-core, seahelmd, git — would otherwise flash a window of its
+/// own. Elsewhere, a plain `Command`.
+pub fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut cmd = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 pub fn tool(name: &str, env: &str) -> PathBuf {
     if let Some(p) = std::env::var_os(env).filter(|p| !p.is_empty()) {
         return PathBuf::from(p);

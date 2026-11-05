@@ -7,7 +7,6 @@
 //! done here, from that. Git stats are worked out on a thread of their own
 //! from each worktree's checkout.
 
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -309,7 +308,7 @@ fn by_creation(mut items: Vec<Item>) -> Vec<Item> {
 }
 
 fn git(path: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new("git").arg("-C").arg(path).args(args).output().ok()?;
+    let out = crate::platform::command("git").arg("-C").arg(path).args(args).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
