@@ -20,6 +20,7 @@ pub trait Host {
     fn transcript(&self, pane_key: &str) -> Option<String>;
     fn messages(&self, pane_key: &str) -> Vec<Message>;
     fn activity(&self, pane_key: &str) -> Vec<String>;
+    fn project_memory(&self, _repo: &str, _verb: &str) -> Result<String,String> { Err("Project memory unavailable".into()) }
     fn first_mate_available(&self) -> bool;
     fn say_to_first_mate(&self, text: &str) -> bool;
 }
@@ -160,6 +161,7 @@ pub fn run(text: &str, ctx: &Context, host: &dyn Host) -> Outcome {
         Err(e) => return Outcome::just(Reply::err(format::describe(&e))),
     };
     match command {
+        Command::Memory {verb,repo} => Outcome::just(match host.project_memory(&repo.path,&verb) { Ok(text)=>Reply::ok(text), Err(e)=>Reply::err(e) }),
         Command::Say(text) => say(&text, &index, ctx, host),
         Command::Go(None) => Outcome::just(Reply::ok(match &ctx.binding {
             Some(Binding::FirstMate) => "Talking to First Mate.".to_string(),
@@ -323,6 +325,7 @@ mod tests {
         fn activity(&self, _: &str) -> Vec<String> {
             vec![]
         }
+        fn project_memory(&self, repo: &str, verb: &str) -> Result<String,String> { Ok(format!("{verb} {repo}")) }
         fn first_mate_available(&self) -> bool {
             self.mate_on
         }
@@ -397,6 +400,19 @@ mod tests {
         let o = run("/new add a readme", &chat(None), &host);
         assert_eq!(o.reply.text, "Started #10 seahelm/task/x. Talking to it from now on.");
         assert!(matches!(o.binding, Some(Binding::Pane { ref key, .. }) if key == "s-new"));
+    }
+
+    #[test]
+    fn memory_runs_from_the_island_or_telegram_without_a_model_turn() {
+        let host=Fake::default();
+        for ctx in [chat(None),on("s-b")] {
+            for verb in ["show","undo"] {
+                let out=run(&format!("/memory {verb} @seahelm"),&ctx,&host);
+                assert!(!out.reply.is_error,"{}",out.reply.text); assert!(out.reply.text.starts_with(verb));
+                assert!(out.first_mate.is_none()); assert!(host.mate.borrow().is_empty());
+            }
+        }
+        assert!(run("/memory confirm @seahelm",&chat(None),&host).reply.is_error);
     }
 
     #[test]

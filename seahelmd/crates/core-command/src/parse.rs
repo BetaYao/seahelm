@@ -17,6 +17,7 @@ pub enum Command {
     Go(Option<Go>),
     New { task: String, repo: Option<RepoRef> },
     Status,
+    Memory { verb: String, repo: RepoRef },
     /// None: the pane the conversation talks to.
     Show(Option<PaneRef>),
     Help(Option<String>),
@@ -80,6 +81,11 @@ fn parse_verb(verb: &str, rest: &str, index: &FleetIndex) -> Result<Command, Err
             Some(t) => go_target(&t, index).map(|g| Command::Go(Some(g))),
         },
         "new" => parse_new(rest, index),
+        "memory" => {
+            let args: Vec<_> = rest.split_whitespace().collect();
+            if args.len() != 2 || !matches!(args[0], "show" | "undo") { return Err(Error::BadArgument { verb:"memory", token:rest.into() }); }
+            Ok(Command::Memory { verb:args[0].into(), repo:repo_ref(args[1],index)? })
+        },
         "status" => match first {
             None => Ok(Command::Status),
             Some(t) => Err(Error::BadArgument { verb: "status", token: t }),

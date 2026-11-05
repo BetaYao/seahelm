@@ -280,8 +280,9 @@ fn creation_branch(task: &str, p: &Value, existing: &[String], allow_hint: bool)
 fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcResult {
     let repo = PathBuf::from(s(p, "repo_path"));
     let mut task = s(p, "prompt");
-    let memory = crate::first_mate::memory::Store::local().context(&crate::first_mate::routing::main_repo(&s(p, "repo_path")));
-    if !memory.is_empty() { task.push_str(&format!("\n\n[seahelm project memory]\n{memory}")); }
+    let main_repo = crate::first_mate::routing::main_repo(&s(p,"repo_path"));
+    let pointer = core.memory_store().pointer(&main_repo);
+    if !pointer.is_empty() { task.push_str(&format!("\n\n{pointer}")); }
     if repo.as_os_str().is_empty() || s(p, "prompt").is_empty() {
         return Err(RpcError::invalid_params("repo_path and prompt are required"));
     }
@@ -299,14 +300,14 @@ fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcRes
         .filter(|b| !b.is_empty() && !b.contains("HEAD"))
         .collect();
     let base = ["main", "master"].into_iter().find(|b| branches.iter().any(|x| x == b)).map(str::to_string).or_else(|| branches.first().cloned()).unwrap_or_else(|| "main".into());
-    let issue = crate::first_mate::routing::issue_link(&s(p, "prompt"));
+    let issue = crate::first_mate::routing::linked_issue(&s(p,"prompt"), &crate::first_mate::routing::remotes(&main_repo));
     if let Some((_, n)) = &issue {
         if let Some(existing) = branches.iter().find(|b| crate::first_mate::routing::issue_number_in(b, *n)) {
             return Ok(json!({"existing": existing, "issue": n, "created": false}));
         }
     }
     let branch = if let Some((_, n)) = issue {
-        issue_branch(n, &s(p, "prompt"), crate::first_mate::memory::Store::local().value(&repo.to_string_lossy(), "branch naming").as_deref())
+        issue_branch(n, &s(p, "prompt"), core.memory_store().value(&main_repo, "branch naming").as_deref())
     } else { creation_branch(&s(p, "prompt"), p, &branches, allow_hint) };
     if git(&repo, &["check-ref-format", "--branch", &branch]).is_none() { return Err(RpcError::invalid_params("invalid branch naming convention")); }
     let name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");

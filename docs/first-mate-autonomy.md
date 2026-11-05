@@ -51,8 +51,8 @@ up**, so that is the first vertical slice.
 | D22 | Core card delivery translates built-in option labels using first_mate_language. Clients answer by index or the card’s shown label, as the registry requires; island, web and Telegram currently send indices. The shown label resolves to a core-owned canonical key before any First Mate comparison. Arbitrary canonical keys and English aliases are not accepted on a Chinese card. Cards raised in English retain their own English labels across a language change. | 2026-11-05 |
 | D23 | Q7: routing a request with no link or project name is a habit like any other; enough correct picks may earn auto through the usual promotion card (D1). | 2026-11-05 |
 | D24 | Memory uses named topics; replacing a topic supersedes its previous active entry in place. Only a sealed core-written revision is injected; external edits require confirmation of their exact digest by the user. | 2026-11-05 |
-| D25 | A mandate is measured from the user's original message, matches known project names, approved aliases or GitHub owner/repo remotes, and is consumed once per user turn. Explicit deny and repository policy still win. | 2026-11-05 |
-| D26 | Routing observations retain the words on the card's originating turn. Exact normalized words are learned conservatively before an alias is proposed; no semantic match asserted by the model grants authority. | 2026-11-05 |
+| D25 | A mandate is measured from the user's original message, matches known project names, approved aliases or GitHub owner/repo remotes, and is consumed only on a successful creation per user turn; a further start needs a card. Explicit deny and repository policy still win. | 2026-11-05 |
+| D26 | Routing observations retain the words on the card's originating turn. Routing habits retain exact normalized words; short project aliases require their own user-confirmed card; no semantic match asserted by the model grants authority. | 2026-11-05 |
 | D27 | Jira supports Cloud (email + API token, HTTP basic auth, `https://<site>.atlassian.net`) and Server/Data Center (personal access token, bearer). Credentials stay in `~/.config/seahelm/first-mate/secrets.json`, mode 0600, never in config.json or a repository; only the user may write them through `seahelm task-source …`, with kernel peer checks. | 2026-11-05 |
 | D28 | Task reads default to every 30 minutes per source; configurable from 5 minutes to 7 days. Each tick admits at most four due sources, each reads at most 50 issues, 100 open PRs and 100 recently updated merged PRs. Reads run off the First Mate thread, with request timeouts; failures never start work. Fetchers are injectable and tests use fakes. | 2026-11-05 |
 | D29 | `task.new` is internal candidate data. Only the daily brief lists tasks in “Could do / 可以做” and may raise one proactive selection card, with at most three ranked tasks plus Pass. Its answer is permission for that one `worktree.create`; pause, deny, budgets and deduplication still apply. No task event starts work or raises a card itself. | 2026-11-05 |
@@ -529,7 +529,7 @@ current milestone, priorities, don'ts, definition of done, plus learned notes
 ("run the tests before committing", "PR summaries in Chinese"). Sources: the
 user's "remember …" to First Mate, and `learn.review` reading the user's
 repeated prompts to agents (D5). First Mate reads it before acting on that
-project, and it goes into the brief of every agent First Mate starts there.
+project. New-agent briefs point to it; SessionStart supplies its trusted content.
 
 Everything stays local (D7), yet every agent should see it, not only those
 First Mate starts. The core already answers every agent's SessionStart hook in
@@ -665,20 +665,42 @@ includes active entries only, capped at 2,000 Unicode characters; `memory.show`
 returns used/capacity and trust state. External edits raise a user confirmation
 card tied to the exact digest and stay out of context meanwhile. The CLI exposes
 `memory note`, `memory show`, `memory undo`, and `memory confirm` (the latter
-requires the digest returned by show). Confirmation and undo are user-only RPCs;
-notes admit the user and the kernel-identified First Mate session. The core writes
+requires the digest returned by show). Confirmation is user-only; note and undo admit the user and the
+kernel-identified First Mate session. `/memory show @repo` and `/memory undo @repo`
+run directly through core-command from the island, web or Telegram. Rejection
+restores the remembered revision and clears the pending card; stale confirmations
+cannot approve a newer edit. The core writes
 the localized confirmation row after saving.
 
 SessionStart hooks append the pane project's memory for Claude Code, Codex and
-Cursor. Agent creation appends it to the brief; project events append it to First
-Mate's context. First Mate receives the discovered projects, descriptions and
+Cursor; before pane registration, the hook cwd resolves the repository. Agent
+creation adds only a pointer to avoid injecting it twice. Project events append
+nonempty memory to First Mate's context. First Mate receives the discovered projects, descriptions and
 approved aliases when the user speaks. Core routing checks that original message
 against project names and GitHub remotes, with one mandate per turn; otherwise
 it raises candidate project actions. Picks feed sealed habits and the existing
-promotion cards. Branch/worktree issue-number matches are checked locally before
-a mandated start; issue interpretation and PR-body duplicate checks remain First
-Mate's read-only investigation. Default issue branches use `fix/<n>-<slug>`; an active `branch naming` memory
-entry may supply a template such as `bug/{n}-{slug}`.
+promotion cards. Only issue tokens in branch names and worktrees on those branches count as
+local duplicates; HEAD SHAs, version names and paths never match. Cached open or
+merged PRs require a closing reference in the same repository; reports name the
+real path/branch or PR number. Action-level dedupe checks the URL's owner/repo
+against the target's remotes. Issue interpretation remains First Mate's read-only
+investigation. Default issue branches use `fix/<n>-<slug>`; an active
+`branch naming` memory entry may supply a template such as `bug/{n}-{slug}`.
+
+Phase 7 review corrections: the running core remembers each revision and its
+history independently of the disk seal (the same process-memory boundary as
+habit grants). Editing both disk files cannot change that snapshot. Injection
+orders current goal, milestone and don'ts before newest notes and never cuts an
+entry in half; the gauge reports the full active total, actual injected count
+and an over-capacity warning. Topic separators accept `:` and `：`, but URL
+colons stay content. Note bodies cannot contain entry/metadata comment markers;
+provenance is written by the core. Candidate cards keep the requested repo first,
+then rank alias/description matches. Alias suggestions are short names, approved
+on their own card; First Mate may also suggest one with an option's `alias` field.
+A start reservation is released on failure and spent on successful creation,
+including starts approved under a repo's ask rule; another start asks on a card.
+
+
 ### Task sources: local operations (phase 8)
 
 Sources live in `first-mate/task-sources/<repo-key>.json`; poll timestamps,

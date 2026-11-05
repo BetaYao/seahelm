@@ -125,6 +125,8 @@ pub enum Msg {
     /// A card First Mate raised was answered (None: dismissed), and where
     /// (`_meta.via`), when the client said.
     Answered { payload: String, option: Option<String>, via: Option<String> },
+    /// A failed create releases its routing reservation.
+    CreateFailed,
     /// A gated call went through.
     DidRun { method: String, result: Value },
     /// An approved or picked call finished.
@@ -213,6 +215,7 @@ struct Proposal {
 
 struct ProposalOption {
     key: String,
+    alias: Option<String>,
     label: String,
     action: Action,
     method: String,
@@ -241,6 +244,11 @@ struct FirstMate {
     user_spoke: bool,
     route_text: String,
     route_used: bool,
+    route_pending: bool,
+    memory: memory::Store,
+    alias_pending: HashMap<String, (String, String, String)>,
+    #[cfg(test)]
+    test_repos: Option<Vec<String>>,
     memory_pending: HashMap<String, (String, String)>,
     approvals: HashMap<String, Approval>,
     habit_proposals: HashMap<String, generalisation::PendingHabit>,
@@ -306,7 +314,7 @@ impl FirstMate {
             tasks_running: false,
             task_cards: HashMap::new(),
             task_in_flight: std::collections::BTreeSet::new(),
-            core,
+            core: core.clone(),
             tx,
             ledger: Ledger::open(dir.join("state.json")),
             audit,
@@ -323,6 +331,11 @@ impl FirstMate {
             user_spoke: false,
             route_text: String::new(),
             route_used: false,
+            route_pending: false,
+            memory: core.memory_store(),
+            alias_pending: HashMap::new(),
+            #[cfg(test)]
+            test_repos: None,
             memory_pending: HashMap::new(),
             approvals: HashMap::new(),
             card_options: HashMap::new(),
@@ -405,6 +418,7 @@ impl FirstMate {
                 self.deliver_if_ready(now);
             }
             Msg::Answered { payload, option, via } => self.answered(&payload, option.as_deref(), via, now),
+            Msg::CreateFailed => self.route_pending = false,
             Msg::DidRun { method, result } => self.did_run(&method, &result),
             Msg::Ran { action, what, level, params, result } => {
                 if let Some(task) = params.get("_task").and_then(|v| serde_json::from_value(v.clone()).ok()) {
@@ -514,7 +528,7 @@ impl FirstMate {
     }
 
     fn stop(&mut self) {
-        let ids: Vec<String> = self.approvals.keys().chain(self.proposals.keys()).chain(self.habit_proposals.keys()).cloned().collect();
+        let ids: Vec<String> = self.approvals.keys().chain(self.proposals.keys()).chain(self.habit_proposals.keys()).chain(self.memory_pending.keys()).chain(self.alias_pending.keys()).cloned().collect();
         for id in ids {
             self.core.drop_card_payload(&id);
         }
@@ -524,6 +538,8 @@ impl FirstMate {
         self.proposals.clear();
         self.habit_proposals.clear();
         self.card_options.clear();
+        self.memory_pending.clear();
+        self.alias_pending.clear();
         self.drop_habit_cards();
         for h in std::mem::take(&mut self.held) {
             self.core.drop_card_payload(&h.payload);
@@ -734,7 +750,7 @@ impl FirstMate {
         if ready.is_empty() {
             return;
         }
-        let text = ready.iter().map(|d| format!("{}\n\n[seahelm project memory]\n{}", d.prompt, memory::Store::local().context(&d.event.repo))).collect::<Vec<_>>().join("\n\n---\n\n");
+        let text = ready.iter().map(|d| { let memory = self.memory.context(&d.event.repo); if memory.is_empty() { d.prompt.clone() } else { format!("{}\n\n[seahelm project memory]\n{}",d.prompt,memory) } }).collect::<Vec<_>>().join("\n\n---\n\n");
         for d in &ready {
             if let Ok(c) = self.config_for(&d.event.repo) {
                 self.active_rules.push((d.rule.clone(), c));
@@ -772,6 +788,7 @@ impl FirstMate {
         self.user_spoke = true;
         self.route_text = t.into();
         self.route_used = false;
+        self.route_pending = false;
         self.tell(&format!("{}\n\n[seahelm projects] {}", t, self.project_list()));
         self.log(Entry::new(now, "message", t));
         true
@@ -886,7 +903,9 @@ impl FirstMate {
 
     fn did_run(&mut self, method: &str, result: &Value) {
         if method == "worktree.create" {
+            self.route_pending = false;
             if let Some(p) = result.get("worktree_path").and_then(Value::as_str) {
+                self.route_used = true;
                 self.started.insert(p.to_string());
                 self.core.first_mate_line(lang::route_started(p).get(self.config.language));
             }
@@ -920,7 +939,7 @@ impl FirstMate {
                     }
                 }
             }
-            options.push(ProposalOption { key: format!("choice:{i}"), label: label.into(), action, method: method.into(), params: o.get("params").cloned().unwrap_or(json!({})) });
+            options.push(ProposalOption { key: format!("choice:{i}"), alias: o.get("alias").and_then(Value::as_str).map(str::to_string), label: label.into(), action, method: method.into(), params: o.get("params").cloned().unwrap_or(json!({})) });
         }
         if options.is_empty() || options.len() > 5 {
             return Err(RpcError::invalid_params("between one and five options"));
@@ -957,14 +976,12 @@ impl FirstMate {
         }
         self.card_options.remove(payload);
         self.expiry.forget(payload);
-        if let Some((repo, digest)) = self.memory_pending.get(payload).cloned() {
-            if option == Some("approve") {
-                if let Err(e) = memory::rpc(&self.core, "memory.confirm", &json!({"repo":repo,"digest":digest})) {
-                    self.core.first_mate_line(lang::memory_failure(&e.message).get(self.config.language));
-                }
-            }
+        if let Some((repo, digest)) = self.memory_pending.remove(payload) {
+            let result = memory::answer_edit(&self.memory,&repo,&digest,option == Some(APPROVE));
+            if let Err(e) = result { self.core.first_mate_line(lang::memory_failure(&e).get(self.config.language)); }
             return;
         }
+        if self.answer_alias(payload, option, now) { return; }
         if let Some(pending) = self.habit_proposals.remove(payload) {
             self.observe_habit_answer("habit.propose", payload, option, via.clone(), format!("propose habit {}", pending.habit.id), format!("{}/{}", pending.key, pending.habit.id), String::new());
             if option == Some("approve") {
@@ -1021,7 +1038,9 @@ impl FirstMate {
                 self.core.first_mate_line(lang::memory_failure(&why).get(self.config.language));
                 return;
             }
-            self.route_pick(o.params["repo_path"].as_str().unwrap_or_default(), &p.route_text, payload, now);
+            let repo=o.params["repo_path"].as_str().unwrap_or_default();
+            self.route_pick(repo, &p.route_text, payload, now);
+            if let Some(alias)=o.alias.as_deref() { self.offer_alias(repo,alias,payload,now); }
         }
         self.execute(o.action, o.method, o.params, o.label, "picked", payload);
     }

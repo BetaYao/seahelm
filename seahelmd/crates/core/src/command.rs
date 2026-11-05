@@ -110,6 +110,11 @@ impl Host for CoreHost<'_> {
             .unwrap_or_default()
     }
 
+    fn project_memory(&self, repo: &str, verb: &str) -> Result<String,String> {
+        let shown = crate::first_mate::memory::rpc(self.0,&format!("memory.{verb}"),&json!({"repo":repo})).map_err(|e|e.message)?;
+        Ok(crate::first_mate::lang::memory_display(verb,&shown).get(crate::first_mate::UserConfig::load().language).into())
+    }
+
     fn first_mate_available(&self) -> bool {
         self.0.first_mate().is_some_and(|fm| fm.state().get("enabled").and_then(Value::as_bool) == Some(true))
     }

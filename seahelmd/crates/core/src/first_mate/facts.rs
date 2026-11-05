@@ -499,7 +499,7 @@ mod tests {
     }
 
     fn merged_pr(number: u64, head: &str) -> PrStatus {
-        PrStatus {
+        PrStatus { body: String::new(),
             number,
             url: "u".into(),
             state: State::Merged,

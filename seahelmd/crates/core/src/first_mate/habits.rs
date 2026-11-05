@@ -1056,6 +1056,11 @@ pub struct Grant {
 }
 
 impl Grant {
+    /// A separate card explicitly confirmed this short project name.
+    pub(super) fn from_alias_card(key: &str, id: &str) -> Grant {
+        Grant { key:key.into(), id:id.into(), level:HabitLevel::Ask, confirm:false, _only_from_a_card:() }
+    }
+
     /// The user's answer on an inventory card (`inventory::Cards::answer`,
     /// the only caller): the answer is the consent (D6), so the habit it
     /// writes is granted the level that answer names — at most `ask`.

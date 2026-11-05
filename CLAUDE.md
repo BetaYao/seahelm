@@ -128,10 +128,16 @@ First Mate phase 7 (`first_mate/memory.rs`, `routing.rs`, autonomy D23–D26):
 project memory stays in `~/.config/seahelm/first-mate/memory/<repo-key>.md`,
 is written through `memory.note`, versioned and undoable, and only a trusted
 core-sealed revision is injected (2,000 characters). External edits need the
-user's exact-revision confirmation. SessionStart hooks, new-agent briefs and
-project events include it. Routing uses the original user message and known
+user's exact-revision confirmation; rejection restores the core-remembered
+version. The core retains its last revision in process memory, so rewriting both
+on-disk files cannot change an active core's trusted memory. SessionStart hooks
+and project events include it; new-agent briefs carry only a pointer. Injection
+keeps whole goal/milestone/don'ts entries first, then newest notes, with a real
+total/capacity warning. `/memory show|undo @repo` works from the island and chats.
+First Mate may write and undo; only the user confirms external edits. Routing uses the original user message and known
 project names, approved aliases or matching GitHub remotes; a mandate starts
-once per turn, otherwise candidate project cards teach the normal sealed habits.
+once per successful turn (another start asks on a card), otherwise ranked project
+cards teach the normal sealed habits. Short aliases require a separate user yes.
 
 **Auto-update:** Sparkle 2 (`Sources/Update/UpdateDriver.swift`, `Sources/App/UpdateCoordinator.swift`). `UpdateDriver` implements `SPUUserDriver` so updates render in the inline `UpdateBanner` instead of Sparkle's modals; it stashes each pending Sparkle reply block until the matching banner button is clicked. There is one appcast per CPU arch (we ship arch-specific zips and Sparkle has no arch filtering), so the feed URL is supplied at runtime by `UpdateCoordinator.feedURLString` rather than baked into Info.plist. `SUPublicEDKey` comes from the `SPARKLE_PUBLIC_ED_KEY` build setting; empty means Sparkle refuses to start. `scripts/package_release.sh` signs Sparkle's nested helpers (Autoupdate, Updater.app, `Downloader.xpc`, `Installer.xpc`) inside-out, then generates and signs `dist/appcast-<arch>.xml` from the final notarized zip using `SPARKLE_PRIVATE_KEY`.
 
