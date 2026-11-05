@@ -58,6 +58,9 @@ pub struct Core {
     pub(crate) git_cache: Mutex<HashMap<String, (String, String, Instant)>>,
     /// The worktrees the core found itself (`discovery::spawn`), canonical.
     discovered: Mutex<Vec<String>>,
+    /// What the user said to First Mate this turn (`autopilot.say`), until
+    /// the turn ends: a note First Mate writes meanwhile cites it.
+    user_turn: Mutex<Option<String>>,
     /// Discovery has finished a scan: the fleet is known, not just what a
     /// client happened to list in the first seconds after start.
     fleet_known: std::sync::atomic::AtomicBool,
@@ -219,6 +222,7 @@ impl Core {
             handles: Mutex::new(handles),
             git_cache: Mutex::new(HashMap::new()),
             discovered: Mutex::new(Vec::new()),
+            user_turn: Mutex::new(None),
             fleet_known: std::sync::atomic::AtomicBool::new(false),
             presence: Mutex::new(first_mate::presence::Tracker::open(Some(audit_path.with_file_name(first_mate::presence::FILE_NAME)))),
             audit_path,
@@ -1285,6 +1289,14 @@ impl Core {
     /// Whether discovery has scanned once since start. Before that the core
     /// knows only what a client listed in its first seconds, and anything
     /// that judges the whole fleet (the inventory) would judge an empty one.
+    pub fn set_user_turn(&self, text: Option<String>) {
+        *self.user_turn.lock().unwrap_or_else(|e| e.into_inner()) = text;
+    }
+
+    pub fn user_turn(&self) -> Option<String> {
+        self.user_turn.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     pub fn fleet_known(&self) -> bool {
         self.fleet_known.load(std::sync::atomic::Ordering::Acquire)
     }

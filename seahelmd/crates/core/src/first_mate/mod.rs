@@ -446,6 +446,7 @@ impl FirstMate {
                 if new == AgentStatus::Idle && old == AgentStatus::Running && self.awaiting_since.is_none() {
                     self.active_rules.clear();
                     self.user_spoke = false;
+                    self.core.set_user_turn(None);
                 }
                 self.deliver_if_ready(now);
             }
@@ -694,6 +695,17 @@ impl FirstMate {
         if matches!(event.trigger, Trigger::PrMerged | Trigger::CiFailed) && event.facts.is_none() {
             event.facts = Some(self.core.measure_worktree(&event.worktree, event.pr.as_ref()));
         }
+        // A merged worktree someone worked in today is not asked about now:
+        // its pane being idle between turns is not nobody using it, and every
+        // merge from it asked again. The daily sweep takes it once it has been
+        // idle a day (delete-merged-clean wants idle_days >= 1).
+        if event.trigger == Trigger::PrMerged && event.facts.as_ref().is_some_and(|f| f.idle_days == Some(0)) {
+            let mut entry = Entry::new(now, "skipped", format!("pr.merged · {} active today — left for the sweep", short(&event.worktree)));
+            entry.worktree_path = Some(event.worktree.clone());
+            entry.pr = event.pr.as_ref().map(|p| p.number);
+            self.log(entry);
+            return;
+        }
         let config = match self.config_for(&event.repo) {
             Ok(c) => c,
             Err(e) => {
@@ -822,6 +834,7 @@ impl FirstMate {
         self.research.save(&self.dir);
         self.user_spoke = true;
         self.route_text = t.into();
+        self.core.set_user_turn(Some(t.to_string()));
         self.route_used = false;
         self.route_pending = false;
         self.tell(&format!("{}\n\n[seahelm projects] {}", t, self.project_list()));
@@ -1013,7 +1026,11 @@ impl FirstMate {
         self.card_options.remove(payload);
         self.expiry.forget(payload);
         if let Some((repo, digest)) = self.memory_pending.remove(payload) {
-            let result = memory::answer_edit(&self.memory,&repo,&digest,option == Some("approve"));
+            let approve = option == Some("approve");
+            let verdict = match option { Some("approve") => "approved", None => "dismissed", _ => "rejected" };
+            self.log(Entry::new(now, "memory", format!("{verdict} an outside edit of {repo}'s memory ({})", &digest[..digest.len().min(12)])));
+            self.observe_habit_answer("memory.confirm", payload, option, via.clone(), format!("outside edit of {repo}'s memory"), String::new(), repo.clone());
+            let result = memory::answer_edit(&self.memory,&repo,&digest,approve);
             if let Err(e) = result { self.core.first_mate_line(lang::memory_failure(&e).get(self.config.language)); }
             return;
         }

@@ -285,8 +285,8 @@ pub fn rpc(core: &Core, method: &str, p: &Value) -> RpcResult {
     match method {
         "memory.note" => {
             let text = p["text"].as_str().ok_or_else(|| err("text required".into()))?;
-            let source = if super::policy::is_first_mate(p) { "first-mate" } else { "user" };
-            store.note(&repo, text, source).map_err(err)?;
+            let source = note_source(super::policy::is_first_mate(p), core.user_turn().as_deref());
+            store.note(&repo, text, &source).map_err(err)?;
             core.first_mate_line(lang::remembered(text).get(UserConfig::load().language));
             let shown = store.show(&repo);
             if shown["over_capacity"] == true {
@@ -303,9 +303,31 @@ pub fn rpc(core: &Core, method: &str, p: &Value) -> RpcResult {
     }
     Ok(store.show(&repo))
 }
+/// Who a note comes from. The user directly; First Mate during a turn the
+/// user started: the user's own words (cut to one line), since that is what
+/// the note rests on; First Mate on its own (an event, a review): itself.
+fn note_source(first_mate: bool, user_turn: Option<&str>) -> String {
+    if !first_mate {
+        return "user".into();
+    }
+    match user_turn.map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty()) {
+        Some(t) if t.chars().count() > 60 => format!("user: \"{}…\"", t.chars().take(60).collect::<String>()),
+        Some(t) => format!("user: \"{t}\""),
+        None => "first-mate".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_note_written_on_the_users_word_cites_it() {
+        assert_eq!(note_source(false, None), "user");
+        assert_eq!(note_source(true, None), "first-mate");
+        assert_eq!(note_source(true, Some("记住，seahelm 的 PR\n用英文")), "user: \"记住，seahelm 的 PR 用英文\"");
+        assert!(note_source(true, Some(&"x".repeat(80))).ends_with("…\""));
+    }
+
     #[test]
     fn supersedes_caps_seals_and_undoes() {
         let tmp = tempfile::tempdir().unwrap();
