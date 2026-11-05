@@ -461,6 +461,7 @@
   .tl-tools-body{margin:-2px 0 8px 14px;padding-left:14px;border-left:1px solid var(--sep)}
   .tl-asst{margin:12px 0 10px;font-size:var(--fs-body);line-height:1.55;color:var(--text);word-break:break-word}
   .tl-notice{margin:6px 0;font-size:var(--fs-sub);color:var(--muted)}
+.tl-note{margin:6px 0;font-size:var(--fs-sub);color:var(--muted);font-style:italic}
   .tl-thinking{margin:10px 0 8px;font-size:var(--fs-sub);line-height:1.55;color:var(--muted);word-break:break-word}
   .tl-thinking strong{color:inherit}
   .tl-decision{margin:8px 0;font-size:var(--fs-sub);line-height:1.5;color:var(--muted)}
@@ -1490,6 +1491,9 @@ function messageRowHTML(m){
       return `<div class="tl-decision">${esc(m.text || '')}</div>`;
     case 'notice':
       return `<div class="tl-notice">${esc(m.text || '')}</div>`;
+    case 'note':
+      // A line seahelm-core wrote itself (First Mate's sweep reports).
+      return `<div class="tl-note">${esc(m.text || '')}</div>`;
     case 'thinking':
       return `<div class="tl-thinking md">${SeahelmMarkdown.render(m.text || '')}</div>`;
     default:

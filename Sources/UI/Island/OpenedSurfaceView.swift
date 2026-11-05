@@ -604,6 +604,8 @@ struct ConversationItem: Identifiable, Equatable {
                 run = []
             case .thinking where !text.isEmpty:
                 out.append(ConversationItem(id: m.seq, kind: .thinking(text)))
+            case .note where !text.isEmpty:
+                dropRun(); out.append(ConversationItem(id: m.seq, kind: .note(text)))
             // Notices ("Claude is waiting for your input") say what the title's
             // status already does, once per turn: left out.
             case .decision where !text.isEmpty:

@@ -969,16 +969,14 @@ impl Core {
     }
 
     /// One line in First Mate's conversation, written by the core rather
-    /// than typed into its session (so it starts no turn): a one-option
-    /// decision row, which the island draws as a note. ` · ` would read as
-    /// a list of buttons there, so it is turned into `, `.
+    /// than typed into its session, so it starts no turn: a `note` row.
     pub fn first_mate_line(&self, text: &str) {
-        let text = text.replace(" · ", ", ").replace('\n', " ");
+        let text = text.replace('\n', " ");
         let mut st = self.lock();
         if st.registry.pane(fm_policy::SESSION).is_none() {
             return;
         }
-        let row = seahelm_core_messages::Message::new(fm_policy::SESSION, fm_policy::SESSION, seahelm_core_messages::Kind::Decision, now()).with_text(text);
+        let row = seahelm_core_messages::Message::new(fm_policy::SESSION, fm_policy::SESSION, seahelm_core_messages::Kind::Note, now()).with_text(text);
         st.messages.append(vec![row]);
         drop(st);
         self.changed.notify_all();

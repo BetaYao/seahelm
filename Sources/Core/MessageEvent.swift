@@ -5,6 +5,9 @@ enum MessageKind: String, Equatable {
     /// What the agent narrates while it works — Claude's visible thinking, a Codex
     /// reasoning summary. Shown apart from what it says.
     case thinking
+    /// A line seahelm-core wrote into the timeline itself (First Mate's sweep
+    /// reports): no turn behind it, drawn as one line of note.
+    case note
 }
 
 struct MessageEvent: Equatable {

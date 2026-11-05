@@ -24,6 +24,8 @@ use crate::core::Core;
 
 /// How often the sweep looks whether a repo is due (it lists repos with git).
 const SWEEP_CHECK_EVERY: Duration = Duration::from_secs(10 * 60);
+/// How often the habit files are read for levels raised by hand.
+const HAND_CHECK_EVERY: Duration = Duration::from_secs(60);
 /// A sweep running longer than this is taken for dead.
 const SWEEP_STUCK: Duration = Duration::from_secs(60 * 60);
 
@@ -137,7 +139,8 @@ impl FirstMate {
         let forced = self.sweep_forced;
         let mut due: HashSet<String> = HashSet::new();
         let mut prec: HashMap<String, Precedence> = HashMap::new();
-        for repo in self.core.repos() {
+        let repos = self.all_repos();
+        for repo in repos.clone() {
             let Ok(config) = self.config_for(&repo) else { continue };
             if config.settings.quiet_hours.is_some_and(|q| q.contains(&local)) {
                 continue;
@@ -161,7 +164,6 @@ impl FirstMate {
         self.learn(now);
 
         let today = Self::today(now);
-        let repos: Vec<String> = self.core.repos();
         let (books, global) = self.books_for(&repos, &today);
         let skip = self.on_cards();
         let deleter = CoreDeleter { core: self.core.clone(), books: books.clone(), global: global.clone(), prec: prec.clone(), default_prec: self.default_prec(), card: None };
@@ -169,7 +171,7 @@ impl FirstMate {
         let tx = self.tx.clone();
         self.sweep_running = Some(Instant::now());
         std::thread::spawn(move || {
-            let integration = sweep::integration_checkouts();
+            let integration = crate::discovery::Filter::live(&crate::rpc::config_dir()).integration;
             let targets = sweep::targets(&live, observations::worktree_info, &integration, &skip);
             let candidates: Vec<Candidate> = targets
                 .into_iter()
@@ -188,6 +190,44 @@ impl FirstMate {
             let report = sweep::run(plan, &deleter);
             let _ = tx.send(Msg::Swept { report });
         });
+    }
+
+    /// Every repo the core knows: those of the worktrees clients list, and
+    /// the repo set the core keeps for discovering worktrees itself
+    /// (`discovery`, phase 3a), so a repo only the core found is swept too.
+    fn all_repos(&self) -> Vec<String> {
+        let mut out = self.core.repos();
+        let set = crate::discovery::RepoSet::open(crate::rpc::config_dir().join(crate::discovery::FILE_NAME));
+        for r in set.repos() {
+            if Path::new(&r).is_dir() && !out.iter().any(|o| norm(o) == norm(&r)) {
+                out.push(r);
+            }
+        }
+        out
+    }
+
+    /// Hand-raised levels in the habit files (D12): one confirmation card
+    /// per habit, until the user answers. Meanwhile the level the core
+    /// granted applies.
+    pub(super) fn check_hand_edits(&mut self, now: f64) {
+        if self.config.paused || self.hand_checked.is_some_and(|t| t.elapsed() < HAND_CHECK_EVERY) {
+            return;
+        }
+        self.hand_checked = Some(Instant::now());
+        let today = Self::today(now);
+        for b in self.habits.all(&today) {
+            for (id, to, from) in b.pending_confirmations() {
+                if self.offers.pending(&b.key, &id) {
+                    continue;
+                }
+                let Some(h) = b.get(&id) else { continue };
+                let nonce = self.mint("c");
+                let offer = self.offers.raise_confirm(&b.key, &id, to, &nonce);
+                let message = habits::confirm_message(h, to, from, &self.habits.path(&b.key));
+                self.raise(&offer.payload, message, offer.options());
+                self.log(Entry::new(now, "approval", format!("habit {id}: {} written by hand, held at {} until confirmed", to.as_str(), from.as_str())));
+            }
+        }
     }
 
     /// Worktrees already on one of First Mate's cards.
@@ -299,7 +339,7 @@ impl FirstMate {
                 let nonce = self.mint("n");
                 let offer = self.offers.raise(&key, &id, level, &nonce);
                 let message = habits::offer_message(h, level, b.level(h));
-                self.raise(&offer.payload, message, vec![habits::yes_label(level), habits::NOT_YET.into()]);
+                self.raise(&offer.payload, message, offer.options());
                 self.log(Entry::new(now, "approval", format!("offered: habit {id} to {}", level.as_str())));
             }
         }
@@ -310,8 +350,8 @@ impl FirstMate {
 
     /// A habit card was answered. Returns false when the payload is not one.
     pub(super) fn answered_habit(&mut self, payload: &str, option: Option<&str>, via: Option<String>, now: f64) -> bool {
-        if payload.starts_with(habits::PROMOTE_PREFIX) {
-            self.answer_promotion(payload, option, via, now);
+        if payload.starts_with(habits::PROMOTE_PREFIX) || payload.starts_with(habits::CONFIRM_PREFIX) {
+            self.answer_offer(payload, option, via, now);
         } else if payload.starts_with(sweep::SWEEP_PREFIX) {
             self.answer_batch(payload, option, via, now);
         } else if payload.starts_with(sweep::ITEM_PREFIX) {
@@ -337,23 +377,34 @@ impl FirstMate {
         });
     }
 
-    fn answer_promotion(&mut self, payload: &str, option: Option<&str>, via: Option<String>, now: f64) {
+    /// A promotion or a hand-edit confirmation answered.
+    fn answer_offer(&mut self, payload: &str, option: Option<&str>, via: Option<String>, now: f64) {
         let today = Self::today(now);
         let Some(answer) = self.offers.answer(payload, option) else { return };
-        let (key, id) = match &answer {
-            OfferAnswer::Accepted(g) => (g.key.clone(), g.id.clone()),
-            OfferAnswer::Declined { key, id } => (key.clone(), id.clone()),
+        let (key, id, confirm) = match &answer {
+            OfferAnswer::Accepted(g) => (g.key.clone(), g.id.clone(), g.confirm),
+            OfferAnswer::Declined { key, id, confirm } => (key.clone(), id.clone(), *confirm),
         };
-        self.observe_habit_answer("habit.promote", payload, option, via, format!("promote habit {id}"), format!("{key}/{id}"), String::new());
+        let (kind, what) = if confirm { ("habit.confirm", "confirm") } else { ("habit.promote", "promote") };
+        self.observe_habit_answer(kind, payload, option, via, format!("{what} habit {id}"), format!("{key}/{id}"), String::new());
         let mut b = self.habits.load(&key, &today);
         match answer {
-            OfferAnswer::Accepted(g) => match b.promote(g, &today) {
-                Ok(c) => {
-                    self.save_book(&b, now);
-                    self.report_change(&c, now);
+            OfferAnswer::Accepted(g) => {
+                let applied = if confirm { b.confirm(g, &today) } else { b.promote(g, &today) };
+                match applied {
+                    Ok(c) => {
+                        self.save_book(&b, now);
+                        self.report_change(&c, now);
+                    }
+                    Err(e) => self.log(Entry::new(now, "denied", format!("habit {id} not raised — {e}"))),
                 }
-                Err(e) => self.log(Entry::new(now, "denied", format!("habit {id} not promoted — {e}"))),
-            },
+            }
+            OfferAnswer::Declined { confirm: true, .. } => {
+                if let Some((written, granted)) = b.revert(&id) {
+                    self.save_book(&b, now);
+                    self.report("habit", &format!("Habit {id} put back to {} in the file (it said {})", granted.as_str(), written.as_str()), now);
+                }
+            }
             OfferAnswer::Declined { .. } => {
                 b.declined(&id);
                 self.save_book(&b, now);
@@ -527,6 +578,7 @@ impl FirstMate {
         self.batches.clear();
         self.items.clear();
         self.sweep_checked = None;
+        self.hand_checked = None;
     }
 }
 

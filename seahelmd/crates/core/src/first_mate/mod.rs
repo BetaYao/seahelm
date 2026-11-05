@@ -206,6 +206,8 @@ struct FirstMate {
     sweep_running: Option<Instant>,
     /// When `maybe_sweep` last looked at the repos (it runs git).
     sweep_checked: Option<Instant>,
+    /// When the habit files were last read for hand-raised levels.
+    hand_checked: Option<Instant>,
     /// First Mate was just turned on: sweep without waiting for a new day.
     sweep_forced: bool,
 }
@@ -247,6 +249,7 @@ pub fn spawn(core: Arc<Core>) -> Handle {
         items: HashMap::new(),
         sweep_running: None,
         sweep_checked: None,
+        hand_checked: None,
         sweep_forced: false,
     };
     let _ = std::thread::Builder::new().name("seahelm-core-first-mate".into()).spawn(move || fm.run(rx));
@@ -347,6 +350,7 @@ impl FirstMate {
         self.observe_prs(now);
         self.check_schedules(now);
         self.maybe_sweep(now);
+        self.check_hand_edits(now);
         if self.awaiting_since.is_some_and(|t| t.elapsed() > Duration::from_secs(120)) {
             // The prompt never started a turn (lost on the way): try again.
             self.awaiting_since = None;

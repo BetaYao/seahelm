@@ -140,19 +140,18 @@ pub fn run(p: Plan, deleter: &dyn Deleter) -> Report {
     r
 }
 
-/// One line for First Mate's conversation. The island reads ` · ` as a
-/// list of buttons, so items are joined with `; `.
+/// One line for First Mate's conversation (a `note` row: no model turn).
 pub fn line_deleted(items: &[Routed]) -> Option<String> {
     (!items.is_empty()).then(|| {
         let names: Vec<String> = items.iter().map(|r| format!("{} ({})", r.candidate.name(), r.decision.id)).collect();
-        format!("Deleted {} by habit: {}. Branches kept.", plural(items.len(), "worktree"), names.join("; "))
+        format!("Deleted {} by habit: {}. Branches kept.", plural(items.len(), "worktree"), names.join(" · "))
     })
 }
 
 pub fn line_suggest(items: &[Routed]) -> Option<String> {
     (!items.is_empty()).then(|| {
         let names: Vec<String> = items.iter().map(|r| r.candidate.name()).collect();
-        format!("These look done: {}.", names.join("; "))
+        format!("These look done: {}.", names.join(" · "))
     })
 }
 
@@ -326,13 +325,6 @@ impl State {
     }
 }
 
-/// Every repo's integration checkout (`~/.config/seahelm/integration-worktrees.json`,
-/// written by the app: repo → checkout).
-pub fn integration_checkouts() -> HashSet<String> {
-    let path = crate::rpc::config_dir().join("integration-worktrees.json");
-    let map: BTreeMap<String, String> = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-    map.into_values().filter(|v| !v.trim().is_empty()).map(|v| norm(&v)).collect()
-}
 
 #[cfg(test)]
 mod tests {
@@ -435,7 +427,6 @@ mod tests {
         assert_eq!(names(&r.deleted), vec!["old"]);
         assert_eq!(line_deleted(&r.deleted).unwrap(), "Deleted 1 worktree by habit: old (merged-long-ago). Branches kept.");
         assert_eq!(line_suggest(&r.suggest).unwrap(), "These look done: closed.");
-        assert!(!line_deleted(&r.deleted).unwrap().contains(" · ") && !line_suggest(&r.suggest).unwrap().contains(" · "));
     }
 
     #[test]

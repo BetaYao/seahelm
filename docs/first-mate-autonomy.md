@@ -37,6 +37,9 @@ up**, so that is the first vertical slice.
 | D8 | The brief has no fixed time: First Mate learns when (and where) the user picks things up and sends it then. | 2026-11-05 |
 | D9 | First Mate tunes its own thresholds (N, M, card expiry, daily cap) from how the user responds, within hard bounds the core keeps. | 2026-11-05 |
 | D10 | A link that identifies its project (a GitHub issue/PR URL; later a Jira key once mapped) counts as the user naming the project: First Mate starts on it without a card. | 2026-11-05 |
+| D11 | The user's `autopilot_autonomy` default for an action caps habits by its value: `deny` stops every habit (even one the user approved), `ask` caps a habit the user never approved and is replaced by an approved habit's level. | 2026-11-05 |
+| D12 | A habit level raised by hand in its YAML file, above what the core granted, is neither applied nor silently undone: the core raises a confirmation card (the habit, the granted level, the written level, the evidence). Yes records the written level as granted; no writes the granted level back into the file. Until the user answers, the granted level applies. | 2026-11-05 |
+| D13 | One approval of a batched card counts as one approval of each habit on it, however many worktrees it covered: M approvals means M taps, not M worktrees. | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -192,12 +195,26 @@ propose edits to its own judgement habits and brief layout through
 
 ### Where habits sit against rules
 
-- A repo's `.seahelm/automations.yml` is written by a person and shared; it
-  **caps** every habit in that repo (`deny` there beats `auto` in a habit).
-- A habit's level, once the user approved it, **replaces** the user's global
-  default (`autopilot_autonomy`) for the cases its `when` covers. Otherwise a
-  `delete_worktree: ask` default would keep every learned `auto` from ever
-  acting.
+- A repo's own `.seahelm/automations.yml` is written by a person and shared;
+  it **caps** every habit in that repo: the strictest `delete_worktree` level
+  any of its enabled rules names (`deny` there beats `auto` in a habit and
+  silences it; `ask` holds it at `ask`). A file that does not parse stops
+  First Mate in the repo, habits included. The built-in rules (D4) are
+  seahelm's, not a person's, and do not cap habits.
+- The user's global default (`autopilot_autonomy`) works by its value (D11):
+  `deny` stops every habit, approved or not. `ask` caps a habit the user
+  never approved (the seed, at `ask` anyway), and a habit's level, once the
+  user approved it on a card, **replaces** that default for the cases its
+  `when` covers. Otherwise a `delete_worktree: ask` default would keep every
+  learned `auto` from ever acting.
+- The level the core honours is at most the one it granted
+  (`habits/.granted.json`). A higher level written into the file by hand
+  waits on a confirmation card (D12).
+- Today habits act only through the sweep. First Mate's own gated calls
+  (`cleanup-merged` asking to delete a worktree) still take the strictest of
+  the rule's level and the user's default; letting a matching habit loosen
+  that path — the built-in rule's level as a default a habit may replace,
+  only a repo's own file capping — is the next step.
 - General rules (D4) keep working as today. `cleanup-merged` stays the
   event-driven path; the habits add the sweep and the learned thresholds. A
   learned habit that proves itself across projects and users is a candidate

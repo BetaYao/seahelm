@@ -19,6 +19,11 @@
 //! own counting (`Book::count`). Down is automatic: a rejection, an undone
 //! automatic deletion, two unanswered expiries.
 //!
+//! A level raised by hand in the file (above the grant) is not dropped
+//! silently (D12): it stays in the file, is honoured at the grant, and the
+//! core asks on a confirmation card (`habit.confirm:`). Yes grants it; no
+//! writes the file back to the granted level.
+//!
 //! Measurable habits only in this phase: `when` must use the vocabulary
 //! (`Fact`); judgement habits arrive with phase 6. A habit whose `when`
 //! admits uncommitted, untracked, ignored or unpushed work, or busy panes,
@@ -63,6 +68,8 @@ pub const ABOUT_CLEANUP: &str = "worktree.cleanup";
 pub const YES_PREFIX: &str = "Yes, ";
 pub const NOT_YET: &str = "Not yet";
 pub const PROMOTE_PREFIX: &str = "habit.promote:";
+pub const CONFIRM_PREFIX: &str = "habit.confirm:";
+pub const PUT_IT_BACK: &str = "No, put it back";
 
 // MARK: levels and the vocabulary
 
@@ -587,7 +594,7 @@ impl Book {
             let cap = b.cap(&h.id);
             let as_written = h.level;
             if h.level > cap {
-                b.notes.push(format!("{}: `{}` in the file was not granted by the core; held at {}", h.id, h.level.as_str(), cap.as_str()));
+                b.notes.push(format!("{}: `{}` in the file was not granted by the core; held at {} until the user confirms it", h.id, h.level.as_str(), cap.as_str()));
                 h.level = cap;
             }
             if h.level == HabitLevel::Auto && h.when.admits_risk() {
@@ -604,7 +611,16 @@ impl Book {
     }
 
     pub fn to_yaml(&self) -> String {
-        let mut seq: Vec<Yaml> = self.habits.iter().filter_map(|h| serde_yaml::to_value(h).ok()).collect();
+        // A level raised by hand and not yet confirmed stays in the file as
+        // written: saving must not answer the confirmation card for the user.
+        let mut seq: Vec<Yaml> = self
+            .habits
+            .iter()
+            .filter_map(|h| match self.written.get(&h.id) {
+                Some(w) => serde_yaml::to_value(Habit { level: *w, ..h.clone() }).ok(),
+                None => serde_yaml::to_value(h).ok(),
+            })
+            .collect();
         seq.extend(self.invalid.iter().map(|(raw, _)| raw.clone()));
         if seq.is_empty() {
             return "[]\n".into();
@@ -651,6 +667,8 @@ impl Book {
         h.evidence.expired_in_row = 0;
         h.evidence.fresh_from = h.sources.len();
         self.caps.insert(id.to_string(), to);
+        // A demotion overrules a raise still waiting for the user's confirmation.
+        self.written.remove(id);
         (to != from).then(|| Change { id: id.into(), from, to, why: why.into() })
     }
 
@@ -773,6 +791,9 @@ impl Book {
         if g.key != self.key {
             return Err(format!("grant for {} applied to {}", g.key, self.key));
         }
+        if g.confirm {
+            return Err("a confirmation is not a promotion".into());
+        }
         let i = self.index(&g.id).ok_or_else(|| format!("no habit {}", g.id))?;
         let from = self.level(&self.habits[i]);
         if from.up() != Some(g.level) {
@@ -788,6 +809,50 @@ impl Book {
         h.evidence.fresh_from = h.sources.len();
         self.caps.insert(g.id.clone(), g.level);
         Ok(Change { id: g.id, from, to: g.level, why: "the user said yes".into() })
+    }
+
+    /// The level a hand edit asks for, if the user is to be asked: what the
+    /// file says, but never `auto` for a `when` that admits risk; None when
+    /// that is no higher than what the core honours.
+    pub fn confirm_target(&self, h: &Habit) -> Option<HabitLevel> {
+        let written = *self.written.get(&h.id)?;
+        let target = if written == HabitLevel::Auto && h.when.admits_risk() { HabitLevel::Ask } else { written };
+        (target > self.level(h)).then_some(target)
+    }
+
+    /// Hand-raised levels waiting for the user: (id, asked-for level, honoured level).
+    pub fn pending_confirmations(&self) -> Vec<(String, HabitLevel, HabitLevel)> {
+        self.habits.iter().filter(|h| h.active()).filter_map(|h| self.confirm_target(h).map(|t| (h.id.clone(), t, self.level(h)))).collect()
+    }
+
+    /// The user said yes to a hand-raised level: grant it (more than one
+    /// level at once is fine — they asked for exactly this).
+    pub fn confirm(&mut self, g: Grant, today: &str) -> Result<Change, String> {
+        if g.key != self.key || !g.confirm {
+            return Err("not a confirmation of this file".into());
+        }
+        let i = self.index(&g.id).ok_or_else(|| format!("no habit {}", g.id))?;
+        let target = self.confirm_target(&self.habits[i]);
+        if target != Some(g.level) {
+            return Err(format!("{}: the file no longer asks for {}", g.id, g.level.as_str()));
+        }
+        let from = self.level(&self.habits[i]);
+        let h = &mut self.habits[i];
+        h.level = g.level;
+        h.approved = Some(today.into());
+        h.evidence.streak = 0;
+        h.evidence.fresh_from = h.sources.len();
+        self.caps.insert(g.id.clone(), g.level);
+        self.written.remove(&g.id);
+        Ok(Change { id: g.id, from, to: g.level, why: "the user confirmed the level written in the file".into() })
+    }
+
+    /// The user said no to a hand-raised level: the next save writes the
+    /// granted level back into the file. Returns (written, granted).
+    pub fn revert(&mut self, id: &str) -> Option<(HabitLevel, HabitLevel)> {
+        let written = self.written.remove(id)?;
+        let h = self.get(id)?;
+        Some((written, self.level(h)))
     }
 }
 
@@ -815,29 +880,43 @@ fn gates_pass(sources: &[String], by_id: &HashMap<&str, &Record>) -> bool {
 
 // MARK: promotion cards
 
-/// Permission to raise one habit one level. Only `Offers::answer` makes
-/// one, from the user's yes on a promotion card the core raised.
+/// Permission to raise one habit: one level (`Book::promote`), or to the
+/// level the user wrote in the file (`Book::confirm`, `confirm` set). Only
+/// `Offers::answer` makes one, from the user's yes on a card the core raised.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Grant {
     pub key: String,
     pub id: String,
     pub level: HabitLevel,
+    pub confirm: bool,
     _only_from_a_card: (),
 }
 
-/// A promotion card the core put up.
+/// A card the core put up about a habit's level: a promotion, or the
+/// confirmation of a level written by hand.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Offer {
     pub key: String,
     pub id: String,
     pub level: HabitLevel,
     pub payload: String,
+    pub confirm: bool,
+}
+
+impl Offer {
+    pub fn options(&self) -> Vec<String> {
+        if self.confirm {
+            vec![confirm_label(self.level), PUT_IT_BACK.into()]
+        } else {
+            vec![yes_label(self.level), NOT_YET.into()]
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum OfferAnswer {
     Accepted(Grant),
-    Declined { key: String, id: String },
+    Declined { key: String, id: String, confirm: bool },
 }
 
 #[derive(Default)]
@@ -849,8 +928,19 @@ impl Offers {
     /// Record a card about to go up; its payload, which carries a nonce so
     /// no other card can stand in for it: `habit.promote:<key>/<id>:<level>:<nonce>`.
     pub fn raise(&mut self, key: &str, id: &str, level: HabitLevel, nonce: &str) -> Offer {
-        let payload = format!("{PROMOTE_PREFIX}{key}/{id}:{}:{nonce}", level.as_str());
-        let o = Offer { key: key.into(), id: id.into(), level, payload: payload.clone() };
+        self.raise_kind(key, id, level, nonce, false)
+    }
+
+    /// A confirmation card for a level written by hand:
+    /// `habit.confirm:<key>/<id>:<level>:<nonce>`.
+    pub fn raise_confirm(&mut self, key: &str, id: &str, level: HabitLevel, nonce: &str) -> Offer {
+        self.raise_kind(key, id, level, nonce, true)
+    }
+
+    fn raise_kind(&mut self, key: &str, id: &str, level: HabitLevel, nonce: &str, confirm: bool) -> Offer {
+        let prefix = if confirm { CONFIRM_PREFIX } else { PROMOTE_PREFIX };
+        let payload = format!("{prefix}{key}/{id}:{}:{nonce}", level.as_str());
+        let o = Offer { key: key.into(), id: id.into(), level, payload: payload.clone(), confirm };
         self.open.insert(payload, o.clone());
         o
     }
@@ -875,16 +965,40 @@ impl Offers {
     /// on an offer this core raised makes a `Grant`.
     pub fn answer(&mut self, payload: &str, option: Option<&str>) -> Option<OfferAnswer> {
         let o = self.open.remove(payload)?;
-        if option == Some(yes_label(o.level).as_str()) {
-            Some(OfferAnswer::Accepted(Grant { key: o.key, id: o.id, level: o.level, _only_from_a_card: () }))
+        if option == o.options().first().map(String::as_str) {
+            Some(OfferAnswer::Accepted(Grant { key: o.key, id: o.id, level: o.level, confirm: o.confirm, _only_from_a_card: () }))
         } else {
-            Some(OfferAnswer::Declined { key: o.key, id: o.id })
+            Some(OfferAnswer::Declined { key: o.key, id: o.id, confirm: o.confirm })
         }
     }
 }
 
 pub fn yes_label(level: HabitLevel) -> String {
     format!("{YES_PREFIX}{}", level.as_str())
+}
+
+pub fn confirm_label(level: HabitLevel) -> String {
+    format!("{YES_PREFIX}keep {}", level.as_str())
+}
+
+/// The confirmation card's text: the habit, the level it is held at, the
+/// level the file asks for, and the evidence.
+pub fn confirm_message(h: &Habit, to: HabitLevel, from: HabitLevel, file: &Path) -> String {
+    let e = &h.evidence;
+    let mut m = format!(
+        "First Mate: the habits file sets \"{}\" to {}, but the core only granted {}. Keep {}?",
+        h.id,
+        to.as_str(),
+        from.as_str(),
+        to.as_str()
+    );
+    m += &format!("\nWhen: {}", describe_when(&h.when));
+    m += &format!("\nEvidence: {} approved, {} rejected, {} by hand, {} ignored (since {})", e.approved, e.rejected, e.manual, e.ignored, e.since);
+    if !h.examples.is_empty() {
+        m += &format!("\nExamples: {}", h.examples.join(", "));
+    }
+    m += &format!("\nNow: {} (file: {}) · until you answer: {}", to.as_str(), file.display(), from.as_str());
+    m
 }
 
 /// The promotion card's text: the evidence and examples behind it.
@@ -1188,6 +1302,9 @@ pub fn list_json(store: &Store, repo: Option<&str>, today: &str, prec_for: impl 
                     if let Some(w) = b.written.get(&h.id) {
                         v["written_level"] = json!(w.as_str());
                     }
+                    if let Some(t) = b.confirm_target(h) {
+                        v["awaiting_confirmation"] = json!(t.as_str());
+                    }
                     v["can_be_auto"] = json!(!h.when.admits_risk());
                     if let Some(p) = &prec {
                         v["effective_level"] = json!(p.effective(b, h).as_str());
@@ -1355,6 +1472,75 @@ mod tests {
     }
 
     #[test]
+    fn a_level_raised_by_hand_waits_for_the_users_confirmation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::new(tmp.path().join("habits"));
+        store.ensure_seed(TODAY, NOW).unwrap();
+        // The user (or anything) edits the seed from ask to auto by hand.
+        let text = std::fs::read_to_string(store.path(GLOBAL)).unwrap().replace("level: ask", "level: auto");
+        std::fs::write(store.path(GLOBAL), &text).unwrap();
+        let mut b = store.load(GLOBAL, TODAY);
+        assert_eq!(b.level(&b.habits[0]), HabitLevel::Ask, "honoured at the grant until answered");
+        assert_eq!(b.pending_confirmations(), vec![(SEED_ID.to_string(), HabitLevel::Auto, HabitLevel::Ask)]);
+        // Saving meanwhile (evidence counted) keeps the user's edit in the file.
+        b.approved(SEED_ID, &[]);
+        store.save(&b, NOW + 1.0).unwrap();
+        assert!(std::fs::read_to_string(store.path(GLOBAL)).unwrap().contains("level: auto"));
+        assert_eq!(store.load(GLOBAL, TODAY).pending_confirmations().len(), 1);
+
+        let mut offers = Offers::default();
+        let o = offers.raise_confirm(GLOBAL, SEED_ID, HabitLevel::Auto, "c1");
+        assert!(o.payload.starts_with("habit.confirm:_global/delete-merged-clean:auto:"));
+        assert_eq!(o.options(), vec!["Yes, keep auto", "No, put it back"]);
+        let msg = confirm_message(&b.habits[0], HabitLevel::Auto, HabitLevel::Ask, &store.path(GLOBAL));
+        assert!(msg.contains("sets \"delete-merged-clean\" to auto, but the core only granted ask") && msg.contains("Evidence: 1 approved"), "{msg}");
+
+        // No: the file goes back to the granted level.
+        let Some(OfferAnswer::Declined { confirm: true, .. }) = offers.answer(&o.payload, Some(PUT_IT_BACK)) else { panic!() };
+        assert_eq!(b.revert(SEED_ID), Some((HabitLevel::Auto, HabitLevel::Ask)));
+        store.save(&b, NOW + 2.0).unwrap();
+        assert!(std::fs::read_to_string(store.path(GLOBAL)).unwrap().contains("level: ask"));
+        assert!(store.load(GLOBAL, TODAY).pending_confirmations().is_empty());
+
+        // Yes: granted, two levels at once if that is what the file says.
+        let text = std::fs::read_to_string(store.path(GLOBAL)).unwrap().replace("level: ask", "level: auto");
+        std::fs::write(store.path(GLOBAL), &text).unwrap();
+        let mut b = store.load(GLOBAL, TODAY);
+        b.habits[0].level = HabitLevel::Observe;
+        b.caps.insert(SEED_ID.into(), HabitLevel::Observe);
+        let o = offers.raise_confirm(GLOBAL, SEED_ID, HabitLevel::Auto, "c2");
+        let Some(OfferAnswer::Accepted(g)) = offers.answer(&o.payload, Some("Yes, keep auto")) else { panic!() };
+        assert!(g.confirm);
+        let c = b.confirm(g, TODAY).unwrap();
+        assert_eq!((c.from, c.to), (HabitLevel::Observe, HabitLevel::Auto));
+        store.save(&b, NOW + 3.0).unwrap();
+        let b = store.load(GLOBAL, TODAY);
+        assert_eq!(b.level(&b.habits[0]), HabitLevel::Auto);
+        assert!(b.notes.is_empty() && b.pending_confirmations().is_empty());
+    }
+
+    #[test]
+    fn confirmations_and_promotions_do_not_stand_in_for_each_other() {
+        let text = "- id: risky\n  when: {pr: merged}\n  do: delete_worktree\n  level: auto\n";
+        let mut b = Book::parse("k", text, &granted(&[("risky", HabitLevel::Observe)]));
+        // A risky `when` written as auto is offered at ask at most.
+        assert_eq!(b.pending_confirmations(), vec![("risky".to_string(), HabitLevel::Ask, HabitLevel::Observe)]);
+        let mut offers = Offers::default();
+        let p = offers.raise("k", "risky", HabitLevel::Suggest, "p");
+        let Some(OfferAnswer::Accepted(g)) = offers.answer(&p.payload, Some("Yes, suggest")) else { panic!() };
+        assert!(b.confirm(g, TODAY).is_err(), "a promotion's yes does not confirm");
+        let c = offers.raise_confirm("k", "risky", HabitLevel::Ask, "c");
+        let Some(OfferAnswer::Accepted(g)) = offers.answer(&c.payload, Some("Yes, keep ask")) else { panic!() };
+        assert!(b.promote(g, TODAY).is_err(), "a confirmation's yes does not promote");
+        // A demotion overrules a pending hand raise.
+        let mut b = Book::parse("k", &text.replace("level: auto", "level: ask"), &granted(&[("risky", HabitLevel::Suggest)]));
+        assert_eq!(b.pending_confirmations().len(), 1);
+        b.rejected("risky");
+        assert!(b.pending_confirmations().is_empty());
+        assert!(b.to_yaml().contains("level: observe"));
+    }
+
+    #[test]
     fn promotion_only_through_the_users_yes_on_the_cores_card() {
         let mut b = Book::seeded(TODAY);
         b.habits[0].level = HabitLevel::Suggest;
@@ -1367,7 +1553,7 @@ mod tests {
         let o = offers.raise(GLOBAL, SEED_ID, HabitLevel::Ask, "n1");
         assert!(o.payload.starts_with("habit.promote:_global/delete-merged-clean:ask:"));
         assert!(offers.pending(GLOBAL, SEED_ID));
-        assert_eq!(offers.answer(&o.payload, Some(NOT_YET)), Some(OfferAnswer::Declined { key: GLOBAL.into(), id: SEED_ID.into() }));
+        assert_eq!(offers.answer(&o.payload, Some(NOT_YET)), Some(OfferAnswer::Declined { key: GLOBAL.into(), id: SEED_ID.into(), confirm: false }));
         assert_eq!(offers.answer(&o.payload, Some("Yes, ask")), None, "an answered card is spent");
         let o = offers.raise(GLOBAL, SEED_ID, HabitLevel::Ask, "n2");
         assert!(matches!(offers.answer(&o.payload, None), Some(OfferAnswer::Declined { .. })), "dismissed is no");
