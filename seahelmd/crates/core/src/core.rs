@@ -55,6 +55,8 @@ pub struct Core {
     pub(crate) handles: Mutex<seahelm_core_command::Handles>,
     /// Per worktree: its repo root and branch, and when they were read.
     pub(crate) git_cache: Mutex<HashMap<String, (String, String, Instant)>>,
+    /// The worktrees the core found itself (`discovery::spawn`), canonical.
+    discovered: Mutex<Vec<String>>,
 }
 
 struct State {
@@ -181,21 +183,15 @@ impl Core {
             transcripts: Mutex::new(seahelm_core_messages::Tail::default()),
             handles: Mutex::new(seahelm_core_command::Handles::open(&handles_path(), Some(&rpc::config_dir().join("pane-handles.json")))),
             git_cache: Mutex::new(HashMap::new()),
+            discovered: Mutex::new(Vec::new()),
         }))
     }
 
-    /// One PR refresh: the worktrees clients listed plus every registered
-    /// pane's worktree. Runs on the PR thread.
+    /// One PR refresh over every live worktree (`live_worktrees`: listed,
+    /// panes, discovered). Runs on the PR thread.
     pub fn pr_cycle(&self, now: Instant) {
-        let mut worktrees = self.prs.listed();
-        {
-            let st = self.lock();
-            for p in st.registry.panes() {
-                if !worktrees.contains(&p.worktree_path) {
-                    worktrees.push(p.worktree_path.clone());
-                }
-            }
-        }
+        let mut worktrees: Vec<String> = self.live_worktrees().into_iter().collect();
+        worktrees.sort();
         self.prs.refresh(&worktrees, now);
     }
 
@@ -1058,10 +1054,30 @@ impl Core {
     }
 
     /// Worktrees clients list plus those with panes.
-    pub fn live_worktrees(&self) -> HashSet<String> {
+    pub fn client_worktrees(&self) -> HashSet<String> {
         let mut out: HashSet<String> = self.prs.listed().into_iter().collect();
         out.extend(self.lock().registry.panes().map(|p| p.worktree_path.clone()));
         out
+    }
+
+    /// Every worktree the core knows: `client_worktrees` plus those it found
+    /// itself (`discovery`), so the fleet is known with every client closed.
+    /// A discovered worktree a client already lists under another spelling
+    /// (a symlinked path) is not added twice; the client's spelling wins.
+    pub fn live_worktrees(&self) -> HashSet<String> {
+        let mut out = self.client_worktrees();
+        let discovered = self.discovered.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if discovered.is_empty() {
+            return out;
+        }
+        let spelled: HashSet<String> = out.iter().map(|w| crate::discovery::canon(w)).collect();
+        out.extend(discovered.into_iter().filter(|d| !spelled.contains(d)));
+        out
+    }
+
+    /// The discovery thread's latest scan.
+    pub fn set_discovered(&self, worktrees: Vec<String>) {
+        *self.discovered.lock().unwrap_or_else(|e| e.into_inner()) = worktrees;
     }
 
     /// Every known worktree with its PR, as last fetched.

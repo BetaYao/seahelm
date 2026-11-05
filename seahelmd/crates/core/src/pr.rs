@@ -6,7 +6,18 @@
 //!
 //! One GraphQL request per repository per minute covers every worktree in
 //! it (the 30 most recently updated PRs, filed by head branch; PRs from
-//! forks skipped). The token is `$GITHUB_TOKEN`, `$GH_TOKEN`, else
+//! forks skipped). A worktree whose branch is not among them (an old merged
+//! PR, a branch quiet for weeks) is looked up by head branch
+//! (`BRANCH_QUERY`), batched per repository, and the answer cached: a
+//! merged or closed PR never changes, so it is never asked again; "no PR"
+//! is asked again after a day, an open one after half an hour.
+//!
+//! Request budget, per repository: one request a minute, as before, plus
+//! branch lookups. A daily sweep over a fleet that has been seen before
+//! costs no branch requests beyond one per repository for the "no PR"
+//! answers gone stale (up to `BRANCH_QUERY_MAX` branches in one request);
+//! a cold start costs one request per `BRANCH_QUERY_MAX` uncovered branches.
+//! Each is a single GraphQL call worth one point of the 5,000-an-hour limit. The token is `$GITHUB_TOKEN`, `$GH_TOKEN`, else
 //! `gh auth token`; with none nothing is asked. The request goes out through
 //! `curl` (on macOS, Linux and Windows 10+) rather than a TLS stack of our
 //! own, on the PR thread, never on an RPC thread. A failed request keeps
@@ -161,6 +172,50 @@ pub const QUERY: &str = "query($owner: String!, $repo: String!) {
   }
 }";
 
+/// Branches looked up in one request at most; the rest wait a tick.
+pub const BRANCH_QUERY_MAX: usize = 20;
+
+/// The query for looking up `n` branches' PRs by head branch: one aliased
+/// `pullRequests(headRefName:)` per branch (`b0`, `b1`, …, the names passed
+/// as variables), the newest five each so a fork's PR of the same name
+/// does not hide this repository's.
+pub fn branch_query(n: usize) -> String {
+    let vars: String = (0..n).map(|i| format!(", $b{i}: String!")).collect();
+    let fields: String = (0..n)
+        .map(|i| {
+            format!(
+                "    b{i}: pullRequests(headRefName: $b{i}, states: [OPEN, MERGED, CLOSED], first: 5, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
+      nodes {{
+        number url state isDraft headRefName headRefOid mergedAt reviewDecision
+        headRepositoryOwner {{ login }}
+        commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ state }} }} }} }}
+      }}
+    }}
+"
+            )
+        })
+        .collect();
+    format!("query($owner: String!, $repo: String!{vars}) {{\n  repository(owner: $owner, name: $repo) {{\n{fields}  }}\n}}")
+}
+
+/// The answer to `branch_query(branches.len())`: every asked branch, with
+/// its newest PR from this repository or None. None when the answer has no
+/// repository (no access, bad token).
+pub fn parse_branch_answers(response: &Value, owner: &str, branches: &[String]) -> Option<HashMap<String, Option<PrStatus>>> {
+    let repo = response.pointer("/data/repository").filter(|r| !r.is_null())?;
+    Some(
+        branches
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let nodes = repo.pointer(&format!("/b{i}/nodes")).and_then(Value::as_array).cloned().unwrap_or_default();
+                let pr = nodes.iter().filter_map(|n| parse_node(n, owner)).find(|(nb, _)| nb == b).map(|(_, p)| p);
+                (b.clone(), pr)
+            })
+            .collect(),
+    )
+}
+
 /// Branch → its most recently updated PR. PRs from forks are skipped: a
 /// fork's `fix-typo` is not this repo's `fix-typo` worktree.
 pub fn parse_statuses(response: &Value, owner: &str) -> HashMap<String, PrStatus> {
@@ -171,40 +226,42 @@ pub fn parse_statuses(response: &Value, owner: &str) -> HashMap<String, PrStatus
         .unwrap_or_default();
     let mut by_branch = HashMap::new();
     for node in nodes {
-        let Some(branch) = node.get("headRefName").and_then(Value::as_str) else { continue };
-        if by_branch.contains_key(branch) {
-            continue;
-        }
-        let (Some(number), Some(url)) = (node.get("number").and_then(Value::as_u64), node.get("url").and_then(Value::as_str))
-        else {
-            continue;
-        };
-        let draft = node.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
-        let Some(state) = parse_state(node.get("state").and_then(Value::as_str), draft) else { continue };
-        let head_owner = node.pointer("/headRepositoryOwner/login").and_then(Value::as_str);
-        if !head_owner.is_some_and(|o| o.eq_ignore_ascii_case(owner)) {
-            continue;
-        }
-        let rollup = node
-            .pointer("/commits/nodes")
-            .and_then(Value::as_array)
-            .and_then(|n| n.last())
-            .and_then(|n| n.pointer("/commit/statusCheckRollup/state"))
-            .and_then(Value::as_str);
-        by_branch.insert(
-            branch.to_string(),
-            PrStatus {
-                number,
-                url: url.to_string(),
-                state,
-                checks: parse_checks(rollup),
-                review: parse_review(node.get("reviewDecision").and_then(Value::as_str)),
-                head_oid: node.get("headRefOid").and_then(Value::as_str).filter(|o| !o.is_empty()).map(str::to_string),
-                merged_at: node.get("mergedAt").and_then(Value::as_str).and_then(parse_iso8601).map(|t| t.floor() as i64),
-            },
-        );
+        let Some((branch, pr)) = parse_node(&node, owner) else { continue };
+        by_branch.entry(branch).or_insert(pr);
     }
     by_branch
+}
+
+/// One PR node: its head branch and status. None for a fork's PR (a fork's
+/// `fix-typo` is not this repo's `fix-typo` worktree) or a malformed node.
+fn parse_node(node: &Value, owner: &str) -> Option<(String, PrStatus)> {
+    let branch = node.get("headRefName").and_then(Value::as_str)?;
+    let number = node.get("number").and_then(Value::as_u64)?;
+    let url = node.get("url").and_then(Value::as_str)?;
+    let draft = node.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
+    let state = parse_state(node.get("state").and_then(Value::as_str), draft)?;
+    let head_owner = node.pointer("/headRepositoryOwner/login").and_then(Value::as_str);
+    if !head_owner.is_some_and(|o| o.eq_ignore_ascii_case(owner)) {
+        return None;
+    }
+    let rollup = node
+        .pointer("/commits/nodes")
+        .and_then(Value::as_array)
+        .and_then(|n| n.last())
+        .and_then(|n| n.pointer("/commit/statusCheckRollup/state"))
+        .and_then(Value::as_str);
+    Some((
+        branch.to_string(),
+        PrStatus {
+            number,
+            url: url.to_string(),
+            state,
+            checks: parse_checks(rollup),
+            review: parse_review(node.get("reviewDecision").and_then(Value::as_str)),
+            head_oid: node.get("headRefOid").and_then(Value::as_str).filter(|o| !o.is_empty()).map(str::to_string),
+            merged_at: node.get("mergedAt").and_then(Value::as_str).and_then(parse_iso8601).map(|t| t.floor() as i64),
+        },
+    ))
 }
 
 /// GitHub's `2026-11-04T10:20:30Z` (UTC, optional fraction or offset)
@@ -317,6 +374,15 @@ pub const FAILURE_TTL: Duration = Duration::from_secs(5 * 60);
 /// `gh auth token` is a subprocess; do not ask per refresh.
 const TOKEN_TTL: Duration = Duration::from_secs(10 * 60);
 const REQUEST_TIMEOUT_SECS: u64 = 8;
+/// A branch looked up and found to have no PR is asked again after this.
+pub const BRANCH_NONE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+/// An open PR found by lookup (so not updated lately) is asked again after
+/// this; once it moves it is among the 30 most recent anyway.
+pub const BRANCH_OPEN_TTL: Duration = Duration::from_secs(30 * 60);
+/// Branches never looked up: a repository's default branch has no PR of
+/// its own worth a request.
+const NOT_LOOKED_UP: &[&str] = &["main", "master", "HEAD"];
+
 /// How often the PR thread looks for stale repositories and moved branches.
 pub const TICK: Duration = Duration::from_secs(15);
 
@@ -328,6 +394,29 @@ pub trait Source: Send + Sync {
     fn token(&self) -> Option<String>;
     /// One repository's PRs by branch, None on any failure.
     fn fetch(&self, owner: &str, repo: &str, token: &str) -> Option<HashMap<String, PrStatus>>;
+    /// The newest PR of each of `branches` (at most `BRANCH_QUERY_MAX`),
+    /// None for a branch without one; None on any failure.
+    fn fetch_branches(&self, owner: &str, repo: &str, token: &str, branches: &[String]) -> Option<HashMap<String, Option<PrStatus>>>;
+}
+
+/// A branch's PR found by `Source::fetch_branches`.
+struct BranchEntry {
+    pr: Option<PrStatus>,
+    at: Instant,
+    /// False when the last lookup failed (`pr` is then what was known before).
+    ok: bool,
+}
+
+impl BranchEntry {
+    fn due(&self, now: Instant) -> bool {
+        let wait = match (&self.pr, self.ok) {
+            (_, false) => FAILURE_TTL,
+            (Some(p), true) if !p.is_live() => return false,
+            (Some(_), true) => BRANCH_OPEN_TTL,
+            (None, true) => BRANCH_NONE_TTL,
+        };
+        now.duration_since(self.at) >= wait
+    }
 }
 
 struct RepoEntry {
@@ -345,7 +434,20 @@ struct Inner {
     /// Worktree → its branch, refreshed every tick.
     branches: HashMap<String, String>,
     repos: HashMap<String, RepoEntry>,
+    /// ("owner/repo", branch) → its PR looked up by head branch, for
+    /// branches not among the repository's recent PRs.
+    branch_prs: HashMap<(String, String), BranchEntry>,
     token: Option<(Option<String>, Instant)>,
+}
+
+impl Inner {
+    /// The branch's PR: the recent list's answer, else the lookup's.
+    fn pr_for(&self, repo: &str, branch: &str) -> Option<&PrStatus> {
+        if let Some(p) = self.repos.get(repo).and_then(|e| e.by_branch.get(branch)) {
+            return Some(p);
+        }
+        self.branch_prs.get(&(repo.to_string(), branch.to_string())).and_then(|e| e.pr.as_ref())
+    }
 }
 
 /// PR status per repository, refreshed on its own thread and cached, so the
@@ -377,18 +479,26 @@ impl PrStore {
         let inner = self.lock();
         let repo = inner.remotes.get(worktree)?.as_ref()?;
         let branch = inner.branches.get(worktree)?;
-        inner.repos.get(repo)?.by_branch.get(branch).cloned()
+        inner.pr_for(repo, branch).cloned()
     }
 
     /// What is known of the worktree's PR: None when nothing was fetched
-    /// for its repository yet (or the fetch failed), Some(None) when the
-    /// branch has no PR among those fetched or the remote is not GitHub.
+    /// for its repository yet (or the fetch failed), or the branch is not
+    /// among the recent PRs and its lookup has not answered; Some(None)
+    /// when the branch has no PR or the remote is not GitHub.
     pub fn known(&self, worktree: &str) -> Option<Option<PrStatus>> {
         let inner = self.lock();
         let Some(repo) = inner.remotes.get(worktree)? else { return Some(None) };
         let branch = inner.branches.get(worktree)?;
         let entry = inner.repos.get(repo).filter(|e| e.ok)?;
-        Some(entry.by_branch.get(branch).cloned())
+        if let Some(p) = entry.by_branch.get(branch) {
+            return Some(Some(p.clone()));
+        }
+        if NOT_LOOKED_UP.contains(&branch.as_str()) {
+            return Some(None);
+        }
+        let looked = inner.branch_prs.get(&(repo.clone(), branch.clone()))?;
+        (looked.ok || looked.pr.is_some()).then(|| looked.pr.clone())
     }
 
     /// Every known worktree with a PR: `{worktree_path, repo, branch, pr}`.
@@ -401,15 +511,16 @@ impl PrStore {
             .filter_map(|wt| {
                 let repo = inner.remotes.get(wt)?.as_ref()?;
                 let branch = inner.branches.get(wt)?;
-                let pr = inner.repos.get(repo)?.by_branch.get(branch)?;
+                let pr = inner.pr_for(repo, branch)?;
                 Some(json!({"worktree_path": wt, "repo": repo, "branch": branch, "pr": pr.to_json()}))
             })
             .collect()
     }
 
-    /// One tick: resolve new worktrees' remotes, refresh every branch, and
-    /// fetch every repository whose answer is stale. Slow work (git, curl)
-    /// runs without the lock. Returns whether any worktree's PR changed.
+    /// One tick: resolve new worktrees' remotes, refresh every branch, fetch
+    /// every repository whose answer is stale, then look up the branches the
+    /// answers do not cover. Slow work (git, curl) runs without the lock.
+    /// Returns whether any worktree's PR changed.
     pub fn refresh(&self, worktrees: &[String], now: Instant) -> bool {
         let unknown: Vec<String> = {
             let inner = self.lock();
@@ -465,10 +576,76 @@ impl PrStore {
                 // A failed fetch keeps what was known: a blip offline should
                 // not wipe every badge until the next success.
                 let by_branch = fetched.unwrap_or(old);
+                // A finished PR in the recent list is the lookup's answer
+                // too, so it costs no request once it drops out of the 30.
+                for (branch, pr) in by_branch.iter().filter(|(_, p)| !p.is_live()) {
+                    inner.branch_prs.insert((repo.clone(), branch.clone()), BranchEntry { pr: Some(pr.clone()), at: now, ok: true });
+                }
                 inner.repos.insert(repo, RepoEntry { by_branch, at: now, ok });
             }
         }
+        self.look_up_branches(worktrees, now);
         before.into_iter().any(|(w, old)| self.status(&w) != old)
+    }
+
+    /// Look up, by head branch, the worktrees' branches their repository's
+    /// recent PRs do not cover and whose cached answer is due: one request
+    /// per repository, `BRANCH_QUERY_MAX` branches at most.
+    fn look_up_branches(&self, worktrees: &[String], now: Instant) {
+        let wanted: Vec<(String, Vec<String>)> = {
+            let mut inner = self.lock();
+            let mut live: HashSet<(String, String)> = HashSet::new();
+            for w in worktrees {
+                if let (Some(Some(repo)), Some(branch)) = (inner.remotes.get(w), inner.branches.get(w)) {
+                    live.insert((repo.clone(), branch.clone()));
+                }
+            }
+            // A branch no worktree has any more is forgotten, so a name
+            // reused later is asked about afresh.
+            inner.branch_prs.retain(|k, _| live.contains(k));
+            let mut by_repo: HashMap<String, Vec<String>> = HashMap::new();
+            for (repo, branch) in live {
+                if NOT_LOOKED_UP.contains(&branch.as_str()) {
+                    continue;
+                }
+                let Some(entry) = inner.repos.get(&repo).filter(|e| e.ok) else { continue };
+                if entry.by_branch.contains_key(&branch) {
+                    continue;
+                }
+                if inner.branch_prs.get(&(repo.clone(), branch.clone())).is_some_and(|e| !e.due(now)) {
+                    continue;
+                }
+                by_repo.entry(repo).or_default().push(branch);
+            }
+            let mut wanted: Vec<(String, Vec<String>)> = by_repo
+                .into_iter()
+                .map(|(r, mut b)| {
+                    b.sort();
+                    b.truncate(BRANCH_QUERY_MAX);
+                    (r, b)
+                })
+                .collect();
+            wanted.sort();
+            wanted
+        };
+        if wanted.is_empty() {
+            return;
+        }
+        let Some(token) = self.token(now) else { return };
+        for (repo, branches) in wanted {
+            let Some((owner, name)) = repo.split_once('/') else { continue };
+            let answers = self.source.fetch_branches(owner, name, &token, &branches);
+            let mut inner = self.lock();
+            for b in branches {
+                let key = (repo.clone(), b.clone());
+                let entry = match &answers {
+                    Some(a) => BranchEntry { pr: a.get(&b).cloned().flatten(), at: now, ok: true },
+                    // A failure keeps what was known and waits.
+                    None => BranchEntry { pr: inner.branch_prs.remove(&key).and_then(|e| e.pr), at: now, ok: false },
+                };
+                inner.branch_prs.insert(key, entry);
+            }
+        }
     }
 
     fn token(&self, now: Instant) -> Option<String> {
@@ -533,26 +710,7 @@ impl Source for Live {
     }
 
     fn fetch(&self, owner: &str, repo: &str, token: &str) -> Option<HashMap<String, PrStatus>> {
-        let body = json!({"query": QUERY, "variables": {"owner": owner, "repo": repo}}).to_string();
-        // The config goes in on stdin, so the token is not in argv for `ps`.
-        let config = format!(
-            "url = \"https://api.github.com/graphql\"\nheader = {}\nheader = \"Content-Type: application/json\"\nheader = \"User-Agent: seahelm-core\"\ndata-binary = {}\n",
-            curl_quote(&format!("Authorization: bearer {token}")),
-            curl_quote(&body),
-        );
-        let mut child = Command::new("curl")
-            .args(["-sS", "--fail", "--max-time", &REQUEST_TIMEOUT_SECS.to_string(), "-K", "-"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        child.stdin.take()?.write_all(config.as_bytes()).ok()?;
-        let out = child.wait_with_output().ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let v: Value = serde_json::from_slice(&out.stdout).ok()?;
+        let v = graphql(token, &json!({"query": QUERY, "variables": {"owner": owner, "repo": repo}}))?;
         // An answer with errors and no repository (no access, bad token) is
         // a failure, not "no PRs".
         if v.pointer("/data/repository").map_or(true, Value::is_null) {
@@ -560,6 +718,42 @@ impl Source for Live {
         }
         Some(parse_statuses(&v, owner))
     }
+
+    fn fetch_branches(&self, owner: &str, repo: &str, token: &str, branches: &[String]) -> Option<HashMap<String, Option<PrStatus>>> {
+        if branches.is_empty() {
+            return Some(HashMap::new());
+        }
+        let mut vars = json!({"owner": owner, "repo": repo});
+        for (i, b) in branches.iter().enumerate() {
+            vars[format!("b{i}")] = json!(b);
+        }
+        let v = graphql(token, &json!({"query": branch_query(branches.len()), "variables": vars}))?;
+        parse_branch_answers(&v, owner, branches)
+    }
+}
+
+/// One GraphQL request through curl; the parsed answer, None on any failure.
+fn graphql(token: &str, body: &Value) -> Option<Value> {
+    let body = body.to_string();
+    // The config goes in on stdin, so the token is not in argv for `ps`.
+    let config = format!(
+        "url = \"https://api.github.com/graphql\"\nheader = {}\nheader = \"Content-Type: application/json\"\nheader = \"User-Agent: seahelm-core\"\ndata-binary = {}\n",
+        curl_quote(&format!("Authorization: bearer {token}")),
+        curl_quote(&body),
+    );
+    let mut child = Command::new("curl")
+        .args(["-sS", "--fail", "--max-time", &REQUEST_TIMEOUT_SECS.to_string(), "-K", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    child.stdin.take()?.write_all(config.as_bytes()).ok()?;
+    let out = child.wait_with_output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    serde_json::from_slice(&out.stdout).ok()
 }
 
 /// The PR thread: every `TICK`, the worktrees clients listed plus every
@@ -710,6 +904,10 @@ mod tests {
         token: Option<String>,
         answer: Mutex<Option<HashMap<String, PrStatus>>>,
         calls: AtomicUsize,
+        /// What a branch lookup finds (absent: no PR); None fails the lookup.
+        by_head: Mutex<Option<HashMap<String, PrStatus>>>,
+        /// Every branch lookup's branches, in order.
+        looked_up: Mutex<Vec<Vec<String>>>,
     }
 
     impl Fake {
@@ -720,6 +918,8 @@ mod tests {
                 token: token.map(Into::into),
                 answer: Mutex::new(None),
                 calls: AtomicUsize::new(0),
+                by_head: Mutex::new(Some(HashMap::new())),
+                looked_up: Mutex::new(Vec::new()),
             }
         }
     }
@@ -739,6 +939,114 @@ mod tests {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.answer.lock().unwrap().clone()
         }
+        fn fetch_branches(&self, owner: &str, repo: &str, _: &str, branches: &[String]) -> Option<HashMap<String, Option<PrStatus>>> {
+            assert_eq!(format!("{owner}/{repo}"), "acme/app");
+            assert!(branches.len() <= BRANCH_QUERY_MAX);
+            self.looked_up.lock().unwrap().push(branches.to_vec());
+            let found = self.by_head.lock().unwrap().clone()?;
+            Some(branches.iter().map(|b| (b.clone(), found.get(b).cloned())).collect())
+        }
+    }
+
+    fn done(n: u64, state: State) -> PrStatus {
+        PrStatus { number: n, url: "u".into(), state, checks: None, review: None, head_oid: Some(format!("oid{n}")), merged_at: None }
+    }
+
+    /// A store over worktrees `/wt/<branch>` each on `<branch>`, with an
+    /// empty recent list.
+    fn branch_store(branches: &[&str]) -> (Arc<Fake>, PrStore, Vec<String>) {
+        let fake = Arc::new(Fake::new(Some("acme/app"), Some("token")));
+        let mut wts = Vec::new();
+        for b in branches {
+            fake.branches.lock().unwrap().insert(format!("/wt/{b}"), b.to_string());
+            wts.push(format!("/wt/{b}"));
+        }
+        *fake.answer.lock().unwrap() = Some(HashMap::new());
+        let store = PrStore::new(Box::new(fake.clone()));
+        (fake, store, wts)
+    }
+
+    #[test]
+    fn an_old_merged_pr_is_found_by_branch_and_never_asked_again() {
+        let (fake, store, wts) = branch_store(&["feat/old", "feat/none"]);
+        fake.by_head.lock().unwrap().as_mut().unwrap().insert("feat/old".into(), done(7, State::Merged));
+        let t0 = Instant::now();
+        assert!(store.refresh(&wts, t0), "the lookup's answer is a change");
+        assert_eq!(*fake.looked_up.lock().unwrap(), vec![vec!["feat/none".to_string(), "feat/old".to_string()]], "one request for both");
+        assert_eq!(store.status("/wt/feat/old").map(|p| (p.number, p.state)), Some((7, State::Merged)));
+        assert_eq!(store.known("/wt/feat/old"), Some(Some(done(7, State::Merged))));
+        assert_eq!(store.known("/wt/feat/none"), Some(None), "looked up: no PR");
+        assert_eq!(store.list().len(), 1, "pr.list serves the looked-up PR");
+        assert_eq!(store.list()[0]["pr"]["number"], 7);
+
+        // An hour on: the repo is asked again, the branches are not.
+        store.refresh(&wts, t0 + Duration::from_secs(3600));
+        assert_eq!(fake.looked_up.lock().unwrap().len(), 1);
+        // A day on: only "no PR" is asked again; the merged one never.
+        store.refresh(&wts, t0 + BRANCH_NONE_TTL);
+        assert_eq!(fake.looked_up.lock().unwrap().last().unwrap(), &vec!["feat/none".to_string()]);
+        store.refresh(&wts, t0 + BRANCH_NONE_TTL * 30);
+        assert!(fake.looked_up.lock().unwrap().iter().skip(1).all(|b| b == &vec!["feat/none".to_string()]));
+    }
+
+    #[test]
+    fn unknown_until_the_lookup_answers() {
+        let (fake, store, wts) = branch_store(&["feat/x"]);
+        *fake.by_head.lock().unwrap() = None;
+        let t0 = Instant::now();
+        store.refresh(&wts, t0);
+        assert_eq!(store.known("/wt/feat/x"), None, "a failed lookup is not \"no PR\"");
+        store.refresh(&wts, t0 + TTL);
+        assert_eq!(fake.looked_up.lock().unwrap().len(), 1, "a failure waits five minutes");
+        *fake.by_head.lock().unwrap() = Some(HashMap::from([("feat/x".to_string(), done(3, State::Closed))]));
+        store.refresh(&wts, t0 + FAILURE_TTL);
+        assert_eq!(store.known("/wt/feat/x").flatten().map(|p| p.state), Some(State::Closed));
+    }
+
+    #[test]
+    fn the_recent_list_wins_and_finished_prs_in_it_need_no_lookup() {
+        let (fake, store, wts) = branch_store(&["feat/a", "feat/m"]);
+        *fake.answer.lock().unwrap() = Some(HashMap::from([("feat/a".to_string(), pr(1)), ("feat/m".to_string(), done(2, State::Merged))]));
+        let t0 = Instant::now();
+        store.refresh(&wts, t0);
+        assert!(fake.looked_up.lock().unwrap().is_empty(), "every branch covered by the recent list");
+        // feat/m drops out of the 30 most recent: its merged PR stays known
+        // without a request.
+        *fake.answer.lock().unwrap() = Some(HashMap::from([("feat/a".to_string(), pr(1))]));
+        store.refresh(&wts, t0 + TTL);
+        assert!(fake.looked_up.lock().unwrap().is_empty());
+        assert_eq!(store.status("/wt/feat/m").map(|p| p.number), Some(2));
+    }
+
+    #[test]
+    fn default_branches_are_never_looked_up_and_lookups_are_capped() {
+        let names: Vec<String> = (0..BRANCH_QUERY_MAX + 5).map(|i| format!("f{i:02}")).collect();
+        let mut all: Vec<&str> = names.iter().map(String::as_str).collect();
+        all.push("main");
+        let (fake, store, wts) = branch_store(&all);
+        let t0 = Instant::now();
+        store.refresh(&wts, t0);
+        assert_eq!(store.known("/wt/main"), Some(None));
+        store.refresh(&wts, t0 + Duration::from_secs(15));
+        let asked = fake.looked_up.lock().unwrap().clone();
+        assert_eq!(asked.len(), 2, "the rest waits a tick");
+        assert_eq!(asked[0].len(), BRANCH_QUERY_MAX);
+        assert_eq!(asked[1].len(), 5);
+        assert!(asked.iter().flatten().all(|b| b != "main"));
+    }
+
+    #[test]
+    fn branch_answers_skip_forks_and_read_every_alias() {
+        let mut fork = node(9, "fix", "OPEN", false, "someone", None, None);
+        fork["headRefName"] = json!("fix");
+        let ours = node(5, "fix", "MERGED", false, "acme", None, None);
+        let v = json!({"data": {"repository": {"b0": {"nodes": [fork, ours]}, "b1": {"nodes": []}}}});
+        let a = parse_branch_answers(&v, "acme", &["fix".to_string(), "lonely".to_string()]).unwrap();
+        assert_eq!(a["fix"].as_ref().map(|p| p.number), Some(5));
+        assert_eq!(a["lonely"], None);
+        assert_eq!(parse_branch_answers(&json!({"data": {"repository": null}}), "acme", &[]), None);
+        let q = branch_query(2);
+        assert!(q.contains("$b1: String!") && q.contains("b1: pullRequests(headRefName: $b1"));
     }
 
     fn pr(n: u64) -> PrStatus {
