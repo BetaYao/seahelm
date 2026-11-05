@@ -103,6 +103,8 @@ pub struct Profile {
     #[serde(default)]
     pub last_seen: f64,
     #[serde(default)]
+    pub prompts: Vec<(f64, String, String)>,
+    #[serde(default)]
     pub last_seen_by: BTreeMap<Channel, f64>,
     #[serde(default)]
     pub last_arrival: Option<Arrival>,

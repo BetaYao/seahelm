@@ -13,6 +13,7 @@ pub const SESSION: &str = "seahelm-first-mate";
 pub enum Class {
     /// Reads and waits: always allowed.
     Open,
+    Card,
     /// Under the autonomy policy.
     Gated(Action),
     /// Not First Mate's to do (closing panes, rearranging layouts…).
@@ -22,7 +23,8 @@ pub enum Class {
 pub fn classify(method: &str) -> Class {
     match method {
         // A card, not an action: nothing runs until the user picks.
-        "autopilot.propose" | "core.ping" | "ping" | "pane.list" | "session.snapshot" | "pane.read" | "pane.explain"
+        "autopilot.propose" | "habits.propose" => Class::Card,
+        "core.ping" | "ping" | "pane.list" | "session.snapshot" | "pane.read" | "pane.explain"
         | "agent.explain" | "worktree.list" | "fleet.status" | "pr.list" | "pane.wait_agent_status" | "wait.agent_status"
         | "pane.wait_for_output" | "wait.output"
         | "usage.summary" | "cards.list" | "autopilot.state" | "message.snapshot" | "message.history"

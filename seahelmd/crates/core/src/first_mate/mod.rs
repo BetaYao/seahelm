@@ -24,6 +24,8 @@ pub mod inventory;
 pub mod lang;
 pub mod learning;
 pub mod observations;
+mod generalisation;
+pub mod tuning;
 pub mod pane;
 pub mod policy;
 pub mod presence;
@@ -107,6 +109,7 @@ pub enum Gate {
 
 pub enum Msg {
     Gate { action: Action, method: String, params: Value, reply: Sender<Gate> },
+    HabitPropose { habit: Value, reply: Sender<RpcResult> },
     Propose { summary: String, options: Vec<Value>, reply: Sender<RpcResult> },
     State { reply: Sender<Value> },
     /// The user's own words.
@@ -159,6 +162,10 @@ impl Handle {
 
     pub fn propose(&self, summary: String, options: Vec<Value>) -> RpcResult {
         self.ask(|reply| Msg::Propose { summary, options, reply }, Err(refused("First Mate is not running")))
+    }
+
+    pub fn propose_habit(&self, habit: Value) -> RpcResult {
+        self.ask(|reply| Msg::HabitPropose { habit, reply }, Err(refused("First Mate is not running")))
     }
 
     pub fn state(&self) -> Value {
@@ -221,6 +228,8 @@ struct FirstMate {
     active_rules: Vec<(Rule, Config)>,
     user_spoke: bool,
     approvals: HashMap<String, Approval>,
+    habit_proposals: HashMap<String, generalisation::PendingHabit>,
+    card_options: HashMap<String, Vec<lang::CardOption>>,
     proposals: HashMap<String, Proposal>,
     started: HashSet<String>,
     configs: HashMap<String, (Result<Config, String>, Option<SystemTime>)>,
@@ -293,6 +302,8 @@ impl FirstMate {
             active_rules: Vec::new(),
             user_spoke: false,
             approvals: HashMap::new(),
+            card_options: HashMap::new(),
+            habit_proposals: HashMap::new(),
             proposals: HashMap::new(),
             started: HashSet::new(),
             configs: HashMap::new(),
@@ -345,6 +356,7 @@ impl FirstMate {
             Msg::Gate { action, method, params, reply } => {
                 let _ = reply.send(self.gate(action, &method, &params, now));
             }
+            Msg::HabitPropose { habit, reply } => { let _ = reply.send(self.propose_habit(habit, now)); }
             Msg::Propose { summary, options, reply } => {
                 let _ = reply.send(self.propose(&summary, &options, now));
             }
@@ -423,8 +435,14 @@ impl FirstMate {
         } else if !want && self.running {
             self.stop();
         }
-        if !self.running {
-            return;
+        if !want && self.budget.review_enabled_at > 0.0 {
+            self.budget.review_enabled_at = 0.0;
+            self.save_budget();
+        }
+        if !self.running { return; }
+        if self.budget.review_enabled_at <= 0.0 {
+            self.budget.review_enabled_at = now;
+            self.save_budget();
         }
         if switched {
             self.launched_at = None;
@@ -464,12 +482,14 @@ impl FirstMate {
     }
 
     fn stop(&mut self) {
-        let ids: Vec<String> = self.approvals.keys().chain(self.proposals.keys()).cloned().collect();
+        let ids: Vec<String> = self.approvals.keys().chain(self.proposals.keys()).chain(self.habit_proposals.keys()).cloned().collect();
         for id in ids {
             self.core.drop_card_payload(&id);
         }
         self.approvals.clear();
         self.proposals.clear();
+        self.habit_proposals.clear();
+        self.card_options.clear();
         self.drop_habit_cards();
         for h in std::mem::take(&mut self.held) {
             self.core.drop_card_payload(&h.payload);
@@ -654,10 +674,14 @@ impl FirstMate {
     // MARK: delivery
 
     fn deliver_if_ready(&mut self, now: f64) {
-        if !self.running || self.config.paused || self.awaiting_since.is_some() || self.queue.is_empty() {
+        if !self.running || self.config.paused || self.awaiting_since.is_some() {
             return;
         }
         if self.core.pane_status(policy::SESSION) != Some(AgentStatus::Idle) {
+            return;
+        }
+        if self.queue.is_empty() {
+            self.review_if_due(now);
             return;
         }
         let local = Local::at(now);
@@ -739,7 +763,8 @@ impl FirstMate {
         }
         // Described with the pane as the user knows it, never a raw id.
         let shown = self.with_pane_label(params);
-        let summary = policy::describe(method, &shown, params.get("_facts").and_then(Value::as_str));
+        let mut summary = policy::describe(method, &shown, params.get("_facts").and_then(Value::as_str));
+        if let Some(id) = params.get("habit").and_then(Value::as_str) { summary = format!("{summary} [habit: {id}]"); }
         let deny = |fm: &mut Self, level: Option<&str>, text: String| {
             let mut e = Entry::new(now, "denied", text);
             e.action = Some(action.as_str().into());
@@ -752,7 +777,18 @@ impl FirstMate {
                 return Gate::Deny(why);
             }
         }
-        match self.level(action) {
+        let mut level = self.level(action);
+        if let Some(id) = params.get("habit").and_then(Value::as_str) {
+            let habit = self.habits.all(&Self::today(now)).into_iter().find_map(|book| {
+                book.get(id).filter(|h| h.active()).map(|h| (h.clone(), book.level(h)))
+            });
+            let Some((habit, granted)) = habit else { return Gate::Deny("unknown habit".into()); };
+            if granted < habits::HabitLevel::Ask || habit.act != habits::Do::DeleteWorktree || action != Action::DeleteWorktree {
+                return Gate::Deny("habit does not grant this action".into());
+            }
+            if level == Level::Auto { level = Level::Ask; }
+        }
+        match level {
             Level::Auto => {
                 let mut e = Entry::new(now, "action", summary);
                 e.action = Some(action.as_str().into());
@@ -853,7 +889,36 @@ impl FirstMate {
 
     /// The user answered one of First Mate's cards.
     fn answered(&mut self, payload: &str, option: Option<&str>, via: Option<String>, now: f64) {
+        let canonical = option.map(|answer| {
+            self.card_options.get(payload).and_then(|options| options.iter()
+                .find(|option| option.accepts(answer))
+                .map(|option| option.legacy.clone())).unwrap_or_else(|| answer.to_string())
+        });
+        let option = canonical.as_deref();
+        if let Some(age) = self.expiry.age(payload, now) {
+            let promotion = payload.starts_with(habits::PROMOTE_PREFIX) && payload.contains(":auto:");
+            let accepted = option == Some(APPROVE)
+                || option.is_some_and(|o| o.starts_with("Yes, ") || o.starts_with("Delete"))
+                || self.proposals.get(payload).is_some_and(|p| p.options.iter().any(|o| Some(o.label.as_str()) == option));
+            let notes = self.budget.tuned.outcome(accepted, promotion, Some(age), false);
+            for note in notes { self.log(Entry::new(now, "tuning", note.en.clone())); self.budget.note(note); }
+            self.save_budget();
+        }
+        self.card_options.remove(payload);
         self.expiry.forget(payload);
+        if let Some(pending) = self.habit_proposals.remove(payload) {
+            self.observe_habit_answer("habit.propose", payload, option, via.clone(), format!("propose habit {}", pending.habit.id), format!("{}/{}", pending.key, pending.habit.id), String::new());
+            if option == Some(APPROVE) {
+                let mut book = self.habits.load(&pending.key, &Self::today(now));
+                let grant = habits::Grant::from_inventory_card(&pending.key, &pending.habit.id, pending.habit.level);
+                if book.adopt_proposal(pending.habit, grant, &Self::today(now)).is_ok() {
+                    if let Some(repo) = pending.repo { self.habits.remember_repo(&pending.key, &repo); }
+                    self.save_book(&book, now);
+                    self.log(Entry::new(now, "habit", format!("accepted habit proposal {payload}")));
+                }
+            }
+            return;
+        }
         if self.answered_habit(payload, option, via.clone(), now) {
             return;
         }

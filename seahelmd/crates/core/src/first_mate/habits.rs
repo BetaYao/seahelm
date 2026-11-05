@@ -296,7 +296,7 @@ impl Cond {
 /// A habit's situation, in measured facts. A fact the core could not
 /// measure (`None`) never matches: unknown is not zero.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct When(pub BTreeMap<Fact, Cond>);
+pub struct When(pub BTreeMap<Fact, Cond>, pub Option<String>);
 
 impl TryFrom<Mapping> for When {
     type Error = String;
@@ -313,7 +313,7 @@ impl TryFrom<Mapping> for When {
         if out.is_empty() {
             return Err("`when` names no fact".into());
         }
-        Ok(When(out))
+        Ok(When(out, None))
     }
 }
 
@@ -325,14 +325,19 @@ impl From<When> for Mapping {
 
 impl Serialize for When {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if let Some(prose) = &self.1 { return prose.serialize(s); }
         Mapping::from(self.clone()).serialize(s)
     }
 }
 
 impl<'de> Deserialize<'de> for When {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let m = Mapping::deserialize(d)?;
-        When::try_from(m).map_err(serde::de::Error::custom)
+        let v = Yaml::deserialize(d)?;
+        match v {
+            Yaml::String(prose) if !prose.trim().is_empty() && prose.len() <= 2000 => Ok(When(BTreeMap::new(), Some(prose))),
+            Yaml::Mapping(m) => When::try_from(m).map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom("when must be measured facts or nonempty prose (at most 2000 bytes)")),
+        }
     }
 }
 
@@ -343,7 +348,7 @@ impl When {
     }
 
     pub fn matches(&self, f: &Facts) -> bool {
-        self.0.iter().all(|(fact, cond)| match (fact, cond) {
+        self.1.is_none() && self.0.iter().all(|(fact, cond)| match (fact, cond) {
             (Fact::Pr, Cond::Pr(states)) => f.pr.as_ref().is_some_and(|p| states.contains(p)),
             (Fact::IdenticalToBase, Cond::Bool(b)) => f.identical_to_base == Some(*b),
             (Fact::AtRisk, Cond::Bool(b)) => at_risk(f) == Some(*b),
@@ -373,6 +378,7 @@ impl When {
 
     /// The fact names that admit risk, for messages.
     pub fn risky_facts(&self) -> Vec<&'static str> {
+        if self.1.is_some() { return vec!["judgement"]; }
         match self.0.get(&Fact::AtRisk) {
             Some(Cond::Bool(true)) => return vec![Fact::AtRisk.as_str()],
             Some(Cond::Bool(false)) => return self.admits(&[Fact::BusyPanes]),
@@ -782,7 +788,8 @@ impl Book {
     /// record is about this book's repo. Then `observe → suggest` for a habit
     /// whose fresh evidence passes the gates — the one move up the core
     /// makes alone, since `suggest` only mentions.
-    pub fn count(&mut self, records: &[Record], applies: impl Fn(&Record) -> bool) -> Vec<Change> {
+    pub fn count(&mut self, records: &[Record], applies: impl Fn(&Record) -> bool) -> Vec<Change> { self.count_with_n(records, applies, tuning::N) }
+    pub fn count_with_n(&mut self, records: &[Record], applies: impl Fn(&Record) -> bool, n: usize) -> Vec<Change> {
         let by_id: HashMap<&str, &Record> = records.iter().map(|r| (r.id.as_str(), r)).collect();
         for r in records.iter().filter(|r| is_manual_removal(r) && applies(r)) {
             let Some(facts) = record_facts(r) else { continue };
@@ -798,7 +805,7 @@ impl Book {
         let mut changes = Vec::new();
         for i in 0..self.habits.len() {
             let h = &self.habits[i];
-            if !h.active() || h.act != Do::DeleteWorktree || self.level(h) != HabitLevel::Observe || !gates_pass(h.fresh_sources(), &by_id) {
+            if !h.active() || h.act != Do::DeleteWorktree || self.level(h) != HabitLevel::Observe || !gates_pass_n(h.fresh_sources(), &by_id, n.clamp(2,10)) {
                 continue;
             }
             let id = h.id.clone();
@@ -811,8 +818,8 @@ impl Book {
                 from: HabitLevel::Observe,
                 to: HabitLevel::Suggest,
                 why: Text::new(
-                    format!("the user did it {}+ times, on {}+ days, in {}+ worktrees", tuning::N, tuning::MIN_DAYS, tuning::MIN_WORKTREES),
-                    format!("你在 {}+ 天、{}+ 个 worktree 里做过 {}+ 次", tuning::MIN_DAYS, tuning::MIN_WORKTREES, tuning::N),
+                    format!("the user did it {}+ times, on {}+ days, in {}+ worktrees", n, tuning::MIN_DAYS, tuning::MIN_WORKTREES),
+                    format!("你在 {}+ 天、{}+ 个 worktree 里做过 {}+ 次", tuning::MIN_DAYS, tuning::MIN_WORKTREES, n),
                 ),
             });
         }
@@ -822,14 +829,15 @@ impl Book {
     /// Habits ready to be offered one level up, and the level: `suggest`
     /// with N fresh matching actions (gated as above), `ask` with M
     /// approvals in a row and a `when` safe enough for `auto`.
-    pub fn offers_due(&self, records: &[Record]) -> Vec<(String, HabitLevel)> {
+    pub fn offers_due(&self, records: &[Record]) -> Vec<(String, HabitLevel)> { self.offers_with_thresholds(records, tuning::N, tuning::M) }
+    pub fn offers_with_thresholds(&self, records: &[Record], n: usize, m: u32) -> Vec<(String, HabitLevel)> {
         let by_id: HashMap<&str, &Record> = records.iter().map(|r| (r.id.as_str(), r)).collect();
         self.habits
             .iter()
             .filter(|h| h.active() && h.act == Do::DeleteWorktree)
             .filter_map(|h| match self.level(h) {
-                HabitLevel::Suggest if gates_pass(h.fresh_sources(), &by_id) => Some((h.id.clone(), HabitLevel::Ask)),
-                HabitLevel::Ask if h.evidence.streak >= tuning::M && !h.when.admits_risk() => Some((h.id.clone(), HabitLevel::Auto)),
+                HabitLevel::Suggest if gates_pass_n(h.fresh_sources(), &by_id, n.clamp(2,10)) => Some((h.id.clone(), HabitLevel::Ask)),
+                HabitLevel::Ask if h.evidence.streak >= m.clamp(3,20) && !h.when.admits_risk() => Some((h.id.clone(), HabitLevel::Auto)),
                 _ => None,
             })
             .collect()
@@ -903,6 +911,16 @@ impl Book {
     /// worktrees it covered. A habit already above the grant (a deletion
     /// habit since raised to `auto`) keeps its level when the answer is
     /// delete again; keep and ask-me-each-time take it down.
+    pub(super) fn adopt_proposal(&mut self, h: Habit, g: Grant, today: &str) -> Result<Option<Change>, String> {
+        if g.key != self.key || g.id != h.id || g.level != h.level || g.confirm || h.level > HabitLevel::Ask {
+            return Err("proposal grant mismatch".into());
+        }
+        // An edited condition starts with fresh evidence and the level named
+        // on this card, even if the previous version had earned auto.
+        self.habits.retain(|old| old.id != h.id);
+        self.adopt(h, g, today)
+    }
+
     pub fn adopt(&mut self, h: Habit, g: Grant, today: &str) -> Result<Option<Change>, String> {
         if g.key != self.key || g.id != h.id || g.level != h.level || g.confirm {
             return Err(format!("grant for {}/{} does not cover {}/{}", g.key, g.id, self.key, h.id));
@@ -976,11 +994,11 @@ fn record_facts(r: &Record) -> Option<Facts> {
 /// N actions, on enough distinct days, in enough distinct worktrees. Only
 /// sources still in the log count: evidence older than the log's
 /// retention has aged out.
-fn gates_pass(sources: &[String], by_id: &HashMap<&str, &Record>) -> bool {
+fn gates_pass_n(sources: &[String], by_id: &HashMap<&str, &Record>, n: usize) -> bool {
     let live: Vec<&&Record> = sources.iter().filter_map(|s| by_id.get(s.as_str())).collect();
     let days: BTreeSet<&str> = live.iter().map(|r| r.at.get(..10).unwrap_or(&r.at)).collect();
     let worktrees: BTreeSet<&str> = live.iter().map(|r| r.worktree.as_str()).collect();
-    live.len() >= tuning::N && days.len() >= tuning::MIN_DAYS && worktrees.len() >= tuning::MIN_WORKTREES
+    live.len() >= n && days.len() >= tuning::MIN_DAYS && worktrees.len() >= tuning::MIN_WORKTREES
 }
 
 // MARK: promotion cards
@@ -1137,6 +1155,7 @@ pub fn offer_message(h: &Habit, to: HabitLevel, from: HabitLevel) -> String {
 }
 
 pub fn describe_when(w: &When) -> String {
+    if let Some(prose) = &w.1 { return prose.clone(); }
     w.0.iter()
         .map(|(f, c)| {
             let v = match c.to_yaml() {
@@ -2193,4 +2212,17 @@ mod tests {
         assert_eq!((h["level"].as_str(), h["written_level"].as_str(), h["effective_level"].as_str()), (Some("observe"), Some("auto"), Some("observe")));
         assert_eq!(h["can_be_auto"], true);
     }
+    #[test]
+    fn editing_an_auto_habit_only_grants_the_ask_shown_on_the_card() {
+        let mut b = Book::seeded(TODAY);
+        b.caps.insert(SEED_ID.into(), HabitLevel::Auto);
+        b.habits[0].level = HabitLevel::Auto;
+        let mut replacement = Habit::seed(TODAY);
+        replacement.when = serde_yaml::from_str("docs PRs no longer needed").unwrap();
+        let grant = Grant::from_inventory_card(GLOBAL, SEED_ID, HabitLevel::Ask);
+        b.adopt_proposal(replacement, grant, TODAY).unwrap();
+        assert_eq!(b.level(&b.habits[0]), HabitLevel::Ask);
+        assert!(!b.habits[0].when.matches(&clean_merged()));
+    }
+
 }

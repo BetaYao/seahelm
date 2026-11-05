@@ -202,10 +202,9 @@ pub fn compose(i: &Inputs) -> Option<String> {
     let expired = i.entries.iter().filter(|e| e.kind == "expired").count();
     let mut notes: Vec<String> = i.notes.iter().map(|t| t.get(l).to_string()).collect();
     if expired > 0 {
-        let days = (budget::tuning::CARD_EXPIRY / 86_400.0).round();
         notes.push(match l {
-            Lang::En => format!("{} withdrawn unanswered after {days} days", plural_en(expired, "card")),
-            Lang::Zh => format!("{expired} 张卡片 {days} 天没人回，已撤下"),
+            Lang::En => format!("{} withdrawn unanswered", plural_en(expired, "card")),
+            Lang::Zh => format!("{expired} 张卡片没人回，已撤下"),
         });
     }
     if done.is_empty() && i.waiting.is_empty() && i.suggest.is_empty() && notes.is_empty() {
@@ -294,7 +293,7 @@ fn offset(now: f64) -> i64 {
 }
 
 impl FirstMate {
-    fn save_budget(&self) {
+    pub(super) fn save_budget(&self) {
         self.budget.save(&budget::State::path(&self.dir));
     }
 
@@ -320,12 +319,16 @@ impl FirstMate {
     }
 
     fn raise_now(&mut self, h: Held, now: f64) {
+        let options: Vec<super::lang::CardOption> = h.options.iter().map(|key|
+            super::lang::CardOption::new(key, self.config.language)).collect();
+        let labels = options.iter().map(|option| option.label.clone()).collect();
+        self.card_options.insert(h.payload.clone(), options);
         self.core.raise_card(Raise {
             kind: Some(h.kind),
             worktree_path: self.dir.to_string_lossy().into(),
             project: pane::PROJECT.into(),
             message: h.message,
-            options: h.options,
+            options: labels,
             payload: Some(h.payload.clone()),
             ..Raise::default()
         });
@@ -460,7 +463,7 @@ impl FirstMate {
 
     /// Withdraw First Mate's cards unanswered for `CARD_EXPIRY`.
     pub(super) fn expire_cards(&mut self, now: f64) {
-        for payload in self.expiry.take_due(now) {
+        for payload in self.expiry.take_due_after(now, self.budget.tuned.expiry_days.clamp(1,7) as f64 * 86400.0) {
             if self.core.has_card_payload(&payload) {
                 self.expire(&payload, now);
             }
@@ -468,11 +471,18 @@ impl FirstMate {
     }
 
     fn expire(&mut self, payload: &str, now: f64) {
+        self.card_options.remove(payload);
+        let proposed_habit = self.habit_proposals.remove(payload);
+        let notes = self.budget.tuned.outcome(false, false, None, true);
+        for note in notes { self.log(Entry::new(now, "tuning", note.en.clone())); self.budget.note(note); }
+        self.save_budget();
         self.core.drop_card_payload(payload);
         let today = super::clock::Local::at(now).day_key();
         let s = |p: &Value, k: &str| p.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
         let mut habits: Vec<(String, String)> = Vec::new();
-        let (kind, summary, worktree, repo) = if let Some(a) = self.approvals.remove(payload) {
+        let (kind, summary, worktree, repo) = if let Some(p) = proposed_habit {
+            ("habit.propose", format!("habit {}", p.habit.id), String::new(), p.repo.unwrap_or_default())
+        } else if let Some(a) = self.approvals.remove(payload) {
             if a.action == super::rules::Action::DeleteWorktree {
                 habits.extend(self.delete_habit_of(&a.params, now));
             }
@@ -531,7 +541,7 @@ impl FirstMate {
         }
         let habit = (!habits.is_empty()).then(|| habits.iter().map(|(k, i)| format!("{k}/{i}")).collect::<Vec<_>>().join(","));
         self.core.observe(observations::Msg::CardExpired { card_kind: kind, card: payload.into(), summary: summary.clone(), worktree, repo, habit });
-        let days = (budget::tuning::CARD_EXPIRY / 86_400.0).round();
+        let days = self.budget.tuned.expiry_days.clamp(1,7);
         self.log(Entry::new(now, "expired", format!("withdrawn unanswered after {days} days: {summary}")));
     }
 
@@ -623,7 +633,7 @@ mod tests {
         assert_eq!(lines[1], "Done: deleted 2 worktrees by habit — feat-a · feat-b; deleted 1 worktree you approved — c; sent to #7: fix CI (on my own)");
         assert_eq!(lines[2], "Waiting on you (2 cards): these 2 worktrees look done: · First Mate asks: delete x — 1 of them come up as cards later");
         assert_eq!(lines[3], "Could go (no card): spike-x");
-        assert_eq!(lines[4], "Notes: Habit closed-idle down from ask to suggest: two of its cards went unanswered · 1 card withdrawn unanswered after 3 days");
+        assert_eq!(lines[4], "Notes: Habit closed-idle down from ask to suggest: two of its cards went unanswered · 1 card withdrawn unanswered");
         assert_eq!(lines.len(), 5);
     }
 
@@ -635,7 +645,7 @@ mod tests {
         assert_eq!(lines[1], "做了：按习惯删了 2 个 worktree — feat-a · feat-b；删了你批准的 1 个 worktree — c；sent to #7: fix CI（自动）");
         assert_eq!(lines[2], "等你处理（2 张卡片）：these 2 worktrees look done: · First Mate asks: delete x — 其中 1 张稍后再弹出");
         assert_eq!(lines[3], "可以清理（不发卡）：spike-x");
-        assert_eq!(lines[4], "备注：习惯 closed-idle 从 ask 降到 suggest：它的卡片连续两次没人回 · 1 张卡片 3 天没人回，已撤下");
+        assert_eq!(lines[4], "备注：习惯 closed-idle 从 ask 降到 suggest：它的卡片连续两次没人回 · 1 张卡片没人回，已撤下");
         let fallback = compose(&Inputs { lang: Lang::Zh, fallback: true, suggest: vec!["a".into()], ..Inputs::default() }).unwrap();
         assert!(fallback.starts_with("First Mate · 今日简报（你今天还没到电脑前）\n"), "{fallback}");
     }

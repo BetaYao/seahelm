@@ -19,7 +19,8 @@ const USAGE: &str = "usage: seahelm <command>
   pane keys <pane> <key…>
   pane wait <pane> [--status done|idle|running|waiting] [--timeout SECS]
   worktree create --repo <path> --task <text> [--agent claudeCode|codex]
-  worktree delete <worktree-path>
+  habit propose --json '<habit>'
+  worktree delete <worktree-path> [--habit <id>]
   propose --json '<{\"summary\": …, \"options\": [{\"label\", \"action\", \"params\"}]}>'
   cards";
 
@@ -127,8 +128,18 @@ fn go(args: &[String]) -> Result<(), Fail> {
             print(&call("worktree.create", p, Duration::from_secs(120))?);
             Ok(())
         }
-        ["worktree", "delete", path] => {
-            print(&call("worktree.delete", json!({"worktree_path": path}), Duration::from_secs(120))?);
+        ["worktree", "delete", path, rest @ ..] => {
+            let (named, _) = flags(&rest.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let mut params = json!({"worktree_path": path});
+            if let Some(habit) = flag(&named, "habit") { params["habit"] = json!(habit); }
+            print(&call("worktree.delete", params, Duration::from_secs(120))?);
+            Ok(())
+        }
+        ["habit", "list"] => { print(&call("habits.list", json!({}), short)?); Ok(()) }
+        ["habit", "propose", rest @ ..] => {
+            let (named, _) = flags(&rest.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let habit: Value = serde_json::from_str(flag(&named, "json").ok_or(Fail::Usage)?).map_err(|e| Fail::Call(format!("--json: {e}")))?;
+            print(&call("habits.propose", json!({"habit":habit}), short)?);
             Ok(())
         }
         ["propose", rest @ ..] => {

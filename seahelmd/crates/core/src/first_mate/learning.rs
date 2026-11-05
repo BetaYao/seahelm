@@ -141,7 +141,7 @@ fn has_github_remote(repo: &str) -> Option<bool> {
 }
 
 impl FirstMate {
-    fn today(now: f64) -> String {
+    pub(super) fn today(now: f64) -> String {
         Local::at(now).day_key()
     }
 
@@ -184,6 +184,11 @@ impl FirstMate {
     /// A habit's level moved: a line now, and a note for the next brief.
     pub(super) fn report_change(&mut self, c: &Change, now: f64) {
         let t = c.text();
+        if c.from == habits::HabitLevel::Auto && c.to < c.from {
+            for note in self.budget.tuned.outcome(false, true, None, false) {
+                self.log(Entry::new(now, "tuning", note.en.clone())); self.budget.note(note);
+            }
+        }
         self.report_text("habit", &t, now);
         self.budget.note(t);
     }
@@ -395,7 +400,7 @@ impl FirstMate {
         let fm_dir = self.dir.to_string_lossy().into_owned();
         for mut b in self.habits.all(&today) {
             let key = b.key.clone();
-            let changes = b.count(&records, |r| r.worktree != fm_dir && (key == GLOBAL || habits::repo_key(&r.repo) == key));
+            let changes = b.count_with_n(&records, |r| r.worktree != fm_dir && (key == GLOBAL || habits::repo_key(&r.repo) == key), self.budget.tuned.n);
             let before = self.habits.load(&key, &today);
             if b != before || !self.habits.path(&key).exists() {
                 self.save_book(&b, now);
@@ -403,7 +408,7 @@ impl FirstMate {
             for c in &changes {
                 self.report_change(c, now);
             }
-            for (id, level) in b.offers_due(&records) {
+            for (id, level) in b.offers_with_thresholds(&records, self.budget.tuned.n, self.budget.tuned.m) {
                 if self.offers.pending(&key, &id) {
                     continue;
                 }
@@ -437,7 +442,7 @@ impl FirstMate {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn observe_habit_answer(&self, kind: &'static str, card: &str, option: Option<&str>, via: Option<String>, summary: String, habit: String, worktree: String) {
+    pub(super) fn observe_habit_answer(&self, kind: &'static str, card: &str, option: Option<&str>, via: Option<String>, summary: String, habit: String, worktree: String) {
         self.core.observe(observations::Msg::CardAnswered {
             card_kind: kind,
             card: card.into(),

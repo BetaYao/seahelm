@@ -1,9 +1,8 @@
 //! The language of what the core writes to the user itself: the daily brief
 //! and the `note` rows in First Mate's timeline (`config.json`
-//! `first_mate_language`: `"en"`, the default, or `"zh"`). The audit log,
-//! cards and First Mate's own words are not covered: the audit stays
-//! English (it is read by tools as much as by people), cards are a later
-//! step, and First Mate answers in whatever language it is spoken to.
+//! `first_mate_language`: `"en"`, the default, or `"zh"`). The audit log stays
+//! English (it is read by tools as much as by people). Built-in card options
+//! are localized here too; First Mate answers in whatever language it is spoken to.
 
 use std::ops::Deref;
 
@@ -88,4 +87,54 @@ mod tests {
         assert_eq!((t.get(Lang::En), t.get(Lang::Zh), &*t), ("Deleted a", "删了 a", "Deleted a"));
         assert_eq!(Text::new("only", "").get(Lang::Zh), "only");
     }
+}
+
+/// Core-owned option identifiers. English strings remain wire aliases for
+/// cards already visible when the language changes.
+pub fn card_label(key: &str, lang: Lang) -> String {
+    if lang == Lang::En { return key.into(); }
+    let fixed = match key {
+        "Approve" => "批准", "Reject" => "拒绝", "Not now" => "暂时不用",
+        "Delete" | "Delete it" => "删除", "Keep" => "保留",
+        "Let me pick" => "让我选择", "Ask me each time" => "每次问我",
+        "Not yet" => "暂不升级", "No, put it back" => "不，恢复原级别",
+        _ => "",
+    };
+    if !fixed.is_empty() { return fixed.into(); }
+    if let Some(n) = key.strip_prefix("Delete all ") { return format!("删除全部 {n} 个"); }
+    if let Some(level) = key.strip_prefix("Yes, keep ") { return format!("是，保留 {level}"); }
+    if let Some(level) = key.strip_prefix("Yes, ") { return format!("是，升级到 {level}"); }
+    key.into()
+}
+
+#[cfg(test)]
+mod card_tests {
+    use super::*;
+    #[test]
+    fn options_are_localized_without_changing_their_identity() {
+        assert_eq!(card_label("Approve", Lang::Zh), "批准");
+        assert_eq!(card_label("Delete all 12", Lang::Zh), "删除全部 12 个");
+        assert_eq!(card_label("Yes, keep auto", Lang::Zh), "是，保留 auto");
+        assert_eq!(card_label("Keep", Lang::En), "Keep");
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CardOption {
+    pub key: String,
+    pub legacy: String,
+    pub label: String,
+}
+impl CardOption {
+    pub fn new(legacy: &str, lang: Lang) -> Self {
+        let key = match legacy {
+            "Approve" => "approve", "Reject" => "reject", "Not now" => "not_now",
+            "Delete" | "Delete it" => "delete", "Keep" => "keep", "Let me pick" => "pick",
+            "Ask me each time" => "ask_each_time", "Not yet" => "not_yet", "No, put it back" => "restore",
+            s if s.starts_with("Delete all ") => "delete_all",
+            _ => "",
+        };
+        Self { key: if key.is_empty() { legacy.to_string() } else { key.into() }, legacy: legacy.into(), label: card_label(legacy, lang) }
+    }
+    pub fn accepts(&self, answer: &str) -> bool { answer == self.key || answer == self.legacy || answer == self.label }
 }
