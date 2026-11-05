@@ -551,7 +551,28 @@ class DashboardViewController: NSViewController {
         detachTerminals()
         embedSplitContainerForSelectedPane(focusTerminal: focusTerminal)
         syncSidePanelToSelection()
-        if changed { notifySelectionChanged() }
+        if changed {
+            syncOverviewHighlightToSelection()
+            notifySelectionChanged()
+        }
+    }
+
+    /// Move the fleet list's highlight (and the focus ring's index) onto the
+    /// selected worktree. Every way of bringing a pane on screen funnels
+    /// through `selectPane` — the CLI's `pane focus`, a fork revealing its new
+    /// pane, the forked badge, a notification — and only the row click and
+    /// `⌃⇥` used to move the highlight, so the terminal changed while the list
+    /// stayed on the previous worktree.
+    private func syncOverviewHighlightToSelection() {
+        guard overviewSelectedId != selectedWorktreeId else { return }
+        overviewSelectedId = selectedWorktreeId
+        if let index = overviewView.orderedRows.firstIndex(where: { $0.id == selectedWorktreeId }) {
+            _ = overviewFocus.jumpToWorktree(index)
+        }
+        if overviewView.isHidden || !overviewView.moveSelection(to: overviewSelectedId, animated: false) {
+            overviewView.selectedId = overviewSelectedId
+            if !overviewView.isHidden { overviewView.update(agents) }
+        }
     }
 
     // MARK: - View mode (alias of chrome collapse)

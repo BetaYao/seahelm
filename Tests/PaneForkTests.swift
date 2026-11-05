@@ -90,14 +90,30 @@ final class PaneForkTests: XCTestCase {
         XCTAssertFalse(PaneFork.badgeToolTip(handle: nil, destinationName: "@feat/x").contains("#"))
     }
 
-    /// The notice waits for the interrupted turn to end, then goes anyway.
-    func testNoticeWaitsForTheTurnToEndButNotForever() {
-        XCTAssertFalse(PaneFork.noticeIsDue(status: .running, waited: 0))
-        XCTAssertFalse(PaneFork.noticeIsDue(status: nil, waited: 1))
-        XCTAssertTrue(PaneFork.noticeIsDue(status: .idle, waited: 0))
-        XCTAssertTrue(PaneFork.noticeIsDue(status: .waiting, waited: 0))
-        XCTAssertTrue(PaneFork.noticeIsDue(status: .running, waited: PaneFork.noticeMaxWait))
-        XCTAssertTrue(PaneFork.noticeIsDue(status: nil, waited: PaneFork.noticeMaxWait))
+    /// The notice waits for the fork to be up and the interrupted turn to end,
+    /// then goes anyway.
+    func testNoticeWaitsForTheForkAndTheTurnButNotForever() {
+        XCTAssertFalse(PaneFork.noticeIsDue(originStatus: .running, forkReady: true, waited: 0))
+        XCTAssertFalse(PaneFork.noticeIsDue(originStatus: nil, forkReady: true, waited: 1))
+        // Origin idle but the fork has not read its transcript yet: hold, or
+        // the notice is copied into the fork's own history.
+        XCTAssertFalse(PaneFork.noticeIsDue(originStatus: .idle, forkReady: false, waited: 0))
+        XCTAssertTrue(PaneFork.noticeIsDue(originStatus: .idle, forkReady: true, waited: 0))
+        XCTAssertTrue(PaneFork.noticeIsDue(originStatus: .waiting, forkReady: true, waited: 0))
+        XCTAssertTrue(PaneFork.noticeIsDue(originStatus: .running, forkReady: true, waited: PaneFork.noticeMaxWait))
+        XCTAssertTrue(PaneFork.noticeIsDue(originStatus: nil, forkReady: true, waited: PaneFork.noticeMaxWait))
+        // A fork that has not started is waited on much longer than the turn.
+        XCTAssertFalse(PaneFork.noticeIsDue(originStatus: .idle, forkReady: false, waited: PaneFork.noticeMaxWait))
+        XCTAssertTrue(PaneFork.noticeIsDue(originStatus: .idle, forkReady: false, waited: PaneFork.forkReadyMaxWait))
+    }
+
+    func testForkIsReadyOnceCoreSeesClaudeAndNumbersIt() {
+        XCTAssertTrue(PaneFork.forkIsReady(agentType: .claudeCode, status: .idle, handle: 4))
+        XCTAssertTrue(PaneFork.forkIsReady(agentType: .claudeCode, status: .running, handle: 4))
+        XCTAssertFalse(PaneFork.forkIsReady(agentType: .claudeCode, status: .idle, handle: nil))
+        XCTAssertFalse(PaneFork.forkIsReady(agentType: .claudeCode, status: .unknown, handle: 4))
+        XCTAssertFalse(PaneFork.forkIsReady(agentType: .unknown, status: .idle, handle: 4))
+        XCTAssertFalse(PaneFork.forkIsReady(agentType: nil, status: nil, handle: nil))
     }
 
     func testHeaderShowsForkedBadgeOnlyWhileSet() {
