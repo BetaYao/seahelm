@@ -18,6 +18,7 @@ pub mod cron;
 pub mod engine;
 pub mod facts;
 pub mod habits;
+pub mod inventory;
 pub mod learning;
 pub mod observations;
 pub mod pane;
@@ -115,6 +116,12 @@ pub enum Msg {
     /// (`peer.rs`, `.granted.json`): an audit line, and with `note` a line
     /// in the conversation too.
     Security { text: String, note: bool },
+    /// The user asked for the inventory again (`habits.inventory`).
+    Inventory { reply: Sender<RpcResult> },
+    /// The inventory measured and grouped the worktrees.
+    Inventoried { measured: usize, groups: Vec<(inventory::Group, Vec<sweep::Candidate>)> },
+    /// The deletions of a group the user said to delete finished.
+    InventoryDeleted { group: inventory::Group, report: inventory::DeleteReport },
 }
 
 /// How the core reaches First Mate.
@@ -148,6 +155,11 @@ impl Handle {
 
     pub fn say(&self, text: String) -> bool {
         self.ask(|reply| Msg::Say { text, reply }, false)
+    }
+
+    /// Take the inventory again: measure now, then one card per group.
+    pub fn inventory(&self) -> RpcResult {
+        self.ask(|reply| Msg::Inventory { reply }, Err(refused("First Mate is not running")))
     }
 }
 
@@ -220,6 +232,10 @@ struct FirstMate {
     hand_checked: Option<Instant>,
     /// First Mate was just turned on: sweep without waiting for a new day.
     sweep_forced: bool,
+    /// The inventory (`inventory`): its open cards, whether one is due
+    /// (First Mate turned on, none ever taken), and since when one measures.
+    inventory: inventory::Cards,
+    inventory_schedule: inventory::Schedule,
 }
 
 /// Start First Mate's thread. It does nothing until the config gives it
@@ -261,6 +277,8 @@ pub fn spawn(core: Arc<Core>) -> Handle {
         sweep_checked: None,
         hand_checked: None,
         sweep_forced: false,
+        inventory: inventory::Cards::default(),
+        inventory_schedule: inventory::Schedule::default(),
     };
     let _ = std::thread::Builder::new().name("seahelm-core-first-mate".into()).spawn(move || fm.run(rx));
     Handle(tx)
@@ -338,6 +356,11 @@ impl FirstMate {
                 }
                 self.log(Entry::new(now, "security", text));
             }
+            Msg::Inventory { reply } => {
+                let _ = reply.send(self.request_inventory(now));
+            }
+            Msg::Inventoried { measured, groups } => self.inventoried(measured, groups, now),
+            Msg::InventoryDeleted { group, report } => self.inventory_deleted(group, report, now),
         }
     }
 
@@ -372,6 +395,7 @@ impl FirstMate {
         self.ensure_session();
         self.observe_prs(now);
         self.check_schedules(now);
+        self.maybe_inventory(now);
         self.maybe_sweep(now);
         self.check_hand_edits(now);
         if self.awaiting_since.is_some_and(|t| t.elapsed() > Duration::from_secs(120)) {
@@ -395,6 +419,7 @@ impl FirstMate {
             eprintln!("seahelm-core: habits: {e}");
         }
         self.sweep_forced = self.sweep_state.sweep_on_start(now);
+        self.inventory_schedule.turned_on(&self.sweep_state);
         eprintln!("seahelm-core: running First Mate");
     }
 

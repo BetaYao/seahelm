@@ -223,6 +223,17 @@ pub fn guarded(method: &str) -> bool {
     is_card_call(method) || speaks_as_user(method)
 }
 
+/// A call checked with its params: the guarded methods, and starting the
+/// inventory (`habits.inventory` without `preview`), which puts cards in
+/// front of the user in First Mate's name. The read-only preview is not.
+pub fn guarded_call(method: &str, params: &serde_json::Value) -> bool {
+    guarded(method) || starts_inventory(method, params)
+}
+
+pub fn starts_inventory(method: &str, params: &serde_json::Value) -> bool {
+    method == "habits.inventory" && params.get("preview").and_then(serde_json::Value::as_bool) != Some(true)
+}
+
 pub fn is_card_call(method: &str) -> bool {
     matches!(method, "cards.answer" | "cards.dismiss" | "cards.clear" | "cards.raise" | "autopilot.answer")
 }
@@ -363,6 +374,12 @@ mod tests {
         for m in ["cards.list", "pane.list", "hook", "autopilot.state", "message.snapshot"] {
             assert!(!guarded(m), "{m}");
         }
+        // Starting the inventory is checked; its preview, and listing habits, are not.
+        let j = |v: &str| serde_json::from_str::<serde_json::Value>(v).unwrap();
+        assert!(guarded_call("habits.inventory", &j("{}")) && guarded_call("habits.inventory", &j(r#"{"preview": false}"#)));
+        assert!(!guarded_call("habits.inventory", &j(r#"{"preview": true}"#)));
+        assert!(!guarded_call("habits.list", &j("{}")));
+        assert!(guarded_call("cards.answer", &j("{}")));
     }
 
     /// This test process, read live: the chain starts at it, and the

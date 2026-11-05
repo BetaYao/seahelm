@@ -144,10 +144,12 @@ pub enum Fact {
     IdleDays,
     BusyPanes,
     IdenticalToBase,
+    /// Derived: uncommitted, untracked, ignored or unpushed above zero.
+    AtRisk,
 }
 
 impl Fact {
-    pub const ALL: [Fact; 9] = [
+    pub const ALL: [Fact; 10] = [
         Fact::Pr,
         Fact::DaysSinceMerge,
         Fact::Uncommitted,
@@ -157,6 +159,7 @@ impl Fact {
         Fact::IdleDays,
         Fact::BusyPanes,
         Fact::IdenticalToBase,
+        Fact::AtRisk,
     ];
     /// What a deletion could lose: an `auto` habit must pin each to zero.
     pub const AT_RISK: [Fact; 5] = [Fact::Uncommitted, Fact::Untracked, Fact::Ignored, Fact::Unpushed, Fact::BusyPanes];
@@ -172,6 +175,7 @@ impl Fact {
             Fact::IdleDays => "idle_days",
             Fact::BusyPanes => "busy_panes",
             Fact::IdenticalToBase => "identical_to_base",
+            Fact::AtRisk => "at_risk",
         }
     }
 
@@ -227,7 +231,7 @@ impl Cond {
                 }
                 Ok(Cond::Pr(states))
             }
-            Fact::IdenticalToBase => v.as_bool().map(Cond::Bool).ok_or_else(|| format!("`{name}` must be true or false")),
+            Fact::IdenticalToBase | Fact::AtRisk => v.as_bool().map(Cond::Bool).ok_or_else(|| format!("`{name}` must be true or false")),
             _ => {
                 let text = match v {
                     Yaml::Number(n) => n.as_u64().map(|n| n.to_string()).ok_or_else(|| format!("`{name}`: {n} is not a whole number"))?,
@@ -342,6 +346,7 @@ impl When {
         self.0.iter().all(|(fact, cond)| match (fact, cond) {
             (Fact::Pr, Cond::Pr(states)) => f.pr.as_ref().is_some_and(|p| states.contains(p)),
             (Fact::IdenticalToBase, Cond::Bool(b)) => f.identical_to_base == Some(*b),
+            (Fact::AtRisk, Cond::Bool(b)) => at_risk(f) == Some(*b),
             (fact, cond) => {
                 let n = match fact {
                     Fact::DaysSinceMerge => f.days_since_merge,
@@ -351,7 +356,7 @@ impl When {
                     Fact::Unpushed => f.unpushed,
                     Fact::IdleDays => f.idle_days,
                     Fact::BusyPanes => Some(f.busy_panes),
-                    Fact::Pr | Fact::IdenticalToBase => None,
+                    Fact::Pr | Fact::IdenticalToBase | Fact::AtRisk => None,
                 };
                 n.is_some_and(|n| cond.holds(n))
             }
@@ -360,14 +365,36 @@ impl When {
 
     /// Admits a worktree with something to lose (uncommitted, untracked,
     /// ignored or unpushed work, or a busy pane): such a habit is never `auto`.
+    /// `at_risk: true` always admits it; `at_risk: false` pins the four
+    /// work facts to zero (busy panes still have to be pinned on their own).
     pub fn admits_risk(&self) -> bool {
-        Fact::AT_RISK.iter().any(|f| self.0.get(f).is_none_or(Cond::admits_positive))
+        !self.risky_facts().is_empty()
     }
 
     /// The fact names that admit risk, for messages.
     pub fn risky_facts(&self) -> Vec<&'static str> {
-        Fact::AT_RISK.iter().filter(|f| self.0.get(f).is_none_or(Cond::admits_positive)).map(|f| f.as_str()).collect()
+        match self.0.get(&Fact::AtRisk) {
+            Some(Cond::Bool(true)) => return vec![Fact::AtRisk.as_str()],
+            Some(Cond::Bool(false)) => return self.admits(&[Fact::BusyPanes]),
+            _ => {}
+        }
+        self.admits(&Fact::AT_RISK)
     }
+
+    fn admits(&self, facts: &[Fact]) -> Vec<&'static str> {
+        facts.iter().filter(|f| self.0.get(f).is_none_or(Cond::admits_positive)).map(|f| f.as_str()).collect()
+    }
+}
+
+/// The derived `at_risk` fact: true when uncommitted, untracked, ignored
+/// or unpushed work is above zero; false when all four are known to be
+/// zero; None when nothing is above zero but git could not count the
+/// unpushed commits (unknown is not zero).
+pub fn at_risk(f: &Facts) -> Option<bool> {
+    if f.changed > 0 || f.untracked > 0 || f.ignored > 0 || f.unpushed.is_some_and(|n| n > 0) {
+        return Some(true);
+    }
+    f.unpushed.map(|_| false)
 }
 
 /// The facts are clean enough for anything to delete the worktree on its
@@ -429,6 +456,10 @@ pub struct Evidence {
     /// Cards that expired unanswered.
     #[serde(default)]
     pub ignored: u32,
+    /// The user's answers about this habit's group on an inventory card,
+    /// whatever they answered: one per answer, however many worktrees.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub decisions: u32,
     /// Automatic deletions the user undid.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub undone: u32,
@@ -855,6 +886,62 @@ impl Book {
         Ok(Change { id: g.id, from, to: g.level, why: "the user confirmed the level written in the file".into() })
     }
 
+    /// Write the habit an inventory answer names (`inventory`), granted by
+    /// that answer. New: added as given. Already there (the inventory
+    /// redone): its `when`, `do` and level follow the new answer, and the
+    /// answer is added to its evidence — one decision, however many
+    /// worktrees it covered. A habit already above the grant (a deletion
+    /// habit since raised to `auto`) keeps its level when the answer is
+    /// delete again; keep and ask-me-each-time take it down.
+    pub fn adopt(&mut self, h: Habit, g: Grant, today: &str) -> Result<Option<Change>, String> {
+        if g.key != self.key || g.id != h.id || g.level != h.level || g.confirm {
+            return Err(format!("grant for {}/{} does not cover {}/{}", g.key, g.id, self.key, h.id));
+        }
+        if h.level == HabitLevel::Auto {
+            return Err(format!("{}: an inventory answer never grants auto", h.id));
+        }
+        let Some(i) = self.index(&h.id) else {
+            self.caps.insert(h.id.clone(), h.level);
+            self.written.remove(&h.id);
+            self.habits.push(h);
+            return Ok(None);
+        };
+        let from = self.level(&self.habits[i]);
+        let keeps_level = h.act == Do::DeleteWorktree && self.habits[i].act == Do::DeleteWorktree && from > h.level;
+        let to = if keeps_level { from } else { h.level };
+        let old = &mut self.habits[i];
+        old.when = h.when;
+        old.act = h.act;
+        old.about = h.about;
+        old.level = to;
+        old.status = Status::Active;
+        old.evidence.approved += h.evidence.approved;
+        old.evidence.decisions += h.evidence.decisions;
+        old.evidence.streak = if h.evidence.approved > 0 && h.act == Do::DeleteWorktree { old.evidence.streak + h.evidence.approved } else { 0 };
+        old.evidence.expired_in_row = 0;
+        for e in h.examples {
+            old.add_example(&e);
+        }
+        if h.approved.is_some() || to != from {
+            old.approved = Some(today.into());
+        }
+        self.caps.insert(h.id.clone(), to);
+        self.written.remove(&h.id);
+        Ok((to != from).then(|| Change { id: h.id, from, to, why: "the user answered the inventory card".into() }))
+    }
+
+    /// Keep a habit in place, never matched again: an answer replaced it.
+    /// Returns whether it was active.
+    pub fn supersede(&mut self, id: &str) -> bool {
+        match self.index(id) {
+            Some(i) if self.habits[i].active() => {
+                self.habits[i].status = Status::Superseded;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// The user said no to a hand-raised level: the next save writes the
     /// granted level back into the file. Returns (written, granted).
     pub fn revert(&mut self, id: &str) -> Option<(HabitLevel, HabitLevel)> {
@@ -898,6 +985,15 @@ pub struct Grant {
     pub level: HabitLevel,
     pub confirm: bool,
     _only_from_a_card: (),
+}
+
+impl Grant {
+    /// The user's answer on an inventory card (`inventory::Cards::answer`,
+    /// the only caller): the answer is the consent (D6), so the habit it
+    /// writes is granted the level that answer names — at most `ask`.
+    pub(super) fn from_inventory_card(key: &str, id: &str, level: HabitLevel) -> Grant {
+        Grant { key: key.into(), id: id.into(), level: level.min(HabitLevel::Ask), confirm: false, _only_from_a_card: () }
+    }
 }
 
 /// A card the core put up about a habit's level: a promotion, or the
@@ -1489,6 +1585,39 @@ pub fn list_json(store: &Store, repo: Option<&str>, today: &str, prec_for: impl 
 mod tests {
     use super::*;
     use crate::first_mate::observations::{By, Record};
+
+    #[test]
+    fn at_risk_is_derived_and_the_safety_rule_knows_it() {
+        let base = Facts { pr: Some("merged".into()), unpushed: Some(0), ..Facts::default() };
+        assert_eq!(at_risk(&base), Some(false));
+        for f in [Facts { changed: 1, ..base.clone() }, Facts { untracked: 1, ..base.clone() }, Facts { ignored: 1, ..base.clone() }, Facts { unpushed: Some(2), ..base.clone() }] {
+            assert_eq!(at_risk(&f), Some(true), "{f:?}");
+        }
+        let unknown = Facts { unpushed: None, ..base.clone() };
+        assert_eq!(at_risk(&unknown), None, "unknown is not zero");
+        assert_eq!(at_risk(&Facts { changed: 1, ..unknown.clone() }), Some(true));
+
+        let yes = When::parse_yaml("{pr: merged, at_risk: true}").unwrap();
+        let no = When::parse_yaml("{pr: merged, at_risk: false, busy_panes: 0}").unwrap();
+        assert!(yes.matches(&Facts { ignored: 1, ..base.clone() }) && !yes.matches(&base) && !yes.matches(&unknown));
+        assert!(no.matches(&base) && !no.matches(&unknown) && !no.matches(&Facts { changed: 1, ..base.clone() }));
+        assert!(When::parse_yaml("{at_risk: 1}").is_err());
+
+        // true admits risk; false pins the four work facts, busy panes still count.
+        assert_eq!(yes.risky_facts(), vec!["at_risk"]);
+        assert!(!no.admits_risk());
+        assert_eq!(When::parse_yaml("{pr: merged, at_risk: false}").unwrap().risky_facts(), vec!["busy_panes"]);
+        // `at_risk: true` overrides facts written as zero beside it.
+        assert!(When::parse_yaml("{at_risk: true, uncommitted: 0, untracked: 0, ignored: 0, unpushed: 0, busy_panes: 0}").unwrap().admits_risk());
+
+        // Written as auto with at_risk: true, granted auto: still held at ask.
+        let text = "- id: risky\n  when: { pr: merged, at_risk: true, busy_panes: 0 }\n  do: delete_worktree\n  level: auto\n";
+        let b = Book::parse("k", text, &granted(&[("risky", HabitLevel::Auto)]));
+        assert_eq!(b.level(b.get("risky").unwrap()), HabitLevel::Ask);
+        let text = "- id: clean\n  when: { pr: merged, at_risk: false, busy_panes: 0 }\n  do: delete_worktree\n  level: auto\n";
+        let b = Book::parse("k", text, &granted(&[("clean", HabitLevel::Auto)]));
+        assert_eq!(b.level(b.get("clean").unwrap()), HabitLevel::Auto);
+    }
 
     const DAY: f64 = 86_400.0;
     const NOW: f64 = 1_793_000_000.0;
