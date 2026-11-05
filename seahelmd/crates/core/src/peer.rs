@@ -220,7 +220,19 @@ pub fn identify(peer: &crate::rpc::Peer) -> Verdict {
 /// raising one (a raised card's answer goes back to whoever raised it, so a
 /// raised card that copies First Mate's could carry the user's yes to it).
 pub fn guarded(method: &str) -> bool {
+    is_card_call(method) || speaks_as_user(method)
+}
+
+pub fn is_card_call(method: &str) -> bool {
     matches!(method, "cards.answer" | "cards.dismiss" | "cards.clear" | "cards.raise" | "autopilot.answer")
+}
+
+/// The calls that speak to First Mate in the user's voice: `autopilot.say`,
+/// and `command.run`, whose prose goes to First Mate when the conversation
+/// is bound to it. What the user says sets `user_spoke` and lets First Mate
+/// act at the user's default levels, so a pane may not say it for them.
+pub fn speaks_as_user(method: &str) -> bool {
+    matches!(method, "autopilot.say" | "command.run")
 }
 
 #[cfg(test)]
@@ -345,10 +357,10 @@ mod tests {
 
     #[test]
     fn guarded_methods() {
-        for m in ["cards.answer", "cards.dismiss", "cards.clear", "cards.raise", "autopilot.answer"] {
+        for m in ["cards.answer", "cards.dismiss", "cards.clear", "cards.raise", "autopilot.answer", "autopilot.say", "command.run"] {
             assert!(guarded(m), "{m}");
         }
-        for m in ["cards.list", "pane.list", "hook", "autopilot.say"] {
+        for m in ["cards.list", "pane.list", "hook", "autopilot.state", "message.snapshot"] {
             assert!(!guarded(m), "{m}");
         }
     }

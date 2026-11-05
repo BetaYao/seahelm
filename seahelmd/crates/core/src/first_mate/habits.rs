@@ -1119,6 +1119,13 @@ pub struct Store {
 
 const GRANTED: &str = ".granted.json";
 const SEAL: &str = ".granted.seal.json";
+
+/// What `.granted.seal.json` holds.
+enum Sealed {
+    Intact(String),
+    Missing,
+    Broken,
+}
 const REPOS: &str = ".repos.json";
 const HISTORY: &str = ".history";
 
@@ -1151,7 +1158,29 @@ impl Store {
         let _guard = seal::LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let path = self.dir.join(GRANTED);
         let on_disk = std::fs::read_to_string(&path).ok();
-        let known = seal::remembered(&path).or_else(|| self.read_seal());
+        let known = match seal::remembered(&path) {
+            Some(k) => Some(k),
+            None => match self.read_seal() {
+                Sealed::Intact(t) => Some(t),
+                Sealed::Missing => None,
+                Sealed::Broken => {
+                    // Nothing the seal says can be believed: start over from
+                    // nothing, which only lowers levels, and say so once.
+                    let _ = std::fs::create_dir_all(&self.dir);
+                    let _ = write_atomic(&path, "{}");
+                    self.write_seal("{}");
+                    seal::report(
+                        &self.dir,
+                        format!(
+                            "The seal on First Mate's granted habit levels ({}) was altered, so the core can no longer tell which levels you granted. \
+                             Every habit is back to observe: First Mate only watches until you approve a level again on a card.",
+                            self.dir.join(SEAL).display()
+                        ),
+                    );
+                    return "{}".into();
+                }
+            },
+        };
         match (known, on_disk) {
             (Some(k), Some(d)) if k == d => d,
             (Some(k), on_disk) => {
@@ -1179,19 +1208,14 @@ impl Store {
         }
     }
 
-    /// The sealed text, if the seal is intact. A seal that does not match
-    /// its own digest was altered too: nothing it says is trusted, and the
-    /// grants start over from nothing (down is always allowed; up needs a card).
-    fn read_seal(&self) -> Option<String> {
-        let text = std::fs::read_to_string(self.dir.join(SEAL)).ok()?;
+    /// The seal on disk. One that does not match its own digest was altered
+    /// too.
+    fn read_seal(&self) -> Sealed {
+        let Ok(text) = std::fs::read_to_string(self.dir.join(SEAL)) else { return Sealed::Missing };
         let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-        let sealed = v.get("text").and_then(Value::as_str);
-        match sealed {
-            Some(t) if v.get("sha256").and_then(Value::as_str) == Some(seal::digest(t).as_str()) => Some(t.to_string()),
-            _ => {
-                seal::report(&self.dir, format!("The seal on First Mate's granted habit levels ({}) was altered; every grant starts over from observe.", self.dir.join(SEAL).display()));
-                Some("{}".into())
-            }
+        match v.get("text").and_then(Value::as_str) {
+            Some(t) if v.get("sha256").and_then(Value::as_str) == Some(seal::digest(t).as_str()) => Sealed::Intact(t.to_string()),
+            _ => Sealed::Broken,
         }
     }
 
@@ -1963,7 +1987,12 @@ mod tests {
         assert_eq!(b.level(&b.habits[0]), HabitLevel::Observe);
         assert_eq!(grants_on_disk(&store), json!({}));
         let reports = take_tamper_reports(Some(&store.dir));
-        assert!(reports.iter().any(|r| r.contains("seal") && r.contains("starts over")), "{reports:?}");
+        assert_eq!(reports.len(), 1, "one note, not two: {reports:?}");
+        assert!(reports[0].contains("seal") && reports[0].contains("back to observe") && reports[0].contains("approve a level again"), "{}", reports[0]);
+        // Sealed afresh: nothing more to say.
+        seal::forget(&granted);
+        store.check_grants();
+        assert!(take_tamper_reports(Some(&store.dir)).is_empty());
     }
 
     #[test]

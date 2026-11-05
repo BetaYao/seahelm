@@ -40,7 +40,7 @@ up**, so that is the first vertical slice.
 | D11 | The user's `autopilot_autonomy` default for an action caps habits by its value: `deny` stops every habit (even one the user approved), `ask` caps a habit the user never approved and is replaced by an approved habit's level. | 2026-11-05 |
 | D12 | A habit level raised by hand in its YAML file, above what the core granted, is neither applied nor silently undone: the core raises a confirmation card (the habit, the granted level, the written level, the evidence). Yes records the written level as granted; no writes the granted level back into the file. Until the user answers, the granted level applies. | 2026-11-05 |
 | D13 | One approval of a batched card counts as one approval of each habit on it, however many worktrees it covered: M approvals means M taps, not M worktrees. | 2026-11-05 |
-| D14 | Only the user answers cards. The core checks who is on the other end of the socket (the kernel's peer pid, not what the call says about itself), refuses a caller inside a seahelm pane, and seals `.granted.json`. Not a sandbox: see "Who may answer a card". | 2026-11-05 |
+| D14 | Only the user answers cards or speaks to First Mate as the user. The core checks who is on the other end of the socket (the kernel's peer pid, not what the call says about itself), refuses a caller inside a seahelm pane, and seals `.granted.json`. Not a sandbox: see "Who may answer a card". | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -194,7 +194,10 @@ straightforward call*, and anything the core refuses or undoes is written
 where the user sees it.
 
 **Peer check** (`seahelmd/crates/core/src/peer.rs`). For `cards.answer`,
-`cards.dismiss`, `cards.clear`, `cards.raise` and `autopilot.answer` the core
+`cards.dismiss`, `cards.clear`, `cards.raise` and `autopilot.answer` — and for `autopilot.say`
+and `command.run`, which speak to First Mate in the user's voice (that sets
+`user_spoke` and lets First Mate act at the user's default levels; prose in
+`command.run` reaches First Mate when the conversation is bound to it) — the core
 takes the connection's peer pid from the kernel (`LOCAL_PEERPID` on macOS,
 `SO_PEERCRED` on Linux, `GetNamedPipeClientProcessId` on Windows), reads that
 process's ancestry and its exec-time environment (`KERN_PROCARGS2`,
@@ -204,8 +207,10 @@ process's ancestry and its exec-time environment (`KERN_PROCARGS2`,
   client (`seahelm-gpui`), seahelm-gateway (web, Telegram) — answers, wherever
   it was launched from. The app relaunched from a pane by `run.sh`, and the
   gateway it starts, carry the pane's variables; they still answer, and the
-  core writes an audit line saying so, so a binary merely named like a
-  client shows up there.
+  core writes an audit line saying so (once per process), so a binary merely
+  named like a client shows up there. Recognising clients by path is the
+  weak point; once there is a signed release, it becomes a code-signature
+  check.
 - a process **inside a pane** — `SEAHELM_PANE_ID` or `SEAHELMD_SESSION` in its
   environment, or a `seahelmd __serve` session process among its ancestors —
   is refused: an RPC error (`-32003`) naming why, an audit line, and a note in
@@ -226,8 +231,8 @@ reach it, and the app would have passed the answer on as itself. The
 `.granted.json`, in memory and in `.granted.seal.json` with its SHA-256.
 Every read compares; a file the core did not write (or a deleted one) is put
 back to the core's version and the user gets a note saying so. A seal that
-does not match its own digest is not believed, and every grant starts over
-from `observe` — lowering needs no one's yes. Grants found before the seal
+does not match its own digest is not believed: every grant starts over from
+`observe` (lowering needs no one's yes), and one note tells the user so. Grants found before the seal
 existed are adopted once. `.history/` is not sealed: it only feeds `undo`,
 which can only lower a grant.
 
