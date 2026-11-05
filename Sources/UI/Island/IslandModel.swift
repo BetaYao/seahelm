@@ -60,6 +60,12 @@ enum IslandOpenReason: Equatable {
 }
 
 /// Observable state driving the island's SwiftUI content. All mutation on main.
+/// A `/command`'s reply as the island shows it under the composer.
+struct IslandCommandReply: Equatable {
+    let text: String
+    let isError: Bool
+}
+
 @Observable
 final class IslandModel {
     static let hoverOpenDelay: TimeInterval = 0.35
@@ -102,6 +108,9 @@ final class IslandModel {
     var draft = ""
     /// The last send that did not reach First Mate; the draft is kept for a retry.
     var sendError: String?
+    /// What the core answered the last `/command` typed here (`/memory show`,
+    /// `/status`, `/help` …): the island is the only place it can be read.
+    var commandReply: IslandCommandReply?
     /// Say this to First Mate (a `/command` runs as one). False when it did not go.
     var onSendToFirstMate: ((String) -> Bool)?
     /// Stop First Mate's turn (Esc into its session).
