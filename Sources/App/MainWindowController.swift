@@ -56,6 +56,8 @@ class MainWindowController: NSWindowController {
     /// back here so macOS drives the native hide/reveal + exit-fullscreen zoom.
     private weak var nativeTrafficLightHome: NSView?
     private var isWindowFullscreen = false
+    /// The pending terminal resync after a non-drag window resize.
+    private var surfaceSyncAfterResize: DispatchWorkItem?
     private lazy var panelCoordinator: PanelCoordinator = {
         let pc = PanelCoordinator()
         pc.delegate = self
@@ -1232,7 +1234,27 @@ dashboard.stationManager = terminalCoordinator.stationManager
     func windowDidExitFullScreen(_ notification: Notification) {
         isWindowFullscreen = false
         positionStandardWindowButtons()
+        scheduleSurfaceSyncAfterResize()
     }
+
+    /// What windowDidEndLiveResize does for a drag, for a window resized any
+    /// other way: lift the sidebar-drag suppression and every split freeze and
+    /// size each terminal to its view. Without it, going full screen after the
+    /// sidebar had been dragged or collapsed (or after a split) left every
+    /// terminal drawing at its old grid in the top-left of a larger pane, with
+    /// stale pixels around it. Coalesced: a full-screen transition resizes the
+    /// window on every frame, and the terminals should get one SIGWINCH.
+    func scheduleSurfaceSyncAfterResize() {
+        surfaceSyncAfterResize?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.surfaceSyncAfterResize = nil
+            GhosttyBridge.shared.resyncAfterWindowResize()
+        }
+        surfaceSyncAfterResize = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.surfaceSyncAfterResizeDelay, execute: work)
+    }
+
+    static let surfaceSyncAfterResizeDelay: TimeInterval = 0.2
 
     /// Return the traffic lights to the system titlebar so macOS manages them.
     private func restoreNativeWindowButtons() {
@@ -1707,6 +1729,13 @@ extension MainWindowController: NSPopoverDelegate {
 extension MainWindowController: NSWindowDelegate {
     func windowDidResize(_ notification: Notification) {
         positionStandardWindowButtons()
+        // A live drag ends in windowDidEndLiveResize; anything else (full
+        // screen, the zoom button, a programmatic frame) has no end of its own.
+        if window?.inLiveResize == false { scheduleSurfaceSyncAfterResize() }
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        scheduleSurfaceSyncAfterResize()
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
