@@ -363,11 +363,32 @@ jobs:
           esac
           ls -la
 
+      # Windows: also a setup.exe (Inno Setup, per-user, Start menu entry,
+      # uninstaller) built from the same folder.
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup -y --no-progress
+          version="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}"
+          version="${version#v}"
+          [ -n "$version" ] || version="$(sed -n 's/.*MARKETING_VERSION: "\(.*\)"/\1/p' project.yml | head -1)"
+          src="$(cygpath -w "$PWD/dist/seahelm-gpui-${{ matrix.name }}")"
+          out="$(cygpath -w "$PWD/dist")"
+          cd clients/gpui/packaging/windows
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+            "/DSourceDir=$src" "/DAppVersion=$version" "/DOutputDir=$out" \
+            "/DOutputBaseName=seahelm-gpui-${{ matrix.name }}-setup" seahelm-gpui.iss
+          echo "setup=dist/seahelm-gpui-${{ matrix.name }}-setup.exe" >> "$GITHUB_ENV"
+          ls -la "$GITHUB_WORKSPACE/dist"
+
       - name: Upload package
         uses: actions/upload-artifact@v6
         with:
           name: gpui-${{ matrix.name }}
-          path: ${{ env.file }}
+          # No setup outside Windows: the package twice is the same file once.
+          path: |
+            ${{ env.file }}
+            ${{ env.setup || env.file }}
           if-no-files-found: error
 
   publish:
@@ -435,9 +456,12 @@ jobs:
 
             - macOS: `seahelm-gpui-macos-arm64.zip` holds `Seahelm GPUI.app`. Unpack it,
               drag it into Applications, open it.
-            - Windows / Linux: `seahelm-gpui-<platform>` is a folder with the GPUI client
-              and the daemons it starts (seahelmd, seahelm-core, seahelm-gateway, seahelm,
-              seahelm-hook). Unpack it and run `seahelm-gpui` from that folder. These are
-              unsigned; Windows SmartScreen asks once.
+            - Windows: run `seahelm-gpui-windows-x86_64-setup.exe` (installs for you only,
+              no administrator rights; Start menu entry and uninstaller). Unsigned, so
+              SmartScreen asks once ("More info" → "Run anyway"). The `.zip` beside it is
+              the same files without an installer.
+            - Linux: `seahelm-gpui-linux-x86_64.tar.gz` is a folder with the GPUI client and
+              the daemons it starts (seahelmd, seahelm-core, seahelm-gateway, seahelm,
+              seahelm-hook). Unpack it and run `seahelm-gpui` from that folder.
 
             Artifacts are notarized when the required Apple signing secrets are configured in this repository; the quarantine step is only needed for un-notarized builds.

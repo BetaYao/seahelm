@@ -10,7 +10,6 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::process::Command;
 
 /// Trunk names tried, in order, when picking what to compare against.
 const BASES: &[&str] = &["origin/main", "origin/master", "main", "master"];
@@ -19,14 +18,8 @@ const PREVIEW_BYTES: usize = 512 * 1024;
 const PREVIEW_LINES: usize = 5000;
 
 fn git_raw(path: &str, args: &[&str]) -> Option<(i32, Vec<u8>)> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::platform::command("git");
     cmd.arg("-C").arg(path).args(args);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
     let out = cmd.output().ok()?;
     Some((out.status.code().unwrap_or(-1), out.stdout))
 }

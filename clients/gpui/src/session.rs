@@ -61,7 +61,7 @@ pub fn ensure_in(name: &str, cmd: &[String], cwd: Option<&str>) -> Result<()> {
     if seahelmd::client::connect(name).is_ok() {
         return Ok(());
     }
-    let mut c = Command::new(daemon_binary());
+    let mut c = crate::platform::command(daemon_binary());
     if let Some(dir) = cwd {
         c.current_dir(dir);
     }

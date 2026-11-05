@@ -1050,7 +1050,7 @@ impl Workspace {
         cx.background_executor()
             .spawn(async move {
                 let _ = core_client::call("pane.unregister", serde_json::json!({"pane": name}));
-                let _ = std::process::Command::new(session::daemon_binary()).args(["kill", &name]).output();
+                let _ = crate::platform::command(session::daemon_binary()).args(["kill", &name]).output();
             })
             .detach();
         self.save_layouts();
