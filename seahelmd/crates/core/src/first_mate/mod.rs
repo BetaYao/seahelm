@@ -17,6 +17,7 @@ pub mod clock;
 pub mod cron;
 pub mod engine;
 pub mod facts;
+pub mod observations;
 pub mod pane;
 pub mod policy;
 pub mod rules;
@@ -96,8 +97,9 @@ pub enum Msg {
     Say { text: String, reply: Sender<bool> },
     /// First Mate's pane changed status.
     Outcome { old: AgentStatus, new: AgentStatus },
-    /// A card First Mate raised was answered (None: dismissed).
-    Answered { payload: String, option: Option<String> },
+    /// A card First Mate raised was answered (None: dismissed), and where
+    /// (`_meta.via`), when the client said.
+    Answered { payload: String, option: Option<String>, via: Option<String> },
     /// A gated call went through.
     DidRun { method: String, result: Value },
     /// An approved or picked call finished.
@@ -268,7 +270,7 @@ impl FirstMate {
                 }
                 self.deliver_if_ready(now);
             }
-            Msg::Answered { payload, option } => self.answered(&payload, option.as_deref(), now),
+            Msg::Answered { payload, option, via } => self.answered(&payload, option.as_deref(), via, now),
             Msg::DidRun { method, result } => self.did_run(&method, &result),
             Msg::Ran { action, what, level, result } => {
                 let outcome = match &result {
@@ -709,7 +711,8 @@ impl FirstMate {
     }
 
     /// The user answered one of First Mate's cards.
-    fn answered(&mut self, payload: &str, option: Option<&str>, now: f64) {
+    fn answered(&mut self, payload: &str, option: Option<&str>, via: Option<String>, now: f64) {
+        self.observe_answer(payload, option, via);
         if let Some(a) = self.approvals.remove(payload) {
             if option != Some(APPROVE) {
                 let mut e = Entry::new(now, "denied", format!("rejected: {}", a.summary));
@@ -718,7 +721,7 @@ impl FirstMate {
                 self.tell(&format!("[seahelm] The user rejected: {}", a.summary));
                 return;
             }
-            self.execute(a.action, a.method, a.params, a.summary, "approved");
+            self.execute(a.action, a.method, a.params, a.summary, "approved", payload);
             return;
         }
         let Some(p) = self.proposals.remove(payload) else { return };
@@ -735,16 +738,53 @@ impl FirstMate {
             self.tell(&format!("[seahelm] The user picked \"{}\" but {} is set to deny; nothing ran.", o.label, o.action.as_str()));
             return;
         }
-        self.execute(o.action, o.method, o.params, o.label, "picked");
+        self.execute(o.action, o.method, o.params, o.label, "picked", payload);
+    }
+
+    /// The answer as evidence (`observations`): which card, what was picked, where.
+    fn observe_answer(&self, payload: &str, option: Option<&str>, via: Option<String>) {
+        let s = |p: &Value, k: &str| p.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+        let msg = if let Some(a) = self.approvals.get(payload) {
+            observations::Msg::CardAnswered {
+                card_kind: "approval",
+                card: payload.into(),
+                option: option.map(str::to_string),
+                via,
+                summary: a.summary.clone(),
+                action: Some(a.action.as_str().into()),
+                worktree: s(&a.params, "worktree_path"),
+                repo: s(&a.params, "repo_path"),
+            }
+        } else if let Some(p) = self.proposals.get(payload) {
+            let picked = p.options.iter().find(|o| Some(o.label.as_str()) == option);
+            observations::Msg::CardAnswered {
+                card_kind: "proposal",
+                card: payload.into(),
+                option: option.map(str::to_string),
+                via,
+                summary: p.summary.clone(),
+                action: picked.map(|o| o.action.as_str().into()),
+                worktree: picked.map(|o| s(&o.params, "worktree_path")).unwrap_or_default(),
+                repo: picked.map(|o| s(&o.params, "repo_path")).unwrap_or_default(),
+            }
+        } else {
+            return;
+        };
+        self.core.observe(msg);
     }
 
     /// Run a call as the user's, off this thread; the outcome comes back as
     /// `Msg::Ran`.
-    fn execute(&self, action: Action, method: String, params: Value, what: String, level: &'static str) {
+    fn execute(&self, action: Action, method: String, params: Value, what: String, level: &'static str, card: &str) {
         let core = self.core.clone();
         let tx = self.tx.clone();
+        let card = card.to_string();
         std::thread::spawn(move || {
-            let result = core.act(&method, &policy::as_user(&params)).map(|mut r| {
+            let result = core.act(&method, &policy::as_user(&params));
+            if let Ok(r) = &result {
+                core.note_performed(&method, &params, r, observations::By::FirstMate, Some(level), Some(&card), None);
+            }
+            let result = result.map(|mut r| {
                 r["_method"] = json!(method);
                 r
             });

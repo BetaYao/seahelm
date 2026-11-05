@@ -80,7 +80,10 @@ impl Host for CoreHost<'_> {
     }
 
     fn create_worktree(&self, repo_path: &str, task: &str) -> Result<String, String> {
-        let r = self.0.act("worktree.create", &json!({"repo_path": repo_path, "prompt": task})).map_err(|e| e.message)?;
+        let params = json!({"repo_path": repo_path, "prompt": task});
+        let r = self.0.act("worktree.create", &params).map_err(|e| e.message)?;
+        // `/new` is the user's own line, from the desktop or a chat.
+        self.0.note_performed("worktree.create", &params, &r, crate::first_mate::observations::By::User, Some("command"), None, None);
         r.get("worktree_path").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "no worktree path".into())
     }
 

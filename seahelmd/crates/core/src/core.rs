@@ -46,6 +46,8 @@ pub struct Core {
     prs: PrStore,
     /// First Mate's thread (`first_mate::spawn`), once started.
     first_mate: std::sync::OnceLock<crate::first_mate::Handle>,
+    /// The observation log's thread (`first_mate::observations::spawn`).
+    observer: std::sync::OnceLock<first_mate::observations::Handle>,
     /// Where each transcript was read to; its own lock, so reading one never
     /// holds `state`.
     transcripts: Mutex<seahelm_core_messages::Tail>,
@@ -98,6 +100,8 @@ struct State {
     cards: Cards,
     /// Where First Mate's pane outcomes and answered cards go.
     first_mate: Option<crate::first_mate::Handle>,
+    /// Where agents' `git worktree add/remove` go, as evidence.
+    observer: Option<first_mate::observations::Handle>,
     /// Every pane's message timeline (`message.*`).
     messages: seahelm_core_messages::Hub,
 }
@@ -167,11 +171,13 @@ impl Core {
                 retries: Vec::new(),
                 cards: Cards::new(),
                 first_mate: None,
+                observer: None,
                 messages: seahelm_core_messages::Hub::new(Some(seahelm_core_messages::hub::Store::open(&message_dir(), 2000)), 80),
             }),
             changed: Condvar::new(),
             prs: PrStore::new(Box::new(pr::Live)),
             first_mate: std::sync::OnceLock::new(),
+            observer: std::sync::OnceLock::new(),
             transcripts: Mutex::new(seahelm_core_messages::Tail::default()),
             handles: Mutex::new(seahelm_core_command::Handles::open(&handles_path(), Some(&rpc::config_dir().join("pane-handles.json")))),
             git_cache: Mutex::new(HashMap::new()),
@@ -286,7 +292,21 @@ impl Core {
             return Reply::Value(Err(first_mate::refused("only First Mate proposes")));
         }
         self.note_presence(method, &p);
+        let caller = fm_policy::caller(&p);
+        let params = matches!(method, "worktree.create" | "worktree.delete").then(|| p.clone());
         let reply = self.clone().dispatch(method, p, now);
+        if let (Some(params), Reply::Value(Ok(r))) = (params, &reply) {
+            use first_mate::observations::By;
+            let (by, pane) = match caller {
+                _ if gated => (By::FirstMate, None),
+                // Called from a pane whose agent is running: the agent
+                // (`seahelm worktree …`); from a bare shell, the user typing it.
+                Some(c) if self.resolve_pane(&c).and_then(|k| self.pane_agent(&k)).is_some_and(|a| a.is_ai_agent()) => (By::Agent, Some(c)),
+                Some(c) => (By::User, Some(c)),
+                None => (By::User, None),
+            };
+            self.note_performed(method, &params, r, by, gated.then_some("auto"), None, pane.as_deref());
+        }
         if gated {
             if let (Some(fm), Reply::Value(Ok(r))) = (self.first_mate.get(), &reply) {
                 fm.send(first_mate::Msg::DidRun { method: method.into(), result: r.clone() });
@@ -505,7 +525,7 @@ impl Core {
                     if let Some(c) = card.filter(|c| raised(c.kind)) {
                         st.registry.publish(json!({"type": "card.answered", "card": c.to_json(), "option": null}));
                         if let (Some(fm), Some(payload)) = (&st.first_mate, &c.payload) {
-                            fm.send(first_mate::Msg::Answered { payload: payload.clone(), option: None });
+                            fm.send(first_mate::Msg::Answered { payload: payload.clone(), option: None, via: via(&p).as_str().map(str::to_string) });
                         }
                     }
                     Ok(json!({"ok": true}))
@@ -634,7 +654,8 @@ impl Core {
             if let Answer::Raised { card, option } = &answer {
                 st.registry.publish(json!({"type": "card.answered", "card": card.to_json(), "option": option, "via": via(p)}));
                 if let (Some(fm), Some(payload)) = (&st.first_mate, &card.payload) {
-                    fm.send(first_mate::Msg::Answered { payload: payload.clone(), option: Some(option.clone()) });
+                    let via = via(p).as_str().map(str::to_string);
+                    fm.send(first_mate::Msg::Answered { payload: payload.clone(), option: Some(option.clone()), via });
                 }
             }
             Ok(answer)
@@ -852,11 +873,43 @@ impl Core {
 /// lock briefly and never does IO under it.
 impl Core {
     /// Start First Mate's thread (it idles until the config gives it First Mate).
+    /// Also starts the observation log, which records whether or not First
+    /// Mate is on and creates First Mate's directory for it — the directory
+    /// only; First Mate itself waits for `autopilot_enabled`
+    /// (`first_mate::observations`).
     pub fn spawn_first_mate(self: &Arc<Self>) {
+        let observer = first_mate::observations::spawn(Arc::clone(self));
+        self.lock().observer = Some(observer.clone());
+        let _ = self.observer.set(observer);
         let handle = first_mate::spawn(Arc::clone(self));
         self.lock().first_mate = Some(handle.clone());
         let _ = self.first_mate.set(handle);
     }
+
+    pub fn observe(&self, m: first_mate::observations::Msg) {
+        if let Some(o) = self.observer.get() {
+            o.send(m);
+        }
+    }
+
+    /// A core-performed `worktree.create` / `worktree.delete` went through:
+    /// tell the observation log who did it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn note_performed(&self, method: &str, params: &Value, result: &Value, by: first_mate::observations::By, how: Option<&str>, card: Option<&str>, pane: Option<&str>) {
+        if !matches!(method, "worktree.create" | "worktree.delete") {
+            return;
+        }
+        self.observe(first_mate::observations::Msg::Performed {
+            method: method.into(),
+            params: params.clone(),
+            result: result.clone(),
+            by,
+            how: how.map(str::to_string),
+            card: card.map(str::to_string),
+            pane: pane.map(str::to_string),
+        });
+    }
+
 
     /// The calls the core performs itself (`actions`).
     pub fn act(&self, method: &str, p: &Value) -> RpcResult {
@@ -982,6 +1035,13 @@ impl Core {
     /// (`pr`, else the PR store's last answer), busy panes, pane activity.
     /// Blocking: git, and maybe a fetch of the PR's head.
     pub fn measure_worktree(&self, worktree: &str, pr: Option<&pr::PrStatus>) -> first_mate::facts::Facts {
+        self.measure_worktree_with(worktree, pr, true)
+    }
+
+    /// `measure_worktree`, saying whether a PR head missing locally may be
+    /// fetched. The observation log's periodic measurements pass false, so
+    /// keeping it fresh never touches the network.
+    pub fn measure_worktree_with(&self, worktree: &str, pr: Option<&pr::PrStatus>, fetch_pr_head: bool) -> first_mate::facts::Facts {
         use first_mate::facts::{Context, Facts, PrInfo};
         let known = if pr.is_some() { None } else { self.prs.known(worktree) };
         let info = match (pr, &known) {
@@ -993,6 +1053,7 @@ impl Core {
         let mut ctx = Context::new(info, now());
         ctx.busy_panes = self.busy_panes(worktree);
         ctx.last_pane_activity = self.last_pane_activity(worktree);
+        ctx.fetch_pr_head = fetch_pr_head;
         Facts::measure(std::path::Path::new(worktree), &ctx)
     }
 
@@ -1347,6 +1408,24 @@ impl State {
 
     /// Held completions whose wait is over, and notices the stability gate
     /// let through.
+    /// An agent starting `git worktree add/remove`: a claim for the
+    /// observation log, which records it as the agent's if the worktree then
+    /// appears or vanishes. A subagent's call counts for its pane too.
+    fn observe_worktree_commands(&self, ev: &hooks::WebhookEvent) {
+        use first_mate::observations::{Msg as Obs, Verb};
+        let Some(observer) = &self.observer else { return };
+        let home = std::env::var("HOME").unwrap_or_default();
+        let found = [
+            (Verb::Create, hooks::location::created_worktree(ev.event, &ev.data, &ev.cwd, &home)),
+            (Verb::Remove, hooks::location::removed_worktree(ev.event, &ev.data, &ev.cwd, &home)),
+        ];
+        for (verb, path) in found {
+            let Some(path) = path else { continue };
+            let pane = self.registry.resolve(ev.pane_id.as_deref(), &ev.cwd).unwrap_or_default();
+            observer.send(Obs::AgentCommand { verb, path, pane });
+        }
+    }
+
     fn timers(&mut self, now: Timestamp) {
         let (due, later): (Vec<Retry>, Vec<Retry>) = std::mem::take(&mut self.retries).into_iter().partition(|r| r.at <= now);
         self.retries = later;
@@ -1417,6 +1496,7 @@ impl State {
                     }
                 }
             }
+            self.observe_worktree_commands(&ev);
             let out = self.provider.handle(&ev, now, &mut hooks::provider::probe_worktree_root);
             if let Some(loc) = &out.pane_location {
                 if let Some(pane) = self.registry.resolve(Some(&loc.pane), "") {
