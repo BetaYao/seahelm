@@ -2137,7 +2137,22 @@ extension MainWindowController {
         // `/command` typed there running as one.
         model.onSendToFirstMate = { [weak self] text in
             guard let self else { return false }
-            if text.hasPrefix("/") { return self.submitBridgeCommand(text) }
+            if text.hasPrefix("/") {
+                // Sent once routed: the core's answer (or its refusal) comes
+                // back as the reply, shown under the composer — every command,
+                // not only `/new`, which is all `submitBridgeCommand` counts.
+                model.commandReply = nil
+                self.routeCommand(text) { [weak self, weak model] reply in
+                    guard let self else { return }
+                    if reply.showsOverview { self.tabCoordinator.switchToTab(0) }
+                    if reply.isError { NSSound.beep() }
+                    if reply.presentsOnDesktop { self.presentCommandReply(reply) }
+                    if !reply.text.isEmpty {
+                        model?.commandReply = IslandCommandReply(text: reply.text, isError: reply.isError)
+                    }
+                }
+                return true
+            }
             return self.tabCoordinator.firstMate.sendUserMessage(text)
         }
         model.onInterruptFirstMate = { [weak self] in

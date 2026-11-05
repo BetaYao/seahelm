@@ -381,6 +381,27 @@ struct OpenedSurfaceView: View {
             if !menuItems.isEmpty {
                 menuList.transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+            if let reply = model.commandReply {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: reply.isError ? "exclamationmark.circle.fill" : "text.alignleft")
+                        .font(.system(size: 10))
+                        .foregroundStyle(reply.isError ? Color.orange : Color.white.opacity(0.5))
+                    ScrollView {
+                        Text(Self.markdown(reply.text))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 160)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .onTapGesture { model.commandReply = nil }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.05)))
+            }
             if let error = model.sendError {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.circle.fill").font(.system(size: 10)).foregroundStyle(.orange)
