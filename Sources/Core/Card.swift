@@ -37,6 +37,18 @@ struct Card: Equatable, Identifiable {
     let checked: [Int]
     let payload: String?
     let createdAt: Date
+    /// AskUserQuestion's tab title for the question ("Customer"), "" without.
+    let header: String
+    /// The line under each option in the agent's dialog, index for index with
+    /// `options` ("" where one has none); empty when there are none.
+    let details: [String]
+
+    /// The description to draw under `labels[index]`: the matching option's,
+    /// nothing for Done or when the details do not line up.
+    func detail(forLabelAt index: Int) -> String {
+        guard details.count == options.count, details.indices.contains(index) else { return "" }
+        return details[index]
+    }
 
     /// Asks the agent something in its own terminal.
     var isAgentQuestion: Bool { kind == .question || kind == .choice }
@@ -61,15 +73,19 @@ struct Card: Equatable, Identifiable {
         checked = d["checked"] as? [Int] ?? []
         payload = d["payload"] as? String
         createdAt = Date(timeIntervalSince1970: d["created_at"] as? Double ?? 0)
+        header = (d["header"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        details = (d["details"] as? [String] ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
     #if DEBUG
     init(id: String, kind: Kind, terminalID: String = "", worktreePath: String = "", message: String = "",
-         options: [String] = [], multiSelect: Bool = false, payload: String? = nil) {
+         options: [String] = [], multiSelect: Bool = false, payload: String? = nil,
+         header: String = "", details: [String] = []) {
         self.id = id; self.kind = kind; paneSessionKey = ""; self.terminalID = terminalID
         self.worktreePath = worktreePath; branch = ""; project = ""; self.message = message
         self.options = options; labels = multiSelect ? options.map { "☐ " + $0 } + [Self.doneLabel] : options
         self.multiSelect = multiSelect; checked = []; self.payload = payload; createdAt = Date()
+        self.header = header; self.details = details
     }
     #endif
 }
