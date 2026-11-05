@@ -205,6 +205,7 @@ struct Proposal {
 }
 
 struct ProposalOption {
+    key: String,
     label: String,
     action: Action,
     method: String,
@@ -229,6 +230,7 @@ struct FirstMate {
     user_spoke: bool,
     approvals: HashMap<String, Approval>,
     habit_proposals: HashMap<String, generalisation::PendingHabit>,
+    reported_invalid: HashSet<String>,
     card_options: HashMap<String, Vec<lang::CardOption>>,
     proposals: HashMap<String, Proposal>,
     started: HashSet<String>,
@@ -303,6 +305,7 @@ impl FirstMate {
             user_spoke: false,
             approvals: HashMap::new(),
             card_options: HashMap::new(),
+            reported_invalid: HashSet::new(),
             habit_proposals: HashMap::new(),
             proposals: HashMap::new(),
             started: HashSet::new(),
@@ -816,7 +819,7 @@ impl FirstMate {
                     budget::Class::Proactive
                 };
                 let lang = self.config.language;
-                self.put_card(CardKind::Approval, &id, format!("{}{}", lang.pick("First Mate asks: ", "First Mate 请示："), brief::describe_action(lang, action, &shown).unwrap_or(summary.clone())), vec![APPROVE.into(), REJECT.into()], class, now);
+                self.put_card(CardKind::Approval, &id, format!("{}{}", lang.pick("First Mate asks: ", "First Mate 请示："), lang::with_habit(brief::describe_action(lang, action, &shown).unwrap_or(summary.clone()), params.get("habit").and_then(Value::as_str), lang)), vec![APPROVE.into(), REJECT.into()], class, now);
                 let mut e = Entry::new(now, "approval", summary.clone());
                 e.action = Some(action.as_str().into());
                 e.level = Some("ask".into());
@@ -872,7 +875,7 @@ impl FirstMate {
             if self.level(action) == Level::Deny {
                 return Err(refused(format!("option {}: {} is set to deny", i + 1, action.as_str())));
             }
-            options.push(ProposalOption { label: label.into(), action, method: method.into(), params: o.get("params").cloned().unwrap_or(json!({})) });
+            options.push(ProposalOption { key: format!("choice:{i}"), label: label.into(), action, method: method.into(), params: o.get("params").cloned().unwrap_or(json!({})) });
         }
         if options.is_empty() || options.len() > 5 {
             return Err(RpcError::invalid_params("between one and five options"));
@@ -891,16 +894,19 @@ impl FirstMate {
     fn answered(&mut self, payload: &str, option: Option<&str>, via: Option<String>, now: f64) {
         let canonical = option.map(|answer| {
             self.card_options.get(payload).and_then(|options| options.iter()
-                .find(|option| option.accepts(answer))
-                .map(|option| option.legacy.clone())).unwrap_or_else(|| answer.to_string())
+                .find(|option| option.label == answer)
+                .map(|option| option.key.clone())).unwrap_or_else(|| lang::option_key(answer))
         });
         let option = canonical.as_deref();
-        if let Some(age) = self.expiry.age(payload, now) {
-            let promotion = payload.starts_with(habits::PROMOTE_PREFIX) && payload.contains(":auto:");
-            let accepted = option == Some(APPROVE)
-                || option.is_some_and(|o| o.starts_with("Yes, ") || o.starts_with("Delete"))
-                || self.proposals.get(payload).is_some_and(|p| p.options.iter().any(|o| Some(o.label.as_str()) == option));
-            let notes = self.budget.tuned.outcome(accepted, promotion, Some(age), false);
+        if let (Some(age), Some(key)) = (self.expiry.age(payload, now), option) {
+            let accepted = matches!(key,"approve" | "delete" | "delete_all") || key.starts_with("yes:") || key.starts_with("choice:");
+            let evidence = if payload.starts_with(habits::PROMOTE_PREFIX) && payload.contains(":auto:") {
+                tuning::Evidence::Promotion(accepted)
+            } else if self.habit_proposals.contains_key(payload) || self.proposals.contains_key(payload)
+                || payload.starts_with(habits::PROMOTE_PREFIX) || payload.starts_with(sweep::SWEEP_PREFIX) {
+                tuning::Evidence::Suggestion(accepted)
+            } else { tuning::Evidence::Answer };
+            let notes = self.budget.tuned.record(evidence, Some(age));
             for note in notes { self.log(Entry::new(now, "tuning", note.en.clone())); self.budget.note(note); }
             self.save_budget();
         }
@@ -908,7 +914,7 @@ impl FirstMate {
         self.expiry.forget(payload);
         if let Some(pending) = self.habit_proposals.remove(payload) {
             self.observe_habit_answer("habit.propose", payload, option, via.clone(), format!("propose habit {}", pending.habit.id), format!("{}/{}", pending.key, pending.habit.id), String::new());
-            if option == Some(APPROVE) {
+            if option == Some("approve") {
                 let mut book = self.habits.load(&pending.key, &Self::today(now));
                 let grant = habits::Grant::from_inventory_card(&pending.key, &pending.habit.id, pending.habit.level);
                 if book.adopt_proposal(pending.habit, grant, &Self::today(now)).is_ok() {
@@ -926,13 +932,13 @@ impl FirstMate {
         let habit = match self.approvals.get(payload) {
             Some(a) if a.action == Action::DeleteWorktree => {
                 let params = a.params.clone();
-                self.count_delete_approval(&params, option == Some(APPROVE), now)
+                self.count_delete_approval(&params, option == Some("approve"), now)
             }
             _ => None,
         };
         self.observe_answer(payload, option, via, habit);
         if let Some(a) = self.approvals.remove(payload) {
-            if option != Some(APPROVE) {
+            if option != Some("approve") {
                 let mut e = Entry::new(now, "denied", format!("rejected: {}", a.summary));
                 e.action = Some(a.action.as_str().into());
                 self.log(e);
@@ -943,7 +949,7 @@ impl FirstMate {
             return;
         }
         let Some(p) = self.proposals.remove(payload) else { return };
-        let Some(o) = p.options.into_iter().find(|o| Some(o.label.as_str()) == option) else {
+        let Some(o) = p.options.into_iter().find(|o| Some(o.key.as_str()) == option) else {
             self.log(Entry::new(now, "denied", format!("not now: {}", p.summary)));
             self.tell(&format!("[seahelm] The user passed on your proposal: {}", p.summary));
             return;
@@ -975,7 +981,7 @@ impl FirstMate {
                 habit,
             }
         } else if let Some(p) = self.proposals.get(payload) {
-            let picked = p.options.iter().find(|o| Some(o.label.as_str()) == option);
+            let picked = p.options.iter().find(|o| Some(o.key.as_str()) == option);
             observations::Msg::CardAnswered {
                 card_kind: "proposal",
                 card: payload.into(),

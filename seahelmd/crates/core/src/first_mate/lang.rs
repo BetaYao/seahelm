@@ -89,8 +89,8 @@ mod tests {
     }
 }
 
-/// Core-owned option identifiers. English strings remain wire aliases for
-/// cards already visible when the language changes.
+/// Display labels for built-in options. Cards already shown in English keep
+/// those English labels; translated cards accept only their shown labels.
 pub fn card_label(key: &str, lang: Lang) -> String {
     if lang == Lang::En { return key.into(); }
     let fixed = match key {
@@ -119,22 +119,38 @@ mod card_tests {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct CardOption {
-    pub key: String,
-    pub legacy: String,
-    pub label: String,
+/// Internal identity; clients send an index or the label actually shown.
+/// Old English cards still normalize here when their original labels arrive.
+pub fn option_key(label: &str) -> String {
+    let fixed = match label {
+        "Approve" => "approve", "Reject" => "reject", "Not now" => "not_now",
+        "Delete" | "Delete it" => "delete", "Keep" => "keep", "Let me pick" => "pick",
+        "Ask me each time" => "ask_each_time", "Not yet" => "not_yet", "No, put it back" => "restore",
+        s if s.starts_with("Delete all ") => "delete_all",
+        _ => "",
+    };
+    if !fixed.is_empty() { return fixed.into(); }
+    if let Some(level) = label.strip_prefix("Yes, keep ") { return format!("confirm:{level}"); }
+    if let Some(level) = label.strip_prefix("Yes, ") { return format!("yes:{level}"); }
+    label.into()
 }
-impl CardOption {
-    pub fn new(legacy: &str, lang: Lang) -> Self {
-        let key = match legacy {
-            "Approve" => "approve", "Reject" => "reject", "Not now" => "not_now",
-            "Delete" | "Delete it" => "delete", "Keep" => "keep", "Let me pick" => "pick",
-            "Ask me each time" => "ask_each_time", "Not yet" => "not_yet", "No, put it back" => "restore",
-            s if s.starts_with("Delete all ") => "delete_all",
-            _ => "",
-        };
-        Self { key: if key.is_empty() { legacy.to_string() } else { key.into() }, legacy: legacy.into(), label: card_label(legacy, lang) }
+
+pub fn habit_action(action: super::habits::Do, lang: Lang) -> &'static str {
+    match action {
+        super::habits::Do::DeleteWorktree => lang.pick("delete a worktree", "删除 worktree"),
+        super::habits::Do::Keep => lang.pick("keep a worktree", "保留 worktree"),
     }
-    pub fn accepts(&self, answer: &str) -> bool { answer == self.key || answer == self.legacy || answer == self.label }
+}
+
+pub fn with_habit(text: String, id: Option<&str>, lang: Lang) -> String {
+    match id { Some(id) => format!("{text} [{}: {id}]",lang.pick("habit","习惯")), None => text }
+}
+
+#[derive(Clone, Debug)]
+pub struct CardOption { pub key: String, pub label: String }
+impl CardOption {
+    pub fn new(label: &str, lang: Lang, index: usize) -> Self {
+        let key = option_key(label);
+        Self { key: if key == label { format!("choice:{index}") } else { key }, label: card_label(label, lang) }
+    }
 }

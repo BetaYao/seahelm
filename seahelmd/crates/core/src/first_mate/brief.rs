@@ -319,8 +319,14 @@ impl FirstMate {
     }
 
     fn raise_now(&mut self, h: Held, now: f64) {
-        let options: Vec<super::lang::CardOption> = h.options.iter().map(|key|
-            super::lang::CardOption::new(key, self.config.language)).collect();
+        let options: Vec<super::lang::CardOption> = h.options.iter().enumerate().map(|(index,key)|
+            {
+                let mut option = super::lang::CardOption::new(key, self.config.language,index);
+                if h.kind == CardKind::Proposal && index + 1 < h.options.len() {
+                    option.key = format!("choice:{index}"); option.label = key.clone();
+                }
+                option
+            }).collect();
         let labels = options.iter().map(|option| option.label.clone()).collect();
         self.card_options.insert(h.payload.clone(), options);
         self.core.raise_card(Raise {
@@ -473,7 +479,7 @@ impl FirstMate {
     fn expire(&mut self, payload: &str, now: f64) {
         self.card_options.remove(payload);
         let proposed_habit = self.habit_proposals.remove(payload);
-        let notes = self.budget.tuned.outcome(false, false, None, true);
+        let notes = self.budget.tuned.record(super::tuning::Evidence::Expired, None);
         for note in notes { self.log(Entry::new(now, "tuning", note.en.clone())); self.budget.note(note); }
         self.save_budget();
         self.core.drop_card_payload(payload);

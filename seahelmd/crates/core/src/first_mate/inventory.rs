@@ -200,10 +200,11 @@ pub fn options(g: Group, n: usize) -> Vec<String> {
 /// The answer an option names on this group's card; None for anything
 /// else — a dismissal, or a delete the at-risk card never offered.
 pub fn parse_answer(g: Group, n: usize, option: Option<&str>) -> Option<Answer> {
-    match option? {
-        o if g.can_delete() && o == delete_label(n) => Some(Answer::Delete),
-        KEEP => Some(Answer::Keep),
-        ASK_EACH_TIME => Some(Answer::AskEachTime),
+    let key = super::lang::option_key(option?);
+    match key.as_str() {
+        o if g.can_delete() && o == super::lang::option_key(&delete_label(n)) => Some(Answer::Delete),
+        "keep" => Some(Answer::Keep),
+        "ask_each_time" => Some(Answer::AskEachTime),
         _ => None,
     }
 }

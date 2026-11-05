@@ -199,8 +199,8 @@ impl Batch {
         self.card_in(super::lang::Lang::En)
     }
 
-    /// The card in the user's language. The option labels stay as they are:
-    /// answers are matched on them.
+    /// The card in the user's language. Built-in option labels are localized
+    /// at delivery and resolved to canonical keys before matching.
     pub fn card_in(&self, lang: super::lang::Lang) -> (String, Vec<String>) {
         use super::lang::Lang;
         let mut m = match (lang, self.items.len()) {
@@ -249,11 +249,12 @@ pub enum BatchAnswer {
 }
 
 pub fn answer_batch(b: &Batch, option: Option<&str>) -> BatchAnswer {
-    match option {
-        Some(o) if b.items.len() == 1 && o == DELETE => BatchAnswer::Delete(vec![0]),
-        Some(o) if b.items.len() == 1 && o == KEEP => BatchAnswer::Keep(0),
-        Some(o) if o == delete_all(b.items.len()) => BatchAnswer::Delete(b.open.clone()),
-        Some(LET_ME_PICK) => BatchAnswer::Pick,
+    let key = option.map(super::lang::option_key);
+    match key.as_deref() {
+        Some(o) if b.items.len() == 1 && o == "delete" => BatchAnswer::Delete(vec![0]),
+        Some(o) if b.items.len() == 1 && o == "keep" => BatchAnswer::Keep(0),
+        Some(o) if o == "delete_all" => BatchAnswer::Delete(b.open.clone()),
+        Some("pick") => BatchAnswer::Pick,
         _ => BatchAnswer::Nothing,
     }
 }

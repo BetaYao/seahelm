@@ -35,6 +35,15 @@ impl Default for State {
         }
     }
 }
+#[derive(Clone, Copy)]
+pub enum Evidence {
+    Suggestion(bool),
+    Promotion(bool),
+    Answer,
+    Expired,
+    Demotion,
+}
+
 impl State {
     pub fn clamp(&mut self) {
         self.n = self.n.clamp(2, 10);
@@ -42,43 +51,48 @@ impl State {
         self.expiry_days = self.expiry_days.clamp(1, 7);
         self.daily_cap = self.daily_cap.clamp(1, 5);
     }
-    pub fn outcome(
-        &mut self,
-        accepted: bool,
-        promotion: bool,
-        latency: Option<f64>,
-        expired: bool,
-    ) -> Vec<Text> {
+    pub fn record(&mut self, evidence: Evidence, latency: Option<f64>) -> Vec<Text> {
         self.clamp();
         let mut notes = Vec::new();
-        if expired {
-            self.expired += 1;
-            self.answered = 0;
-        } else {
-            self.answered += 1;
-            self.expired = 0;
-            if promotion {
-                if accepted {
-                    self.promotions_yes += 1;
-                    self.promotions_no = 0;
-                } else {
-                    self.promotions_no += 1;
-                    self.promotions_yes = 0;
-                }
-            } else if accepted {
-                self.accepted += 1;
-                self.declined = 0;
-            } else {
-                self.declined += 1;
-                self.accepted = 0;
+        match evidence {
+            Evidence::Expired => {
+                self.expired += 1;
+                self.answered = 0;
             }
-            if let Some(age) = latency {
-                if age < 3600.0 {
-                    self.fast += 1;
-                    self.late = 0;
-                } else if age > 86400.0 {
-                    self.late += 1;
-                    self.fast = 0;
+            Evidence::Demotion => {
+                self.promotions_no += 1;
+                self.promotions_yes = 0;
+            }
+            evidence => {
+                self.answered += 1;
+                self.expired = 0;
+                match evidence {
+                    Evidence::Promotion(true) => {
+                        self.promotions_yes += 1;
+                        self.promotions_no = 0;
+                    }
+                    Evidence::Promotion(false) => {
+                        self.promotions_no += 1;
+                        self.promotions_yes = 0;
+                    }
+                    Evidence::Suggestion(true) => {
+                        self.accepted += 1;
+                        self.declined = 0;
+                    }
+                    Evidence::Suggestion(false) => {
+                        self.declined += 1;
+                        self.accepted = 0;
+                    }
+                    _ => {}
+                }
+                if let Some(age) = latency {
+                    if age < 3600.0 {
+                        self.fast += 1;
+                        self.late = 0;
+                    } else if age > 86400.0 {
+                        self.late += 1;
+                        self.fast = 0;
+                    }
                 }
             }
         }
@@ -89,22 +103,7 @@ impl State {
                     let old = self.$field;
                     self.$field = ((old as i64 + $delta).clamp($lo, $hi)) as _;
                     if old != self.$field {
-                        notes.push(Text::new(
-                            format!(
-                                "First Mate tuning: {} {} → {}: {}",
-                                stringify!($field),
-                                old,
-                                self.$field,
-                                $reason
-                            ),
-                            format!(
-                                "First Mate 调整：{} 从 {} 改为 {}：{}",
-                                stringify!($field),
-                                old,
-                                self.$field,
-                                $zh
-                            ),
-                        ));
+                        notes.push(Text::new($reason, $zh));
                     }
                 }
             };
@@ -115,8 +114,8 @@ impl State {
             -1,
             2,
             10,
-            "you accepted the last six suggestions",
-            "你接受了最近六次建议"
+            "I'll suggest these clean-ups sooner: you accepted the last six suggestions.",
+            "你接受了最近六次清理建议，以后我会更早提出这类建议。"
         );
         adjust!(
             declined,
@@ -124,8 +123,8 @@ impl State {
             1,
             2,
             10,
-            "you declined the last six suggestions",
-            "你拒绝了最近六次建议"
+            "I'll wait for more evidence before suggesting clean-ups: you declined the last six.",
+            "最近六次清理建议你都没有采纳，以后我会等证据更多时再提议。"
         );
         adjust!(
             promotions_yes,
@@ -133,8 +132,8 @@ impl State {
             -1,
             3,
             20,
-            "you accepted the last six promotions",
-            "你接受了最近六次升级"
+            "I'll offer automation sooner: you accepted the last six promotions.",
+            "你接受了最近六次升级，以后我会更早向你提议自动处理。"
         );
         adjust!(
             promotions_no,
@@ -142,8 +141,8 @@ impl State {
             1,
             3,
             20,
-            "you declined the last six promotions",
-            "你拒绝了最近六次升级"
+            "I'll wait for more approvals before offering automation: you declined the last six promotions.",
+            "最近六次升级未被采纳或后来降级，以后我会积累更多批准再提议自动处理。"
         );
         adjust!(
             fast,
@@ -151,8 +150,8 @@ impl State {
             -1,
             1,
             7,
-            "you answered six cards within an hour",
-            "你在一小时内回答了六张卡"
+            "I'll withdraw unanswered cards sooner: you answered six within an hour.",
+            "你都在一小时内回答了最近六张卡，以后未回答的卡片会早一些撤下。"
         );
         adjust!(
             late,
@@ -160,8 +159,8 @@ impl State {
             1,
             1,
             7,
-            "you answered six cards after a day",
-            "你在一天后回答了六张卡"
+            "I'll leave cards open longer: you answered six after a day.",
+            "你在一天后仍回答了六张卡，以后我会多留一些时间等你回复。"
         );
         adjust!(
             answered,
@@ -169,8 +168,8 @@ impl State {
             1,
             1,
             5,
-            "you answered the last six cards",
-            "你回答了最近六张卡"
+            "I'll allow one more suggestion a day: you answered the last six cards.",
+            "你回答了最近六张卡，以后每天可以多提一条建议。"
         );
         adjust!(
             expired,
@@ -178,8 +177,8 @@ impl State {
             -1,
             1,
             5,
-            "six cards expired unanswered",
-            "六张卡未回答而过期"
+            "I'll ask less often: six cards expired unanswered.",
+            "六张卡未回答而过期，以后每天我会少问一次。"
         );
         notes
     }
@@ -191,11 +190,11 @@ mod tests {
     fn evidence_moves_questions_within_bounds() {
         let mut s = State::default();
         for _ in 0..120 {
-            s.outcome(true, true, Some(1.0), false);
+            s.record(Evidence::Promotion(true), Some(1.0));
         }
         assert_eq!((s.m, s.expiry_days, s.daily_cap), (3, 1, 5));
         for _ in 0..120 {
-            s.outcome(false, false, None, true);
+            s.record(Evidence::Expired, None);
         }
         assert_eq!(s.daily_cap, 1);
     }
@@ -203,8 +202,8 @@ mod tests {
     fn sparse_or_opposing_evidence_does_not_move_n() {
         let mut s = State::default();
         for _ in 0..20 {
-            s.outcome(true, false, None, false);
-            s.outcome(false, false, None, false);
+            s.record(Evidence::Suggestion(true), None);
+            s.record(Evidence::Suggestion(false), None);
         }
         assert_eq!(s.n, 3);
     }
@@ -214,7 +213,7 @@ mod tests {
         assert_eq!(old, State::default());
         let mut state = old;
         for _ in 0..6 {
-            state.outcome(true, false, Some(30.0), false);
+            state.record(Evidence::Suggestion(true), Some(30.0));
         }
         let restored: State =
             serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
@@ -223,5 +222,29 @@ mod tests {
             (restored.n, restored.expiry_days, restored.daily_cap),
             (2, 2, 4)
         );
+    }
+    #[test]
+    fn demotion_is_not_an_answer_and_does_not_reset_expiries() {
+        let mut state = State::default();
+        state.record(Evidence::Expired, None);
+        state.record(Evidence::Demotion, None);
+        assert_eq!(
+            (
+                state.expired,
+                state.answered,
+                state.fast,
+                state.accepted,
+                state.declined
+            ),
+            (1, 0, 0, 0, 0)
+        );
+        assert_eq!(state.promotions_no, 1);
+        let notes: Vec<_> = (0..6)
+            .flat_map(|_| state.record(Evidence::Suggestion(true), Some(10.0)))
+            .collect();
+        assert!(notes.iter().any(|note| note.zh.contains("更早提出")));
+        assert!(notes
+            .iter()
+            .all(|note| !note.zh.contains("daily_cap") && !note.zh.contains("expiry_days")));
     }
 }

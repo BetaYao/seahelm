@@ -293,8 +293,8 @@ impl Cond {
     }
 }
 
-/// A habit's situation, in measured facts. A fact the core could not
-/// measure (`None`) never matches: unknown is not zero.
+/// Measured facts, or an explicitly tagged judgement condition from a proposal.
+/// Unknown measured values and judgement prose never match automatically.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct When(pub BTreeMap<Fact, Cond>, pub Option<String>);
 
@@ -325,7 +325,7 @@ impl From<When> for Mapping {
 
 impl Serialize for When {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        if let Some(prose) = &self.1 { return prose.serialize(s); }
+        if let Some(prose) = &self.1 { return BTreeMap::from([("judgement",prose)]).serialize(s); }
         Mapping::from(self.clone()).serialize(s)
     }
 }
@@ -334,7 +334,11 @@ impl<'de> Deserialize<'de> for When {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Yaml::deserialize(d)?;
         match v {
-            Yaml::String(prose) if !prose.trim().is_empty() && prose.len() <= 2000 => Ok(When(BTreeMap::new(), Some(prose))),
+            Yaml::Mapping(m) if m.len() == 1 && m.contains_key(Yaml::String("judgement".into())) => {
+                let prose = m.get(Yaml::String("judgement".into())).and_then(Yaml::as_str).unwrap_or_default();
+                if prose.trim().is_empty() || prose.len() > 2000 { return Err(serde::de::Error::custom("invalid judgement condition")); }
+                Ok(When(BTreeMap::new(), Some(prose.into())))
+            },
             Yaml::Mapping(m) => When::try_from(m).map_err(serde::de::Error::custom),
             _ => Err(serde::de::Error::custom("when must be measured facts or nonempty prose (at most 2000 bytes)")),
         }
@@ -915,9 +919,7 @@ impl Book {
         if g.key != self.key || g.id != h.id || g.level != h.level || g.confirm || h.level > HabitLevel::Ask {
             return Err("proposal grant mismatch".into());
         }
-        // An edited condition starts with fresh evidence and the level named
-        // on this card, even if the previous version had earned auto.
-        self.habits.retain(|old| old.id != h.id);
+        if self.get(&h.id).is_some() { return Err("habit already exists".into()); }
         self.adopt(h, g, today)
     }
 
@@ -1102,7 +1104,7 @@ impl Offers {
     /// on an offer this core raised makes a `Grant`.
     pub fn answer(&mut self, payload: &str, option: Option<&str>) -> Option<OfferAnswer> {
         let o = self.open.remove(payload)?;
-        if option == o.options().first().map(String::as_str) {
+        if option.map(super::lang::option_key) == o.options().first().map(|label| super::lang::option_key(label)) {
             Some(OfferAnswer::Accepted(Grant { key: o.key, id: o.id, level: o.level, confirm: o.confirm, _only_from_a_card: () }))
         } else {
             Some(OfferAnswer::Declined { key: o.key, id: o.id, confirm: o.confirm })
@@ -2213,16 +2215,16 @@ mod tests {
         assert_eq!(h["can_be_auto"], true);
     }
     #[test]
-    fn editing_an_auto_habit_only_grants_the_ask_shown_on_the_card() {
+    fn a_proposal_cannot_replace_an_existing_auto_habit() {
         let mut b = Book::seeded(TODAY);
         b.caps.insert(SEED_ID.into(), HabitLevel::Auto);
         b.habits[0].level = HabitLevel::Auto;
         let mut replacement = Habit::seed(TODAY);
-        replacement.when = serde_yaml::from_str("docs PRs no longer needed").unwrap();
+        replacement.when = serde_yaml::from_str("{judgement: docs PRs no longer needed}").unwrap();
         let grant = Grant::from_inventory_card(GLOBAL, SEED_ID, HabitLevel::Ask);
-        b.adopt_proposal(replacement, grant, TODAY).unwrap();
-        assert_eq!(b.level(&b.habits[0]), HabitLevel::Ask);
-        assert!(!b.habits[0].when.matches(&clean_merged()));
+        assert!(b.adopt_proposal(replacement, grant, TODAY).is_err());
+        assert_eq!(b.level(&b.habits[0]), HabitLevel::Auto);
+        assert!(b.habits[0].when.matches(&clean_merged()));
     }
 
 }

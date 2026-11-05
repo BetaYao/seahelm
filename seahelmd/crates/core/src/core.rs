@@ -1114,6 +1114,16 @@ impl Core {
 
     /// What First Mate reads to time the brief: the profile, and whether a
     /// desktop client is in front.
+    #[cfg(test)]
+    pub fn set_test_first_mate(&self, handle: first_mate::Handle) {
+        self.lock().first_mate = Some(handle.clone());
+        let _ = self.first_mate.set(handle);
+    }
+
+    pub fn presence_last_seen(&self) -> f64 {
+        self.presence.lock().unwrap_or_else(|e| e.into_inner()).profile.last_seen
+    }
+
     pub fn presence(&self) -> first_mate::presence::Snapshot {
         let desktop_in_front = self.lock().clients.iter().any(|(name, (_, active))| *active && !name.starts_with("web"));
         let profile = self.presence.lock().unwrap_or_else(|e| e.into_inner()).profile.clone();
