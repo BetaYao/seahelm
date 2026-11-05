@@ -128,6 +128,9 @@ the user; First Mate shows and changes them only through the core.
           ignored_files: 0, unpushed: 0, busy_panes: 0 }
   do: delete_worktree
   level: ask            # observe | suggest | ask | auto
+  status: active        # active | superseded (kept in place, beside its replacement)
+  observed: 2026-11-05
+  sources: [obs-0012, obs-0031, obs-0040]
   origin: inventory     # general | inventory | learned | user
   evidence: { approved: 5, rejected: 0, manual: 3, ignored: 0, since: 2026-11-05 }
   examples: [feat/island-pill, fix/web-question-details]
@@ -274,6 +277,73 @@ weekday, and:
 
 Where they open it (and whether they act on it) is evidence for the next day's
 choice.
+
+## Prior art: Hermes Agent, OpenClaw, Meta Muse
+
+Researched 2026-11-05 from Hermes's and OpenClaw's own repos
+(`NousResearch/hermes-agent` `website/docs/user-guide/features/{memory,skills,curator}.md`;
+`openclaw/openclaw` `docs/concepts/{memory,dreaming,user-model,memory-provenance,standing-intents}.md`,
+`docs/gateway/heartbeat.md`). Muse is closed; what is known comes from press
+coverage of its launch (2026-09) and of a WIRED story (2026-10-03).
+
+| | Hermes | OpenClaw | Muse |
+|---|---|---|---|
+| Always in context | `MEMORY.md` (2,200 chars) + `USER.md` (1,375), hard caps, a fullness gauge, frozen per session | `USER.md` (4,000 chars of directives) + `MEMORY.md`, truncated past a budget | an editable memory file in a per-user cloud VM |
+| Searched on demand | every transcript in SQLite FTS5 (`session_search`) | daily notes `memory/YYYY-MM-DD.md`, hybrid embedding + keyword search | — |
+| Writing | the agent's `memory` tool (add / patch / remove; whole-entry replace removed); a background review every ~10 turns, cheaper model, budget | the agent while working; a silent flush before compaction; nightly "dreaming" that promotes only past score gates (frequency, distinct queries, multi-day recurrence) and returns merge/supersede *decisions* with source line refs | hourly pages on every person in the user's life, unstated goals inferred |
+| Procedures | `SKILL.md` written after hard-won work; a curator (idle-only, weekly) archives unused ones, never deletes; backups, audit, rollback | Skill Workshop, `propose` mode for drafts, one-word undo | saved workflows as skills (unconfirmed) |
+| Control | optional write approval queue, tied to the exact entry text; a "journey" timeline; injection scanning | supersede in place (`observed: DATE \| status: superseded`); forget by session lineage; memory edited off the tracked path or during a web-tainted turn is dropped from context | edit, "best effort" forget; no off switch |
+| Personal data | via skills only | Gmail to a separate sandboxed reader agent, as untrusted data | Gmail, Calendar, more; the backlash: profiles of people who never opted in |
+
+What we take, and where it lands in this design:
+
+1. **Small, capped, always-in-context memory; the rest searched.** A project's
+   memory injected at SessionStart and into First Mate's context is capped
+   (start at 2,000 chars) with a fullness gauge, so First Mate has to prune;
+   the observation log is the searchable tier (`seahelm learn search`).
+2. **Directives with an observed date, a status and their sources.** Habits
+   and memory notes carry `observed`, `status: active|superseded` and `sources`
+   (observation ids). A changed preference is superseded in place, never
+   appended beside the old one.
+3. **Gates before a habit is proposed**: N matching actions **on at least two
+   days and in at least two distinct worktrees**. One inventory answer covering
+   twelve worktrees is one decision, not twelve.
+4. **Review only when idle**, with a token budget, on a cheaper model if set,
+   and the first review a full day after First Mate is turned on.
+5. **Everything undoable.** Every change to a habit or memory file keeps the
+   previous version; "撤销" / `seahelm habit undo` reverts the last; forgetting
+   follows lineage (a forgotten observation takes the habits it alone supports
+   back down).
+6. **Provenance.** Learning reads only what the *user* did and said: their
+   actions, card answers, their prompts to agents and to First Mate. Agent
+   output, issue bodies, web pages and mail are data, never sources of a
+   directive. A memory file edited outside the core is shown to the user and
+   kept out of automatic context until confirmed.
+7. **The core confirms every write.** Hermes's worst failure is the model
+   saying "I'll remember" and never calling the tool. First Mate writes only
+   through the core, and the *core* posts the line "记下了：…" in the
+   conversation; no line means nothing was saved.
+8. **First Mate's long session.** Its context is refreshed at each review, and
+   it flushes learnings before its session compacts.
+
+What we refuse, from Muse: no pages about people; nothing inferred about third
+parties; forgetting is real deletion along lineage, not best effort; one
+switch turns learning off.
+
+## Personal sources (future: mail, calendar)
+
+The user may later authorise mail and calendar. They fit as:
+
+- **Calendar** sharpens the activity profile (D8): no cards during meetings,
+  the brief in a gap between them.
+- **Mail** is another task source beside GitHub and Jira: candidate tasks go to
+  the brief, never straight to action.
+
+Rules, from OpenClaw's design and Muse's backlash: read-only connectors; mail
+read by a separate, sandboxed reader whose output is a summary marked
+untrusted; nothing from these sources becomes a habit or a memory directive;
+no profiles of people; each source switched on and off on its own; still local
+(D7), with the same caveat as D5 that what First Mate reads goes to the model.
 
 ## Scenario 1 — worktree clean-up (first slice)
 
