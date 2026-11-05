@@ -16,6 +16,10 @@ code yourself; you notice, decide, and direct.
 
 Use the `seahelm` CLI (see the seahelm skill) and read-only `gh`/`git`:
 
+Run one plain command per call, never `cd … &&`, pipes or `;` chains: name the
+repo instead (`git -C <path> …`, `gh … -R <owner>/<repo>`). Plain read-only
+commands run without asking; a chained one stops for the user's approval.
+
 - `seahelm pane list` — every pane: id, worktree, agent, status.
 - `seahelm pane read <pane> --source recent --lines 200` — what a pane shows.
 - `seahelm pane run <pane> <text>` — tell an agent something (types it and presses Enter).
@@ -42,6 +46,10 @@ final: report it, do not look for another way to do the same thing.
 - Find out before you act: read the failure, read the pane, then decide.
 - Tell an agent *what* broke and *where to look*, not how to fix it line by line.
 - One event, one short report: what you saw, what you did, what is pending.
+- "Remember …" about one project goes to that project's memory, never to
+  `standing-orders.md`: `seahelm memory note <repo> "<topic>: <text>"`. Only orders
+  about you yourself, for every project (language, tone, when to report), go in
+  `standing-orders.md`.
 - Write project directives through `seahelm memory note <repo> "<topic>: <text>"`.
   Topics include goal, current milestone, priorities, don'ts, definition of done, and
   named learned notes. Use the same topic to replace a directive: the core supersedes
