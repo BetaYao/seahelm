@@ -16,6 +16,7 @@ use seahelm_core_registry::cards::{CardKind, Raise};
 use super::clock::Local;
 use super::engine::Entry;
 use super::habits::{self, Book, Change, Decision, OfferAnswer, Precedence, Store, GLOBAL};
+use super::inventory::{self, Answer as InventoryAnswer};
 use super::observations::{self, norm, By};
 use super::rules::{Action, Level};
 use super::sweep::{self, Batch, BatchAnswer, Candidate, Deleter, Routed};
@@ -66,11 +67,57 @@ impl CoreDeleter {
 impl Deleter for CoreDeleter {
     fn delete(&self, r: &Routed, how: &str) -> Result<(), String> {
         self.recheck(r, how.starts_with("habit:"))?;
-        let params = json!({"worktree_path": r.candidate.path});
-        let result = self.core.act("worktree.delete", &params).map_err(|e| e.message)?;
-        self.core.note_performed("worktree.delete", &params, &result, By::FirstMate, Some(how), self.card.as_deref(), None);
-        Ok(())
+        perform_delete(&self.core, &r.candidate.path, how, self.card.as_deref())
     }
+}
+
+/// The core's own `worktree.delete`, logged as First Mate's with `how` and
+/// the card the user answered: the one path every habit or inventory
+/// deletion takes.
+fn perform_delete(core: &Core, path: &str, how: &str, card: Option<&str>) -> Result<(), String> {
+    let params = json!({"worktree_path": path});
+    let result = core.act("worktree.delete", &params).map_err(|e| e.message)?;
+    core.note_performed("worktree.delete", &params, &result, By::FirstMate, Some(how), card, None);
+    Ok(())
+}
+
+/// A group the user said to delete on an inventory card. `inventory::
+/// delete_group` has measured and matched each worktree again already.
+pub struct InventoryDeleter {
+    pub core: Arc<Core>,
+    pub card: String,
+}
+
+impl Deleter for InventoryDeleter {
+    fn delete(&self, r: &Routed, how: &str) -> Result<(), String> {
+        perform_delete(&self.core, &r.candidate.path, how, Some(&self.card))
+    }
+}
+
+/// A repo whose own rules forbid First Mate deleting worktrees (or do not
+/// parse, which stops First Mate there): the inventory leaves it out.
+fn repo_denies(repo: &str) -> bool {
+    let own = Path::new(repo).join(super::rules::RELATIVE_PATH).exists();
+    match super::rules::Config::load(Path::new(repo)) {
+        Ok(c) => habits::repo_cap(&c, own) == Some(Level::Deny),
+        Err(_) => true,
+    }
+}
+
+/// Measure every live linked worktree for the inventory (main and
+/// integration checkouts, First Mate's own directory and anything in
+/// `skip` excluded; so are repos that forbid deletions). Runs git: off
+/// First Mate's thread. Returns how many were measured.
+fn measure_for_inventory(core: &Core, live: &HashSet<String>, skip: &HashSet<String>) -> (usize, Vec<Candidate>) {
+    let integration = crate::discovery::Filter::live(&crate::rpc::config_dir()).integration;
+    let mut denies: HashMap<String, bool> = HashMap::new();
+    let targets: Vec<_> = sweep::targets(live, observations::worktree_info, &integration, skip)
+        .into_iter()
+        .filter(|t| !*denies.entry(norm(&t.repo)).or_insert_with(|| repo_denies(&t.repo)))
+        .collect();
+    let n = targets.len();
+    let out = targets.into_iter().map(|t| Candidate { facts: core.measure_worktree(&t.path, None), path: t.path, repo: t.repo, branch: t.branch }).collect();
+    (n, out)
 }
 
 impl FirstMate {
@@ -123,6 +170,10 @@ impl FirstMate {
     pub(super) fn maybe_sweep(&mut self, now: f64) {
         // A sweep thread that never reported (it died) does not block the next.
         if self.sweep_running.is_some_and(|t| t.elapsed() < SWEEP_STUCK) || self.config.paused {
+            return;
+        }
+        // The inventory goes first: its cards cover what the sweep would ask.
+        if self.inventory_schedule.holds_sweep() {
             return;
         }
         if !self.sweep_forced && self.sweep_checked.is_some_and(|t| t.elapsed() < SWEEP_CHECK_EVERY) {
@@ -236,6 +287,7 @@ impl FirstMate {
         for b in self.batches.values() {
             out.extend(b.items.iter().map(|r| norm(&r.candidate.path)));
         }
+        out.extend(self.inventory.worktrees().map(norm));
         out.insert(norm(&self.dir.to_string_lossy()));
         out
     }
@@ -356,6 +408,8 @@ impl FirstMate {
             self.answer_batch(payload, option, via, now);
         } else if payload.starts_with(sweep::ITEM_PREFIX) {
             self.answer_item(payload, option, via, now);
+        } else if payload.starts_with(inventory::PREFIX) {
+            self.answer_inventory(payload, option, via, now);
         } else {
             return false;
         }
@@ -563,11 +617,12 @@ impl FirstMate {
         let mut out = self.offers.payloads();
         out.extend(self.batches.keys().cloned());
         out.extend(self.items.keys().cloned());
+        out.extend(self.inventory.payloads());
         out
     }
 
     pub(super) fn is_habit_card(&self, payload: &str) -> bool {
-        self.offers.contains(payload) || self.batches.contains_key(payload) || self.items.contains_key(payload)
+        self.offers.contains(payload) || self.batches.contains_key(payload) || self.items.contains_key(payload) || self.inventory.contains(payload)
     }
 
     pub(super) fn drop_habit_cards(&mut self) {
@@ -577,9 +632,158 @@ impl FirstMate {
         self.offers.clear();
         self.batches.clear();
         self.items.clear();
+        self.inventory.clear();
         self.sweep_checked = None;
         self.hand_checked = None;
     }
+}
+
+// MARK: the inventory
+
+impl FirstMate {
+    /// The first time First Mate is turned on: take the inventory (once;
+    /// the flag is written when it has measured).
+    pub(super) fn maybe_inventory(&mut self, _now: f64) {
+        if self.inventory_schedule.start_if_due(self.config.paused) {
+            self.start_inventory();
+        }
+    }
+
+    /// `habits.inventory`: the user asks for it again.
+    pub(super) fn request_inventory(&mut self, now: f64) -> crate::rpc::RpcResult {
+        match self.inventory_schedule.request(self.running) {
+            inventory::Request::Off => Err(super::refused("First Mate is off")),
+            inventory::Request::AlreadyMeasuring => Ok(json!({"started": false, "message": "The inventory is measuring already; the cards follow."})),
+            inventory::Request::Start => {
+                self.log(Entry::new(now, "event", "inventory requested by the user"));
+                self.start_inventory();
+                Ok(json!({"started": true, "message": "Measuring every worktree; one card per group follows (none if nothing looks finished)."}))
+            }
+        }
+    }
+
+    fn start_inventory(&mut self) {
+        let fm_dir = self.dir.to_string_lossy().into_owned();
+        let live: HashSet<String> = self.core.live_worktrees().into_iter().filter(|w| *w != fm_dir).collect();
+        // Worktrees on another card are not asked about twice; the inventory's
+        // own open cards are replaced, so their worktrees count again.
+        let mut skip: HashSet<String> = self.approvals.values().filter_map(|a| a.params.get("worktree_path").and_then(Value::as_str)).map(norm).collect();
+        for b in self.batches.values() {
+            skip.extend(b.items.iter().map(|r| norm(&r.candidate.path)));
+        }
+        skip.insert(norm(&fm_dir));
+        let core = self.core.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let (measured, candidates) = measure_for_inventory(&core, &live, &skip);
+            let _ = tx.send(Msg::Inventoried { measured, groups: inventory::group(candidates) });
+        });
+    }
+
+    pub(super) fn inventoried(&mut self, measured: usize, groups: Vec<(inventory::Group, Vec<Candidate>)>, now: f64) {
+        self.inventory_schedule.measured(&mut self.sweep_state, now);
+        self.sweep_state.save(&sweep::State::path(&self.habits.dir));
+        if !self.running {
+            return;
+        }
+        self.report("event", &inventory::line_raised(measured, &groups), now);
+        let nonce = self.mint("inv");
+        let (cards, old) = self.inventory.raise(&nonce, groups);
+        for p in old {
+            self.core.drop_card_payload(&p);
+        }
+        let of = cards.len();
+        for (i, c) in cards.iter().enumerate() {
+            let (message, options) = c.render(i + 1, of);
+            self.raise(&c.payload, message, options);
+            self.log(Entry::new(now, "approval", format!("inventory: {} — {} worktree(s)", c.group.title(), c.members.len())));
+        }
+    }
+
+    /// An inventory card answered: the answer as an observation, the habits
+    /// it writes (granted by it), and — for delete — the deletions.
+    fn answer_inventory(&mut self, payload: &str, option: Option<&str>, via: Option<String>, now: f64) {
+        let today = Self::today(now);
+        let Some(a) = self.inventory.answer(payload, option, &today) else { return };
+        let title = a.card.group.title();
+        let n = a.card.members.len();
+        let ids: Vec<String> = a.habits.iter().map(|(h, _)| format!("{GLOBAL}/{}", h.id)).collect();
+        self.core.observe(observations::Msg::CardAnswered {
+            card_kind: "habit.inventory",
+            card: payload.into(),
+            option: option.map(str::to_string),
+            via,
+            summary: format!("inventory: {title} ({n} worktree{})", if n == 1 { "" } else { "s" }),
+            action: Some(Action::DeleteWorktree.as_str().into()),
+            worktree: String::new(),
+            repo: String::new(),
+            habit: (!ids.is_empty()).then(|| ids.join(",")),
+        });
+        let Some(answer) = a.answer else {
+            self.log(Entry::new(now, "denied", format!("not now: inventory — {title}")));
+            return;
+        };
+        let mut book = self.habits.load(GLOBAL, &today);
+        let mut written = Vec::new();
+        let mut changes = Vec::new();
+        for (h, g) in a.habits {
+            let id = h.id.clone();
+            match book.adopt(h, g, &today) {
+                Ok(c) => {
+                    written.push(id);
+                    changes.extend(c);
+                }
+                Err(e) => self.log(Entry::new(now, "denied", format!("inventory habit {id} not written — {e}"))),
+            }
+        }
+        if !written.is_empty() {
+            self.save_book(&book, now);
+        }
+        self.report("habit", &inventory::line_answered(&a.card, answer, &written), now);
+        for c in &changes {
+            self.report_change(c, now);
+        }
+        if answer != InventoryAnswer::Delete || !a.card.group.can_delete() {
+            return;
+        }
+        let Some(habit) = written.first().cloned() else { return };
+        let group = a.card.group;
+        let members = a.card.members;
+        let core = self.core.clone();
+        let deleter = InventoryDeleter { core: core.clone(), card: payload.to_string() };
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let report = inventory::delete_group(group, members, &habit, |p| core.measure_worktree(p, None), &deleter);
+            let _ = tx.send(Msg::InventoryDeleted { group, report });
+        });
+    }
+
+    pub(super) fn inventory_deleted(&mut self, group: inventory::Group, report: inventory::DeleteReport, now: f64) {
+        for c in &report.deleted {
+            let mut e = Entry::new(now, "action", format!("Deleted worktree {} (inventory: {}) — {}", c.name(), group.title(), c.facts.summary()));
+            e.action = Some(Action::DeleteWorktree.as_str().into());
+            e.level = Some("approved".into());
+            e.rule = Some(format!("{}:{}", inventory::HOW, group.key()));
+            e.worktree_path = Some(c.path.clone());
+            self.log(e);
+        }
+        for (c, why) in &report.failed {
+            let mut e = Entry::new(now, "skipped", format!("{} not deleted (inventory) — {why}", c.name()));
+            e.worktree_path = Some(c.path.clone());
+            self.log(e);
+        }
+        self.core.first_mate_line(&inventory::line_deleted(group, &report));
+    }
+}
+
+/// `habits.inventory {preview: true}`: the groups as they stand, raising no
+/// card and writing nothing (works with First Mate off).
+pub fn inventory_preview(core: &Core) -> Value {
+    let fm_dir = super::pane::dir().to_string_lossy().into_owned();
+    let live: HashSet<String> = core.live_worktrees().into_iter().filter(|w| *w != fm_dir).collect();
+    let skip: HashSet<String> = [norm(&fm_dir)].into();
+    let (measured, candidates) = measure_for_inventory(core, &live, &skip);
+    inventory::preview_json(measured, &inventory::group(candidates))
 }
 
 /// `habits.list {repo?}`, read-only: from the files, with each repo's
@@ -628,6 +832,9 @@ mod tests {
             assert_eq!(policy::classify(m), Class::Forbidden, "{m}");
         }
         assert_eq!(policy::classify("habits.list"), Class::Open);
+        // The inventory is the user's to ask for; First Mate cannot raise it.
+        assert_eq!(policy::classify("habits.inventory"), Class::Forbidden);
+        assert!(rpc("habits.inventory", &json!({})).is_none(), "not a free read: it goes to First Mate's thread");
         for m in ["cards.answer", "cards.raise", "autopilot.answer", "cards.dismiss"] {
             assert_eq!(policy::classify(m), Class::Forbidden, "{m}");
         }

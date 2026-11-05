@@ -511,6 +511,19 @@ impl Core {
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "habits.list" => Ok(first_mate::learning::rpc(method, &p).unwrap_or_default()),
+            // The inventory (docs/first-mate-autonomy.md, D6): `preview` only
+            // measures and groups; otherwise First Mate raises one card per
+            // group. Nothing is deleted or granted until the user answers one.
+            "habits.inventory" => {
+                if p.get("preview").and_then(Value::as_bool) == Some(true) {
+                    Ok(first_mate::learning::inventory_preview(&self))
+                } else {
+                    match self.first_mate.get() {
+                        Some(fm) => fm.inventory(),
+                        None => Err(first_mate::refused("First Mate is not running")),
+                    }
+                }
+            }
             "autopilot.state" => Ok(match self.first_mate.get() {
                 Some(fm) => fm.state(),
                 None => json!({"enabled": false, "owner": "core"}),

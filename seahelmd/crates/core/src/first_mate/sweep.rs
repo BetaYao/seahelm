@@ -264,6 +264,10 @@ pub struct State {
     pub last_at: f64,
     #[serde(default)]
     pub deleted: Vec<Deleted>,
+    /// When the inventory last measured the worktrees (`inventory`); None:
+    /// never, so turning First Mate on takes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_at: Option<f64>,
 }
 
 /// Turning First Mate on sweeps at once, unless one ran this recently (a
@@ -292,6 +296,12 @@ impl State {
     /// Whether a repo is due today.
     pub fn due(&self, repo: &str, day: &str) -> bool {
         self.swept.get(repo).map(String::as_str) != Some(day)
+    }
+
+    /// Whether turning First Mate on should take the inventory: only if
+    /// none was ever taken (the user can redo it, `habits.inventory`).
+    pub fn inventory_due(&self) -> bool {
+        self.inventory_at.is_none()
     }
 
     /// Whether turning on now should sweep everything again.

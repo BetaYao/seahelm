@@ -149,7 +149,9 @@ impl Cli {
         }
     }
 
-    /// First Mate's habits, read-only: `seahelm habit list [--repo <path>] [--json]`.
+    /// First Mate's habits: `seahelm habit list [--repo <path>] [--json]`
+    /// (read-only), and `seahelm habit inventory [--preview] [--json]` — take
+    /// the inventory again (one card per group; `--preview` only shows the groups).
     fn habit(&self, a: &[String]) {
         match first(a) {
             Some("list") => {
@@ -162,8 +164,21 @@ impl Cli {
                     print!("{}", habit_table(&v));
                 }
             }
+            Some("inventory") => {
+                let rest = &a[1..];
+                let preview = has(rest, "--preview");
+                // Measuring every worktree runs git in each: give it time.
+                let v = self.call("habits.inventory", json!({"preview": preview}), 180.0, &[]);
+                if has(rest, "--json") {
+                    pretty(&v);
+                } else if preview {
+                    print!("{}", inventory_table(&v));
+                } else {
+                    println!("{}", v["message"].as_str().unwrap_or("Started."));
+                }
+            }
             Some(other) => die(&format!("unknown habit subcommand: {other}"), 2),
-            None => die("usage: seahelm habit list [--repo <path>] [--json]", 2),
+            None => die("usage: seahelm habit <list [--repo <path>] [--json] | inventory [--preview] [--json]>", 2),
         }
     }
 
@@ -416,7 +431,7 @@ fn route(method: &str) -> &'static [Side] {
         }
         "worktree.create" | "worktree.delete" | "pane.close" => &[Side::App, Side::Core],
         // First Mate's habits live in the core alone.
-        "habits.list" => &[Side::Core],
+        "habits.list" | "habits.inventory" => &[Side::Core],
         _ => &[Side::App],
     }
 }
@@ -496,6 +511,24 @@ fn request(side: Side, method: &str, params: &Value, timeout: f64) -> Result<Str
 }
 
 // MARK: - arguments and output
+
+/// `habits.inventory --preview` for a person: one block per group.
+fn inventory_table(v: &Value) -> String {
+    let groups = v["groups"].as_array().cloned().unwrap_or_default();
+    let mut out = format!("measured {} worktree(s)\n", v["measured"].as_u64().unwrap_or(0));
+    if groups.is_empty() {
+        out += "nothing looks finished: no card would be raised\n";
+    }
+    for g in groups {
+        let ws = g["worktrees"].as_array().cloned().unwrap_or_default();
+        let opts: Vec<&str> = g["options"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        out += &format!("{} · {}  [{}]\n", g["title"].as_str().unwrap_or("?"), ws.len(), opts.join(" / "));
+        for w in ws {
+            out += &format!("  {} — {}\n", w["path"].as_str().unwrap_or("?"), w["facts"].as_str().unwrap_or(""));
+        }
+    }
+    out
+}
 
 /// `habits.list` for a person: one block per file, one line per habit.
 fn habit_table(v: &Value) -> String {
@@ -620,6 +653,7 @@ mod tests {
             assert_eq!(route(m), [Side::App, Side::Core], "{m}");
         }
         assert_eq!(route("habits.list"), [Side::Core], "habits live in the core alone");
+        assert_eq!(route("habits.inventory"), [Side::Core]);
         // Only the side drawing the panes can do these.
         for m in ["pane.split", "pane.focus", "pane.zoom", "pane.move", "pane.fork", "pane.exec", "layout.apply"] {
             assert_eq!(route(m), [Side::App], "{m}");

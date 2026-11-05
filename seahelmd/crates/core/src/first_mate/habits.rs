@@ -855,6 +855,49 @@ impl Book {
         Ok(Change { id: g.id, from, to: g.level, why: "the user confirmed the level written in the file".into() })
     }
 
+    /// Write the habit an inventory answer names (`inventory`), granted by
+    /// that answer. New: added as given. Already there (the inventory
+    /// redone): its `when`, `do` and level follow the new answer, and the
+    /// answer is added to its evidence — one decision, however many
+    /// worktrees it covered. A habit already above the grant (a deletion
+    /// habit since raised to `auto`) keeps its level when the answer is
+    /// delete again; keep and ask-me-each-time take it down.
+    pub fn adopt(&mut self, h: Habit, g: Grant, today: &str) -> Result<Option<Change>, String> {
+        if g.key != self.key || g.id != h.id || g.level != h.level || g.confirm {
+            return Err(format!("grant for {}/{} does not cover {}/{}", g.key, g.id, self.key, h.id));
+        }
+        if h.level == HabitLevel::Auto {
+            return Err(format!("{}: an inventory answer never grants auto", h.id));
+        }
+        let Some(i) = self.index(&h.id) else {
+            self.caps.insert(h.id.clone(), h.level);
+            self.written.remove(&h.id);
+            self.habits.push(h);
+            return Ok(None);
+        };
+        let from = self.level(&self.habits[i]);
+        let keeps_level = h.act == Do::DeleteWorktree && self.habits[i].act == Do::DeleteWorktree && from > h.level;
+        let to = if keeps_level { from } else { h.level };
+        let old = &mut self.habits[i];
+        old.when = h.when;
+        old.act = h.act;
+        old.about = h.about;
+        old.level = to;
+        old.status = Status::Active;
+        old.evidence.approved += h.evidence.approved;
+        old.evidence.streak = if h.evidence.approved > 0 && h.act == Do::DeleteWorktree { old.evidence.streak + h.evidence.approved } else { 0 };
+        old.evidence.expired_in_row = 0;
+        for e in h.examples {
+            old.add_example(&e);
+        }
+        if to != from || h.act != Do::DeleteWorktree {
+            old.approved = Some(today.into());
+        }
+        self.caps.insert(h.id.clone(), to);
+        self.written.remove(&h.id);
+        Ok((to != from).then(|| Change { id: h.id, from, to, why: "the user answered the inventory card".into() }))
+    }
+
     /// The user said no to a hand-raised level: the next save writes the
     /// granted level back into the file. Returns (written, granted).
     pub fn revert(&mut self, id: &str) -> Option<(HabitLevel, HabitLevel)> {
@@ -898,6 +941,15 @@ pub struct Grant {
     pub level: HabitLevel,
     pub confirm: bool,
     _only_from_a_card: (),
+}
+
+impl Grant {
+    /// The user's answer on an inventory card (`inventory::Cards::answer`,
+    /// the only caller): the answer is the consent (D6), so the habit it
+    /// writes is granted the level that answer names — at most `ask`.
+    pub(super) fn from_inventory_card(key: &str, id: &str, level: HabitLevel) -> Grant {
+        Grant { key: key.into(), id: id.into(), level: level.min(HabitLevel::Ask), confirm: false, _only_from_a_card: () }
+    }
 }
 
 /// A card the core put up about a habit's level: a promotion, or the
