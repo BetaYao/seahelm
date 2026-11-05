@@ -116,6 +116,16 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setForkTarget(worktreeName)
     }
 
+    /// Mark the focused pane as forked into another pane; nil clears it.
+    func updateForkedInto(title: String?, toolTip: String?) {
+        terminalHeader.setForkedInto(title: title, toolTip: toolTip)
+    }
+
+    var onOpenFork: (() -> Void)? {
+        get { terminalHeader.onOpenFork }
+        set { terminalHeader.onOpenFork = newValue }
+    }
+
     var onForkPane: (() -> Void)? {
         get { terminalHeader.onForkPane }
         set { terminalHeader.onForkPane = newValue }
