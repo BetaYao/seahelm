@@ -1322,6 +1322,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
             chrome.headerDelegate = self
             chrome.paneSharing = self
             chrome.onForkPane = { [weak self] in self?.forkOfferedPane() }
+            chrome.onOpenFork = { [weak self] in self?.openForkOfFocusedPane() }
             chrome.onStateChange = { [weak self] state in
                 self?.handleChromeStateChange(state)
             }
@@ -1456,6 +1457,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
     /// Show the fork button when the focused pane's agent is working in another
     /// tracked worktree and its session can be forked.
     private func updateForkOffer(station: Station?) {
+        updateForkedBadge(station: station)
         guard let station, case .success(let plan) = tabCoordinator.forkPlan(stationId: station.id),
               forkedInto[station.id] != plan.destination.path else {
             forkOfferStationId = nil
@@ -1466,6 +1468,30 @@ dashboard.stationManager = terminalCoordinator.stationManager
         let name = plan.destination.branch.isEmpty
             ? URL(fileURLWithPath: plan.destination.path).lastPathComponent : plan.destination.branch
         windowChrome?.updateForkTarget("@" + name)
+    }
+
+    /// The pane the header's forked badge opens, while it is shown.
+    private var forkedBadgeTarget: String?
+
+    /// `⑂ #n` on a pane whose conversation was forked, for as long as the fork
+    /// is in the fleet.
+    private func updateForkedBadge(station: Station?) {
+        guard let station, let fork = tabCoordinator.forkRecord(forStationId: station.id) else {
+            forkedBadgeTarget = nil
+            windowChrome?.updateForkedInto(title: nil, toolTip: nil)
+            return
+        }
+        forkedBadgeTarget = fork.record.forkStationId
+        windowChrome?.updateForkedInto(
+            title: PaneFork.badgeTitle(handle: fork.handle),
+            toolTip: PaneFork.badgeToolTip(handle: fork.handle, destinationName: fork.record.destinationName))
+    }
+
+    private func openForkOfFocusedPane() {
+        guard let target = forkedBadgeTarget, tabCoordinator.revealPane(stationId: target) else {
+            NSSound.beep()
+            return
+        }
     }
 
     private func forkOfferedPane() {

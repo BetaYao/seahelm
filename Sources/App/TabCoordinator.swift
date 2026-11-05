@@ -999,6 +999,10 @@ class TabCoordinator {
     /// Pane + destination pairs already auto-forked, so the original pane's
     /// later events (it is still filed where it was) do not fork it again.
     private var autoForked: Set<String> = []
+    /// Where each pane was last forked to, by the original pane's station id.
+    /// In memory: the durable record is the notice in the original pane's own
+    /// transcript (`PaneFork.originNotice`).
+    private var forkRecords: [String: PaneFork.Record] = [:]
 
     /// Fork the pane into `worktreePath`, a worktree its agent created itself and
     /// is now working in (`PaneFork.shouldAutoFork`). The original pane stays,
@@ -1118,9 +1122,70 @@ class TabCoordinator {
             DispatchQueue.main.async {
                 guard let self, started else { completion(.failure(.launchFailed)); return }
                 NSLog("[TabCoordinator] Forked pane \(stationId) into \(destination.path) as \(name)")
-                completion(.success(self.installPane(sessionName: name, in: destination, reveal: reveal)))
+                let forkId = self.installPane(sessionName: name, in: destination, reveal: reveal)
+                self.recordFork(origin: stationId, forkStationId: forkId, sessionName: name, destination: destination)
+                completion(.success(forkId))
             }
         }
+    }
+
+    /// Remember where `origin` went, refresh its header badge, and tell its
+    /// agent: the Esc that made room for the fork reads to it as the user
+    /// cutting it off, and nothing else would ever say the work moved.
+    private func recordFork(origin: String, forkStationId: String, sessionName: String,
+                            destination: WorktreeInfo) {
+        let name = destination.branch.isEmpty
+            ? URL(fileURLWithPath: destination.path).lastPathComponent : destination.branch
+        forkRecords[origin] = PaneFork.Record(forkStationId: forkStationId,
+                                              destinationPath: destination.path,
+                                              destinationName: "@" + name)
+        delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+        sendForkNotice(origin: origin, forkSession: sessionName, destinationName: "@" + name,
+                       destinationPath: destination.path, waited: 0)
+    }
+
+    /// Send the notice once the interrupted turn has ended (`PaneFork.noticeIsDue`).
+    /// The fork's `#n` is read at send time: seahelm-core numbers a pane only
+    /// once it has listed it, which a pane this new may not be yet. A pane
+    /// closed in the meantime gets nothing.
+    private func sendForkNotice(origin stationId: String, forkSession: String, destinationName: String,
+                                destinationPath: String, waited: TimeInterval) {
+        guard StationRegistry.shared.station(forId: stationId) != nil else { return }
+        let status = Fleet.shared.pane(for: stationId)?.status
+        if PaneFork.noticeIsDue(status: status, waited: waited) {
+            let notice = PaneFork.originNotice(handle: CoreLink.shared.handle(forSession: forkSession),
+                                               destinationName: destinationName,
+                                               destinationPath: destinationPath)
+            PaneInput.shared.sendCommand(to: stationId, command: notice)
+            return
+        }
+        let step = PaneFork.noticePollInterval
+        DispatchQueue.main.asyncAfter(deadline: .now() + step) { [weak self] in
+            self?.sendForkNotice(origin: stationId, forkSession: forkSession, destinationName: destinationName,
+                                 destinationPath: destinationPath, waited: waited + step)
+        }
+    }
+
+    /// Where `stationId` was last forked to, with the fork's `#n` (nil until
+    /// seahelm-core has numbered it) — nil once that fork's pane is gone. Main thread.
+    func forkRecord(forStationId stationId: String) -> (record: PaneFork.Record, handle: Int?)? {
+        guard let record = forkRecords[stationId] else { return nil }
+        guard let fork = StationRegistry.shared.station(forId: record.forkStationId),
+              terminalCoordinator.stationManager.locate(stationId: record.forkStationId) != nil else {
+            forkRecords.removeValue(forKey: stationId)
+            return nil
+        }
+        return (record, CoreLink.shared.handle(forSession: fork.paneSessionKey))
+    }
+
+    /// Bring a pane on screen and focus it, wherever it is filed. Main thread.
+    @discardableResult
+    func revealPane(stationId: String) -> Bool {
+        guard preparePaneControlTarget(stationId) else { return false }
+        DispatchQueue.main.async { [weak self] in
+            _ = self?.terminalCoordinator.focusPane(targetStationId: stationId)
+        }
+        return true
     }
 
     /// File a new pane on an already-running seahelmd session in `destination`, and

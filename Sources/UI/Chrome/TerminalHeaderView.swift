@@ -31,6 +31,12 @@ final class TerminalHeaderView: NSView {
     /// Display name of the worktree a fork would land in; nil hides the button.
     private var forkTargetName: String?
     var onForkPane: (() -> Void)?
+    /// On a pane that was forked: `⑂ #n`, the pane its work carries on in.
+    /// Clicking it opens that pane. Zero width while there is none.
+    private let forkedBadge = ChromeIconButton()
+    private var forkedBadgeWidth: NSLayoutConstraint?
+    private var forkedBadgeTitle: String?
+    var onOpenFork: (() -> Void)?
     private let collapsedLeadingStack = NSStackView()
 
     /// Whether edit mode is currently on (drives the icon's active tint).
@@ -220,6 +226,9 @@ final class TerminalHeaderView: NSView {
         configureForkButton()
         addSubview(forkButton)
 
+        configureForkedBadge()
+        addSubview(forkedBadge)
+
         for strip in [editTerminalStrip, editPreviewStrip] {
             strip.translatesAutoresizingMaskIntoConstraints = false
             strip.isHidden = true
@@ -240,6 +249,8 @@ final class TerminalHeaderView: NSView {
             editModeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             forkButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             forkButton.trailingAnchor.constraint(equalTo: editModeButton.leadingAnchor, constant: -4),
+            forkedBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            forkedBadge.trailingAnchor.constraint(equalTo: forkButton.leadingAnchor, constant: -4),
         ])
 
         configureShareButton()
@@ -259,7 +270,7 @@ final class TerminalHeaderView: NSView {
             titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: memoryLabel.trailingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: forkButton.leadingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: forkedBadge.leadingAnchor, constant: -8),
             editModeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
         ]
 
@@ -277,7 +288,7 @@ final class TerminalHeaderView: NSView {
                 equalTo: collapsedLeadingStack.trailingAnchor, constant: 10),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: forkButton.leadingAnchor, constant: -8),
+                lessThanOrEqualTo: forkedBadge.leadingAnchor, constant: -8),
 
             editModeButton.trailingAnchor.constraint(equalTo: expandButton.leadingAnchor, constant: -4),
 
@@ -537,6 +548,53 @@ final class TerminalHeaderView: NSView {
         onForkPane?()
     }
 
+    private func configureForkedBadge() {
+        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        if let image = NSImage(systemSymbolName: "arrow.triangle.branch",
+                               accessibilityDescription: "Forked") {
+            forkedBadge.image = image.withSymbolConfiguration(config)
+        }
+        forkedBadge.bezelStyle = .recessed
+        forkedBadge.isBordered = false
+        forkedBadge.imagePosition = .imageLeading
+        forkedBadge.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        forkedBadge.contentTintColor = NSColor(hex: 0x888888)
+        forkedBadge.target = self
+        forkedBadge.action = #selector(forkedBadgeClicked)
+        forkedBadge.translatesAutoresizingMaskIntoConstraints = false
+        forkedBadge.setAccessibilityIdentifier("chrome.forkedBadge")
+        forkedBadge.wantsLayer = true
+        forkedBadge.layer?.cornerRadius = 7
+        forkedBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let width = forkedBadge.widthAnchor.constraint(equalToConstant: 0)
+        forkedBadgeWidth = width
+        NSLayoutConstraint.activate([width, forkedBadge.heightAnchor.constraint(equalToConstant: 26)])
+        applyForkedBadgeVisibility()
+    }
+
+    /// Mark the focused pane as forked into pane `#n`; nil clears the badge.
+    func setForkedInto(title: String?, toolTip: String?) {
+        guard forkedBadgeTitle != title || forkedBadge.toolTip != toolTip else { return }
+        forkedBadgeTitle = title
+        forkedBadge.title = title ?? ""
+        forkedBadge.toolTip = toolTip
+        forkedBadge.setAccessibilityLabel(toolTip)
+        applyForkedBadgeVisibility()
+    }
+
+    var forkedBadgeIsVisibleForTesting: Bool { !forkedBadge.isHidden }
+    var forkedBadgeTitleForTesting: String { forkedBadge.title }
+
+    private func applyForkedBadgeVisibility() {
+        let visible = forkedBadgeTitle != nil && !hasHoistedStrips && !firstMateMode
+        forkedBadge.isHidden = !visible
+        forkedBadgeWidth?.constant = visible ? ceil(forkedBadge.intrinsicContentSize.width) + 10 : 0
+    }
+
+    @objc private func forkedBadgeClicked() {
+        onOpenFork?()
+    }
+
     /// Enable + light the edit-mode toggle. `available` gates it on there being
     /// at least one open preview (empty set → focus mode only).
     func setEditMode(available: Bool, isOn: Bool) {
@@ -618,6 +676,7 @@ final class TerminalHeaderView: NSView {
         titleLabel.isHidden = hasHoistedStrips
         applyShareVisibility()
         applyForkVisibility()
+        applyForkedBadgeVisibility()
         if firstMateMode {
             titleLabel.attributedStringValue = Self.firstMateTitle
             titleLabel.toolTip = "First Mate — ⌘J or ⌃⌃ to go back"

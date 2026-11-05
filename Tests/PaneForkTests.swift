@@ -63,4 +63,54 @@ final class PaneForkTests: XCTestCase {
         XCTAssertEqual(PaneFork.sessionName(branch: String(repeating: "x", count: 200),
                                             worktreePath: "/r/wt2").count, 80)
     }
+
+    // MARK: - Telling the original pane
+
+    func testOriginNoticeNamesTheForkAndSaysTheUserDidNotStopIt() {
+        let notice = PaneFork.originNotice(handle: 12, destinationName: "@feat/x",
+                                           destinationPath: "/r/repo-x")
+        XCTAssertTrue(notice.hasPrefix("[seahelm] "), notice)
+        XCTAssertTrue(notice.contains("pane #12"), notice)
+        XCTAssertTrue(notice.contains("@feat/x"), notice)
+        XCTAssertTrue(notice.contains("/r/repo-x"), notice)
+        XCTAssertTrue(notice.contains("not by the user"), notice)
+        XCTAssertTrue(notice.contains("Do not continue"), notice)
+        // Typed into a TUI and submitted with Return: one line.
+        XCTAssertFalse(notice.contains("\n"), notice)
+    }
+
+    /// seahelm-core numbers a pane only once it has listed it; a fork that new
+    /// is named by its worktree instead.
+    func testOriginNoticeWithoutAHandleNamesTheWorktree() {
+        let notice = PaneFork.originNotice(handle: nil, destinationName: "@feat/x",
+                                           destinationPath: "/r/repo-x")
+        XCTAssertFalse(notice.contains("#"), notice)
+        XCTAssertTrue(notice.contains("the pane in @feat/x"), notice)
+        XCTAssertEqual(PaneFork.badgeTitle(handle: nil), "")
+        XCTAssertFalse(PaneFork.badgeToolTip(handle: nil, destinationName: "@feat/x").contains("#"))
+    }
+
+    /// The notice waits for the interrupted turn to end, then goes anyway.
+    func testNoticeWaitsForTheTurnToEndButNotForever() {
+        XCTAssertFalse(PaneFork.noticeIsDue(status: .running, waited: 0))
+        XCTAssertFalse(PaneFork.noticeIsDue(status: nil, waited: 1))
+        XCTAssertTrue(PaneFork.noticeIsDue(status: .idle, waited: 0))
+        XCTAssertTrue(PaneFork.noticeIsDue(status: .waiting, waited: 0))
+        XCTAssertTrue(PaneFork.noticeIsDue(status: .running, waited: PaneFork.noticeMaxWait))
+        XCTAssertTrue(PaneFork.noticeIsDue(status: nil, waited: PaneFork.noticeMaxWait))
+    }
+
+    func testHeaderShowsForkedBadgeOnlyWhileSet() {
+        let header = TerminalHeaderView(frame: NSRect(x: 0, y: 0, width: 800, height: 38))
+        XCTAssertFalse(header.forkedBadgeIsVisibleForTesting)
+        header.setForkedInto(title: PaneFork.badgeTitle(handle: 7),
+                             toolTip: PaneFork.badgeToolTip(handle: 7, destinationName: "@feat/x"))
+        XCTAssertTrue(header.forkedBadgeIsVisibleForTesting)
+        XCTAssertEqual(header.forkedBadgeTitleForTesting, "#7")
+        header.setFirstMateMode(true)
+        XCTAssertFalse(header.forkedBadgeIsVisibleForTesting, "First Mate's header has no pane to badge")
+        header.setFirstMateMode(false)
+        header.setForkedInto(title: nil, toolTip: nil)
+        XCTAssertFalse(header.forkedBadgeIsVisibleForTesting)
+    }
 }

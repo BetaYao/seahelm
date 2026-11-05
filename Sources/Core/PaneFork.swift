@@ -72,6 +72,54 @@ enum PaneFork {
     /// Wait between the Esc and reading the transcript, so the interrupted turn
     /// is on disk before the fork copies it.
     static let interruptSettleDelay: TimeInterval = 1.0
+
+    // MARK: - Telling the original pane
+
+    /// Where a pane was last forked to: the pane its conversation carries on in.
+    struct Record: Equatable {
+        let forkStationId: String
+        let destinationPath: String
+        let destinationName: String
+    }
+
+    /// What the original pane is told once its fork is running. The Esc that
+    /// made room for the fork reads to its agent as the user cutting it off, so
+    /// without this its transcript never learns that the work moved, and asked
+    /// about it later it has no idea where it went.
+    /// `handle` is nil while seahelm-core has not numbered the fork yet; the
+    /// notice then names the worktree alone.
+    static func originNotice(handle: Int?, destinationName: String, destinationPath: String) -> String {
+        let pane = handle.map { "pane #\($0)" } ?? "a new pane"
+        let pointer = handle.map { "pane #\($0)" } ?? "the pane in \(destinationName)"
+        return "[seahelm] This conversation was forked into \(pane) (\(destinationName), \(destinationPath)), "
+            + "which carries on the task there. Your turn was stopped for the fork, not by the user. "
+            + "Do not continue that task in this pane. Reply with one line acknowledging it; "
+            + "if the user asks about the task later, point them to \(pointer)."
+    }
+
+    /// The header badge on the original pane: which pane the work went to.
+    static func badgeTitle(handle: Int?) -> String { handle.map { "#\($0)" } ?? "" }
+
+    static func badgeToolTip(handle: Int?, destinationName: String) -> String {
+        guard let handle else { return "Forked into \(destinationName) — click to open it" }
+        return "Forked into \(destinationName) as pane #\(handle) — click to open it"
+    }
+
+    /// How often, and for how long, to wait for the interrupted turn to end
+    /// before the notice goes in.
+    static let noticePollInterval: TimeInterval = 0.5
+    static let noticeMaxWait: TimeInterval = 20
+
+    /// Whether the notice can be sent now. It waits for the interrupted turn to
+    /// end, so it reads as a new message rather than landing in the middle of
+    /// one; past `noticeMaxWait` it goes anyway — the agent queues a message
+    /// typed while it runs, and a notice that never arrives is the bug this
+    /// exists to fix.
+    static func noticeIsDue(status: AgentStatus?, waited: TimeInterval) -> Bool {
+        if waited >= noticeMaxWait { return true }
+        guard let status else { return false }
+        return status != .running
+    }
 }
 
 enum PaneForkError: Error, Equatable {
