@@ -1,6 +1,7 @@
 # The macOS app as a client of seahelm-core
 
-Status: steps 1–7 done (2026-11-04, one PR); step 8 in progress. A hard cut:
+Status: done. Steps 1–7 landed 2026-11-04 in one PR, step 8 the same day
+(07e6e21). A hard cut:
 no switch, no shadow phase, no fallback, no compatibility with old sessions.
 
 ## Goal
@@ -16,7 +17,7 @@ What stays in the app: Ghostty surfaces and input, layout and panes, drawing
 control socket for the `seahelm` CLI, and acting on what the core reports
 (fork, auto-fork, repo auto-add) until those actions move into the core too.
 
-## Where it stands
+## Where it stood before the cut
 
 - The core decides status for the app's panes in shadow. It agreed on 99.8%
   of pane-polls over six hours on 2026-11-04. Every disagreement that lasted
@@ -128,7 +129,7 @@ seahelmd from before `Snapshot`) were restarted on 2026-11-04.
 | 5 | App: cards from the core only; integration reports raised with `cards.raise`. `PendingOrdersQueue` goes. **Done.** |
 | 6 | App: timelines from `message.*`; `MessageStreamHub` goes. **Done.** |
 | 7 | App: fork, auto-fork and repo auto-add on `pane.location`. **Done.** |
-| 8 | App: PR and usage from `pr.list` / `usage.summary`; the GitHub poller, usage providers and the `CommandExecutor` fallback go. |
+| 8 | App: PR and usage from `pr.list` / `usage.summary`; the GitHub poller, usage providers and the `CommandExecutor` fallback go. **Done.** |
 
 Steps 3–5 land together: `Fleet` replacing `AgentRegistry` takes the
 outcome stream that notices and cards rode on. 6–8 are independent.
