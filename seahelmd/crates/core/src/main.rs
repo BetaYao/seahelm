@@ -7,6 +7,7 @@
 //!   seahelm-core install-hooks    wire Claude Code and Codex hooks to `hook`,
 //!                                 and Claude's statusline to `statusline`
 //!   seahelm-core statusline [-- CMD]  Claude's statusline: cache the payload, run CMD
+//!   seahelm-core facts PATH [--json] [--fetch]  a worktree's measured facts (read-only)
 //!   seahelm-core version
 //!
 //! The service reads each registered pane's screen from its seahelmd session,
@@ -18,6 +19,7 @@ mod bridge;
 mod cli;
 mod command;
 mod core;
+mod facts_cli;
 mod first_mate;
 mod install;
 mod keys;
@@ -64,6 +66,7 @@ fn run() -> Result<()> {
             Ok(())
         }
         "install-hooks" => install::run(rest),
+        "facts" => facts_cli::run(rest),
         "statusline" => std::process::exit(statusline::run(rest)),
         "version" => {
             println!("seahelm-core {}", env!("CARGO_PKG_VERSION"));

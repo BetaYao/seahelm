@@ -52,7 +52,8 @@ pub fn as_user(params: &Value) -> Value {
 }
 
 /// One line for a card or the audit log. `facts` is what a delete would
-/// throw away, as measured.
+/// throw away, as measured (`Facts::summary`: ignored files by name, then
+/// uncommitted work, unpushed commits, panes, PR, idle age, base).
 pub fn describe(method: &str, params: &Value, facts: Option<&str>) -> String {
     let s = |k: &str| params.get(k).and_then(Value::as_str).unwrap_or_default();
     let base = |p: &str| std::path::Path::new(p).file_name().and_then(|n| n.to_str()).unwrap_or(p).to_string();
@@ -92,5 +93,11 @@ mod tests {
         assert_eq!(describe("pane.run", &p, None), "Tell #3: fix it now");
         let d = json!({"worktree_path": "/w/feat-x"});
         assert_eq!(describe("worktree.delete", &d, Some("nothing uncommitted")), "Delete worktree feat-x — nothing uncommitted");
+        // The measured facts lead with what `git worktree remove` would lose silently.
+        let f = super::super::facts::Facts { ignored: 2, ignored_files: vec![".env".into(), "notes.md".into()], unpushed: Some(0), ..Default::default() };
+        assert_eq!(
+            describe("worktree.delete", &d, Some(&f.summary())),
+            "Delete worktree feat-x — 2 ignored files would be lost (.env, notes.md) · nothing uncommitted · every commit is on a remote · panes idle · PR unknown"
+        );
     }
 }
