@@ -138,6 +138,14 @@ impl Card {
             "created_at": self.created_at,
             "fresh_at": self.fresh_at,
         });
+        // What Claude's dialog shows beside the question: its tab title, and a
+        // line under each option. Only on cards that have them.
+        if !self.flags.header.is_empty() {
+            v["header"] = json!(self.flags.header);
+        }
+        if !self.flags.details.is_empty() {
+            v["details"] = json!(self.flags.details);
+        }
         if self.flags.multi_select {
             v["multi_select"] = json!(true);
             v["checked"] = json!(self.flags.checked);
@@ -734,6 +742,32 @@ mod tests {
         let Answer::Keys { confirm_review, .. } = q.answer("c-2", "x", None, 3.0).unwrap() else { panic!() };
         assert!(confirm_review);
         assert!(q.list().is_empty());
+    }
+
+    /// Claude's dialog shows a tab title and a line under each option; the card
+    /// carries both, and the next question of the ask brings its own.
+    #[test]
+    fn a_question_card_carries_header_and_details_per_question() {
+        let mut q = Cards::new();
+        let first = QuestionFlags {
+            header: "Customer".into(),
+            details: vec!["closing the books".into(), String::new()],
+            ..QuestionFlags::default()
+        };
+        let next = QuestionSpec {
+            prompt: "(2/2) Second".into(),
+            options: vec!["x".into(), "y".into()],
+            flags: QuestionFlags { header: "Requester".into(), review_after: true, ..QuestionFlags::default() },
+        };
+        q.observe(&question("p1", hook(), &["a", "b"], first, vec![next]), 1.0);
+        let v = q.list()[0].to_json();
+        assert_eq!(v["header"], json!("Customer"));
+        assert_eq!(v["details"], json!(["closing the books", ""]));
+
+        q.answer("c-1", "a", None, 2.0).unwrap();
+        let v = q.list()[0].to_json();
+        assert_eq!(v["header"], json!("Requester"));
+        assert!(v.get("details").is_none(), "the second question has no descriptions");
     }
 
     #[test]

@@ -335,7 +335,7 @@ impl Adapter {
             return;
         }
         let handle = if c.pane.is_empty() { None } else { self.pane_meta(&c.pane).await.map(|m| m.handle) };
-        let text = notices::card_text(handle, &c.project, &c.branch, &c.message, &c.options);
+        let text = notices::card_text(handle, &c);
         let buttons = self.option_buttons(&c, true);
         for chat in chats {
             let packet = format!("{chat}\u{1F}{}", c.packet_key());

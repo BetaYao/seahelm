@@ -613,6 +613,13 @@ private struct SuggestionCard: View {
                     .contentShape(Rectangle())
                     .onTapGesture { onDismiss() }
             }
+            if isQuestion, !order.header.isEmpty {
+                // The question's tab title in the agent's dialog.
+                Text(order.header)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.bottom, -4)
+            }
             if !order.message.isEmpty {
                 Text(order.message)
                     .font(.system(size: 12))
@@ -621,7 +628,9 @@ private struct SuggestionCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Options keep their own taps so they don't bubble to onReveal.
-            OptionList(options: order.labels, onTap: onOption)
+            OptionList(options: order.labels,
+                       details: order.labels.indices.map { order.detail(forLabelAt: $0) },
+                       onTap: onOption)
         }
         .padding(12)
         .background(
@@ -640,6 +649,8 @@ private struct SuggestionCard: View {
 /// Options as full-width rows, top to bottom, each with a numbered badge.
 private struct OptionList: View {
     let options: [String]
+    /// A line under each option ("" for none), as the agent's dialog shows it.
+    var details: [String] = []
     let onTap: (String) -> Void
     @State private var hoveredIndex: Int?
 
@@ -655,11 +666,21 @@ private struct OptionList: View {
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                                     .fill(Color.white.opacity(0.14))
                             )
-                        Text(option)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.95))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(option)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.95))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            if details.indices.contains(index), !details[index].isEmpty {
+                                Text(details[index])
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.white.opacity(0.55))
+                                    .lineLimit(3)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                         Spacer(minLength: 0)
                     }
                 .padding(.horizontal, 10)

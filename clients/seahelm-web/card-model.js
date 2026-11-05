@@ -45,19 +45,32 @@
     return labels.map(l => card.multi_select ? l.replace(TICK, '') : l);
   }
 
+  /** The line under each option, as Claude's dialog shows it: one per
+   *  option, '' where an option has none; empty when the card has none or
+   *  they do not line up with what is drawn. */
+  function optionDetails(card, options) {
+    const details = Array.isArray(card.details) ? card.details.map(d => String(d || '').trim()) : [];
+    if (details.length !== options.length || !details.some(Boolean)) return [];
+    return details;
+  }
+
   /** One card as the pane's reply bar draws it. */
   function toDecision(card) {
     const type = PANE_KINDS[card.kind];
     const multi = type === 'question' && !!card.multi_select;
+    // Single-select: show what is tapped, the labels. Multi-select: the
+    // options untouched (the ticks are drawn as state) and Done at the end.
+    const options = multi ? optionTexts(card)
+      : (Array.isArray(card.labels) && card.labels.length ? card.labels.map(String) : optionTexts(card));
     return {
       id: card.id,
       kind: card.kind,
       type,
       prompt: String(card.message || ''),
-      // Single-select: show what is tapped, the labels. Multi-select: the
-      // options untouched (the ticks are drawn as state) and Done at the end.
-      options: multi ? optionTexts(card)
-        : (Array.isArray(card.labels) && card.labels.length ? card.labels.map(String) : optionTexts(card)),
+      // The question's tab title in Claude's dialog ("Customer").
+      header: type === 'question' ? String(card.header || '').trim() : '',
+      options,
+      details: type === 'question' ? optionDetails(card, options) : [],
       multi_select: multi,
       checked: Array.isArray(card.checked) ? card.checked.slice() : [],
       danger: isDanger(card),

@@ -512,9 +512,17 @@
   .rb-opts.multi .rb-tick.on{box-shadow:inset 0 0 0 1.5px var(--accent)}
   .rb-opts.multi .rb-tick.on::before{content:'✓';background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
   .rb-opts.multi .rb-done{background:var(--accent);color:var(--accent-ink);font-weight:600}
+  /* AskUserQuestion: the question's tab title over it, a line under each option. */
+  .rb-head .rb-hdr{display:block;margin-bottom:2px;font-size:var(--fs-sub);font-weight:500;color:var(--muted)}
+  .rb-opts .rb-lbl{display:block}
+  .rb-opts .rb-desc{display:block;margin-top:3px;font-size:var(--fs-sub);font-weight:400;line-height:1.35;opacity:.72}
+  .rb-opts.detailed button{text-align:left}
+  .rb-opts.multi .rb-tick .rb-txt{flex:1;min-width:0}
   @media (min-width:761px){
     .rb-opts{flex-direction:row;flex-wrap:wrap}
     .rb-opts button{min-height:40px;border-radius:12px;text-align:left}
+    /* With a line under each option they read as a list, as in the terminal. */
+    .rb-opts.detailed{flex-direction:column}
   }
 
   /* The composer: a pill with one button inside it. */
@@ -2323,7 +2331,8 @@ function renderReplyBar(){
     ? '<path d="M12 3l8 4v5c0 5-3.4 8.3-8 9-4.6-.7-8-4-8-9V7z"/>'
     : '<path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0012 3z"/>';
   head.innerHTML = `<span class="rb-ic" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24">${icon}</svg></span>`
-    + `<span>${esc(question ? (e.prompt || 'Needs your approval') : 'What next?')}</span>`
+    + `<span>${question && e.header ? `<b class="rb-hdr">${esc(e.header)}</b>` : ''}`
+    + `${esc(question ? (e.prompt || 'Needs your approval') : 'What next?')}</span>`
     + '<button class="rb-skip" type="button">Skip</button>';
   card.setAttribute('aria-label', question ? (e.prompt || 'Needs your approval') : 'What next?');
   head.querySelector('.rb-skip').onclick = () => {
@@ -2336,8 +2345,9 @@ function renderReplyBar(){
   bar.appendChild(card);
   const opts = document.createElement('div');
   const multi = question && !!e.multi_select;
-  opts.className = 'rb-opts' + (multi ? ' multi' : '');
   const options = e.options || [];
+  const details = e.details || [];
+  opts.className = 'rb-opts' + (multi ? ' multi' : '') + (details.length ? ' detailed' : '');
   const checked = new Set(e.checked || []);
   // A multi-select row only toggles: the card stays up, ticked, and Done —
   // index options.length, the card's last label — is what answers it.
@@ -2361,7 +2371,14 @@ function renderReplyBar(){
   options.forEach((opt, i) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.textContent = opt;
+    if (details.length) {
+      const txt = `<span class="rb-lbl">${esc(opt)}</span>`
+        + (details[i] ? `<span class="rb-desc">${esc(details[i])}</span>` : '');
+      b.innerHTML = multi ? `<span class="rb-txt">${txt}</span>` : txt;
+      b.setAttribute('aria-label', details[i] ? `${opt}: ${details[i]}` : opt);
+    } else {
+      b.textContent = opt;
+    }
     if (multi) {
       b.className = 'rb-tick' + (checked.has(i) ? ' on' : '');
       b.setAttribute('role', 'checkbox');

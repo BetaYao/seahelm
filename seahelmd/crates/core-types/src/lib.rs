@@ -320,6 +320,14 @@ pub struct QuestionFlags {
     pub cursor: usize,
     /// The AskUserQuestion call (`tool_use_id`) its questions share.
     pub ask_id: String,
+    /// The question's short tab title in Claude's dialog (`header`), e.g.
+    /// "Customer". Empty when the agent gave none.
+    #[serde(default)]
+    pub header: String,
+    /// Each option's `description`, index for index with the options; empty
+    /// strings where an option has none, and empty when none has one.
+    #[serde(default)]
+    pub details: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

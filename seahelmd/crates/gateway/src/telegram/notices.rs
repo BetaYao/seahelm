@@ -97,6 +97,11 @@ pub struct Card {
     pub labels: Vec<String>,
     pub multi_select: bool,
     pub checked: Vec<usize>,
+    /// AskUserQuestion's tab title for the question, "" without.
+    pub header: String,
+    /// The line under each option, index for index with `options` ("" where
+    /// one has none); empty when there are none.
+    pub details: Vec<String>,
 }
 
 pub const DONE_LABEL: &str = "✔ Done";
@@ -125,6 +130,8 @@ impl Card {
             labels,
             multi_select: v.get("multi_select").and_then(Value::as_bool).unwrap_or(false),
             checked: v.get("checked").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as usize)).collect()).unwrap_or_default(),
+            header: s("header").trim().to_string(),
+            details: list("details").into_iter().map(|d: String| d.trim().to_string()).collect(),
         })
     }
 
@@ -148,7 +155,11 @@ impl Card {
 /// The card as a chat message. The options are spelled out as well as drawn:
 /// a button label is trimmed to a phone's width, and two options often
 /// differ in the part that gets trimmed.
-pub fn card_text(handle: Option<u64>, project: &str, branch: &str, message: &str, options: &[String]) -> String {
+pub fn card_text(handle: Option<u64>, card: &Card) -> String {
+    let (project, branch, message, options) = (card.project.as_str(), card.branch.as_str(), card.message.as_str(), &card.options);
+    // The description under each option, as the agent's dialog shows it;
+    // only when they line up with the options.
+    let details: &[String] = if card.details.len() == options.len() { &card.details } else { &[] };
     let target = [project, branch].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" / ");
     let head = [handle.map(|h| format!("#{h}")), (!target.is_empty()).then_some(target)].into_iter().flatten().collect::<Vec<_>>().join(" · ");
     let mut lines = vec![format!("{} **Waiting on you**", status_icon("waiting"))];
@@ -156,13 +167,19 @@ pub fn card_text(handle: Option<u64>, project: &str, branch: &str, message: &str
         lines.push(head);
     }
     let prompt = message.trim();
+    if !card.header.is_empty() {
+        lines.push(format!("\n**{}**", card.header));
+    }
     if !prompt.is_empty() {
-        lines.push(format!("\n{prompt}"));
+        lines.push(if card.header.is_empty() { format!("\n{prompt}") } else { prompt.to_string() });
     }
     if !options.is_empty() {
         lines.push(String::new());
         for (i, o) in options.iter().enumerate() {
             lines.push(format!("{}. {o}", i + 1));
+            if let Some(d) = details.get(i).filter(|d| !d.is_empty()) {
+                lines.push(format!("    {d}"));
+            }
         }
     }
     lines.join("\n")
@@ -336,6 +353,25 @@ mod tests {
         assert_eq!(notice_body("Error", "r", "b", "failed at /a/b/c.rs now", ""), "failed at c.rs now");
     }
 
+    /// AskUserQuestion's tab title over the question and a line under each
+    /// option, as in the agent's dialog.
+    #[test]
+    fn card_text_shows_header_and_descriptions() {
+        let v = json!({"id": "c1", "kind": "question", "project": "repo", "branch": "fix",
+                       "message": "Which customer?", "header": "Customer",
+                       "options": ["Banana", "None"], "labels": ["Banana", "None"],
+                       "details": ["closing the books", ""]});
+        let c = Card::from_json(&v).unwrap();
+        assert_eq!(
+            card_text(None, &c),
+            "◐ **Waiting on you**\nrepo / fix\n\n**Customer**\nWhich customer?\n\n1. Banana\n    closing the books\n2. None"
+        );
+        // Details that do not line up are left out.
+        let mut odd = c.clone();
+        odd.details = vec!["x".into()];
+        assert!(!card_text(None, &odd).contains("    x"));
+    }
+
     #[test]
     fn cards_read_the_core_shape() {
         let v = json!({"id": "c1", "kind": "question", "pane_session_key": "s-1", "project": "repo", "branch": "fix",
@@ -345,7 +381,7 @@ mod tests {
         assert_eq!(c.labels.len(), 3);
         assert_eq!(picked_summary(&c, DONE_LABEL), "No");
         assert_eq!(picked_summary(&c, "☐ Yes"), "☐ Yes");
-        let text = card_text(Some(3), &c.project, &c.branch, &c.message, &c.options);
+        let text = card_text(Some(3), &c);
         assert_eq!(text, "◐ **Waiting on you**\n#3 · repo / fix\n\nProceed?\n\n1. Yes\n2. No");
         assert!(Card::from_json(&json!({"kind": "question"})).is_none());
     }
@@ -363,7 +399,7 @@ mod tests {
     }
 
     fn card(id: &str, kind: &str, msg: &str) -> Card {
-        Card { id: id.into(), kind: kind.into(), pane: "p".into(), project: String::new(), branch: String::new(), message: msg.into(), options: vec!["a".into()], labels: vec!["a".into()], multi_select: false, checked: vec![] }
+        Card { id: id.into(), kind: kind.into(), pane: "p".into(), project: String::new(), branch: String::new(), message: msg.into(), options: vec!["a".into()], labels: vec!["a".into()], multi_select: false, checked: vec![], header: String::new(), details: vec![] }
     }
 
     #[test]

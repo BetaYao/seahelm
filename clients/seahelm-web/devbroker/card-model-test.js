@@ -26,6 +26,30 @@ console.log('card model');
 }
 
 {
+  // AskUserQuestion: the tab title and the line under each option.
+  const { byPane } = buildDecisions([card({
+    id: 'q', kind: 'question', pane_session_key: 'p', message: 'Which customer?', header: 'Customer',
+    options: ['Banana (Recommended)', 'None'], labels: ['Banana (Recommended)', 'None'],
+    details: ['closing the books', ''],
+  })]);
+  const d = byPane.get('p');
+  check(d.header === 'Customer', 'a question carries its header');
+  check(d.details.length === 2 && d.details[0] === 'closing the books' && d.details[1] === '',
+    'details line up with the options, empty where an option has none');
+}
+
+{
+  const { byPane } = buildDecisions([
+    card({ id: 'q', kind: 'question', pane_session_key: 'p1', options: ['a', 'b'], labels: ['a', 'b'], details: ['only one'] }),
+    card({ id: 'q2', kind: 'question', pane_session_key: 'p2', options: ['a'], labels: ['a'] }),
+    card({ id: 's', kind: 'suggestion', pane_session_key: 'p3', labels: ['x'], header: 'H', details: ['d'] }),
+  ]);
+  check(byPane.get('p1').details.length === 0, 'details that do not line up are dropped');
+  check(byPane.get('p2').details.length === 0 && byPane.get('p2').header === '', 'a card without them has none');
+  check(byPane.get('p3').header === '' && byPane.get('p3').details.length === 0, 'a suggestion never shows them');
+}
+
+{
   const { byPane } = buildDecisions([card({ id: 'c', kind: 'choice', pane_id: 'id9', labels: ['1. a', '2. b'], options: ['a', 'b'] })]);
   check(byPane.get('id9').type === 'question', 'a screen choice reads as a question');
   check(byPane.get('id9').options.join() === '1. a,2. b', 'single-select shows the labels');

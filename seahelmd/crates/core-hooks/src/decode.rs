@@ -94,20 +94,33 @@ pub fn questions(ev: &WebhookEvent, now: Timestamp) -> Option<Vec<QuestionSpec>>
             if !options.iter().all(Value::is_object) {
                 return None;
             }
-            let labels: Vec<String> = options
+            // Label and description together, so the descriptions stay
+            // aligned with the labels that survive.
+            let (labels, details): (Vec<String>, Vec<String>) = options
                 .iter()
-                .filter_map(|o| o.get("label").and_then(Value::as_str))
-                .filter(|l| !l.is_empty())
-                .map(str::to_string)
-                .collect();
+                .filter_map(|o| {
+                    let label = o.get("label").and_then(Value::as_str).filter(|l| !l.is_empty())?;
+                    let detail = o.get("description").and_then(Value::as_str).unwrap_or("").trim();
+                    Some((label.to_string(), detail.to_string()))
+                })
+                .unzip();
             if labels.is_empty() {
                 return None;
             }
+            let details = if details.iter().all(String::is_empty) { Vec::new() } else { details };
+            let header = q.get("header").and_then(Value::as_str).unwrap_or("").trim().to_string();
             let multi = q.get("multiSelect").and_then(Value::as_bool).unwrap_or(false);
             Some(QuestionSpec {
                 prompt: prompt.into(),
                 options: labels,
-                flags: QuestionFlags { multi_select: multi, review_after: multi, ask_id: ask_id.clone(), ..Default::default() },
+                flags: QuestionFlags {
+                    multi_select: multi,
+                    review_after: multi,
+                    ask_id: ask_id.clone(),
+                    header,
+                    details,
+                    ..Default::default()
+                },
             })
         })
         .collect();
@@ -187,6 +200,36 @@ mod tests {
         let Some(EventKind::Question { prompt, options, .. }) = k else { panic!("wrong kind") };
         assert_eq!(prompt, "Where should daily check-in happen?");
         assert_eq!(options, vec!["Gate face scan", "Front desk kiosk"]);
+    }
+
+    #[test]
+    fn test_ask_user_question_keeps_header_and_descriptions() {
+        let k = kind(
+            T::ToolUseStart,
+            json!({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{
+                "question": "Which customer raised these?", "header": "Customer",
+                "options": [
+                    {"label": "Banana (Recommended)", "description": "They are closing the books"},
+                    {"label": ""},
+                    {"label": "No customer"}]}]}}),
+        );
+        let Some(EventKind::Question { options, flags, .. }) = k else { panic!("wrong kind") };
+        assert_eq!(options, vec!["Banana (Recommended)", "No customer"]);
+        assert_eq!(flags.header, "Customer");
+        // Aligned with the labels kept: the empty label's slot is gone.
+        assert_eq!(flags.details, vec!["They are closing the books".to_string(), String::new()]);
+    }
+
+    #[test]
+    fn test_ask_user_question_without_descriptions_has_no_details() {
+        let k = kind(
+            T::ToolUseStart,
+            json!({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{
+                "question": "Q?", "options": [{"label": "A"}, {"label": "B", "description": "  "}]}]}}),
+        );
+        let Some(EventKind::Question { flags, .. }) = k else { panic!("wrong kind") };
+        assert!(flags.details.is_empty());
+        assert!(flags.header.is_empty());
     }
 
     #[test]
