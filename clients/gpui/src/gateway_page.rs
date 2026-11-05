@@ -611,7 +611,7 @@ impl GatewayPage {
     }
 }
 
-fn card() -> gpui::Div {
+pub(crate) fn card() -> gpui::Div {
     div()
         .flex()
         .flex_col()
@@ -623,7 +623,7 @@ fn card() -> gpui::Div {
         .bg(tokens::sidebar_tint())
 }
 
-fn section_head(
+pub(crate) fn section_head(
     title: &str,
     blurb: &str,
     on: bool,
@@ -659,11 +659,11 @@ fn row(label: &str) -> gpui::Div {
         .child(div().w(px(92.)).flex_none().text_size(px(12.)).text_color(tokens::ink_dim()).child(label.to_string()))
 }
 
-fn muted(text: &str) -> gpui::Div {
+pub(crate) fn muted(text: &str) -> gpui::Div {
     div().text_size(px(11.5)).line_height(px(16.)).text_color(tokens::ink_faint()).child(text.to_string())
 }
 
-fn dot(c: Rgba) -> gpui::Div {
+pub(crate) fn dot(c: Rgba) -> gpui::Div {
     div().size(px(7.)).flex_none().rounded_full().bg(c)
 }
 
@@ -687,7 +687,7 @@ fn switch(id: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
         .child(div().size(px(16.)).rounded_full().bg(gpui::white()))
 }
 
-fn button(id: impl Into<SharedString>, label: &str, primary: bool, disabled: bool) -> gpui::Stateful<gpui::Div> {
+pub(crate) fn button(id: impl Into<SharedString>, label: &str, primary: bool, disabled: bool) -> gpui::Stateful<gpui::Div> {
     let id: SharedString = id.into();
     let tint = if primary { tokens::accent() } else { tokens::ink_dim() };
     div()

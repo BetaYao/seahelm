@@ -179,6 +179,7 @@ impl Workspace {
     /// first row left.
     fn forget_worktree(&mut self, item: &str) {
         self.panes.remove(item);
+        self.forget_preview_tabs(item);
         self.save_layouts();
         if self.selected.as_deref() == Some(item) {
             self.selected = self.fleet.groups.iter().flat_map(|g| g.items.iter()).find(|i| i.id != item).map(|i| i.id.clone());

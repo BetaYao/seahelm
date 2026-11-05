@@ -16,10 +16,15 @@ use crate::core_client::{self, WorktreeState};
 use crate::notify;
 use crate::fleet::{self, Dot, GitStats, Group, Grouping, Item, Snapshot};
 use crate::gateway_page::GatewayPage;
+use crate::settings_page::SettingsPage;
 use crate::platform;
 use crate::session;
 #[path = "worktree_menu.rs"]
 mod worktree_menu;
+#[path = "pane_extras.rs"]
+mod pane_extras;
+#[path = "preview_tabs.rs"]
+mod preview_tabs;
 use worktree_menu::{CancelSheet, NewWorktree, RowMenu};
 use crate::side_panel::{self, SidePanel, Tab as SideTab};
 use crate::split::{Axis, Direction, LeafId, Rect, SplitTree};
@@ -35,7 +40,7 @@ const DIVIDER_HIT: f32 = 16.0;
 
 actions!(
     seahelm,
-    [SplitRight, SplitDown, ClosePane, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPaneDown]
+    [SplitRight, SplitDown, ClosePane, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPaneDown, ZoomPane]
 );
 
 /// The split shortcuts: the macOS app's on macOS; elsewhere ctrl+shift
@@ -51,6 +56,7 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("cmd-alt-right", FocusPaneRight, None),
             KeyBinding::new("cmd-alt-up", FocusPaneUp, None),
             KeyBinding::new("cmd-alt-down", FocusPaneDown, None),
+            KeyBinding::new("cmd-shift-enter", ZoomPane, None),
         ]);
     } else {
         cx.bind_keys([
@@ -61,6 +67,7 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("ctrl-alt-right", FocusPaneRight, None),
             KeyBinding::new("ctrl-alt-up", FocusPaneUp, None),
             KeyBinding::new("ctrl-alt-down", FocusPaneDown, None),
+            KeyBinding::new("ctrl-shift-enter", ZoomPane, None),
         ]);
     }
     cx.bind_keys([KeyBinding::new("escape", CancelSheet, Some("NewWorktreeSheet"))]);
@@ -127,8 +134,8 @@ pub struct Workspace {
     /// Remote access (seahelm-gateway's settings) is in the main area.
     gateway_open: bool,
     gateway_page: Entity<GatewayPage>,
-    /// The selected worktree's Files / Changes panel, on the right, and
-    /// which tab it is open on (None: closed).
+    /// The left column shows Files or Changes in place of the fleet
+    /// (None: the fleet), as the macOS app's column does.
     side_tab: Option<SideTab>,
     side_panel: Entity<SidePanel>,
     _side_closed: Subscription,
@@ -136,12 +143,24 @@ pub struct Workspace {
     new_worktree: Option<NewWorktree>,
     /// A row's right-click menu, while open.
     row_menu: Option<RowMenu>,
+    /// Settings is in the main area.
+    settings_open: bool,
+    settings_page: Entity<SettingsPage>,
+    /// What the core knows about each pane, by session (`pane_extras`).
+    pane_facts: pane_extras::Facts,
+    /// Who is at work on a pane through the core, by session.
+    presence: HashMap<String, pane_extras::Presence>,
+    /// Files and changes opened as tabs in the main area, by worktree.
+    preview_tabs: HashMap<String, preview_tabs::PreviewTabs>,
+    /// The worktree and leaf shown alone (zoomed), if any.
+    zoomed: Option<(String, LeafId)>,
 }
 
 impl Workspace {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let side_panel = cx.new(SidePanel::new);
         let side_closed = cx.subscribe(&side_panel, |w, _, _: &side_panel::CloseRequested, cx| w.set_side(None, cx));
+        cx.subscribe(&side_panel, |w, _, e: &side_panel::OpenRequested, cx| w.open_preview(e.0.clone(), cx)).detach();
         let this = Self {
             fleet: Snapshot::default(),
             git: HashMap::new(),
@@ -179,7 +198,14 @@ impl Workspace {
             _side_closed: side_closed,
             new_worktree: None,
             row_menu: None,
+            settings_open: false,
+            settings_page: cx.new(SettingsPage::new),
+            pane_facts: HashMap::new(),
+            presence: HashMap::new(),
+            zoomed: None,
+            preview_tabs: HashMap::new(),
         };
+        Self::poll_pane_facts(cx);
         Self::poll_core(cx);
         Self::listen_core(cx);
         Self::poll_usage(cx);
@@ -283,7 +309,7 @@ impl Workspace {
     /// banner. Both are logged for comparing with the macOS app.
     fn listen_core(cx: &mut Context<Self>) {
         let (tx, mut rx) = futures::channel::mpsc::unbounded();
-        core_client::subscribe(&["pane.status_changed", "pane.notice", "cards.changed"], tx);
+        core_client::subscribe(&["pane.status_changed", "pane.notice", "cards.changed", "pane.presence"], tx);
         cx.spawn(async move |this, cx| {
             use futures::StreamExt;
             while let Some(ev) = rx.next().await {
@@ -306,6 +332,11 @@ impl Workspace {
                             })
                             .await;
                         if this.update(cx, |w, cx| w.set_cards(cards, cx)).is_err() {
+                            break;
+                        }
+                    }
+                    "pane.presence" => {
+                        if this.update(cx, |w, cx| w.note_presence(&ev, cx)).is_err() {
                             break;
                         }
                     }
@@ -593,6 +624,7 @@ impl Workspace {
     fn toggle_first_mate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.first_mate_open = !self.first_mate_open;
         self.set_gateway_open(false, cx);
+        self.settings_open = false;
         notify::log(if self.first_mate_open { "first_mate.open" } else { "first_mate.close" }, serde_json::json!({}));
         if self.first_mate_open {
             if let Some(view) = self.first_mate_terminal(cx) {
@@ -605,10 +637,26 @@ impl Workspace {
     }
 
     /// The share button opens Remote access over the main area, or closes it.
+    fn toggle_settings(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_open = !self.settings_open;
+        if self.settings_open {
+            self.first_mate_open = false;
+            self.set_gateway_open(false, cx);
+            self.settings_page.update(cx, |p, cx| {
+                p.reload();
+                cx.notify();
+            });
+        } else {
+            self.refocus_terminal(window, cx);
+        }
+        cx.notify();
+    }
+
     fn toggle_gateway(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         let open = !self.gateway_open;
         if open {
             self.first_mate_open = false;
+            self.settings_open = false;
         }
         self.set_gateway_open(open, cx);
         notify::log(if open { "gateway.open" } else { "gateway.close" }, serde_json::json!({}));
@@ -888,6 +936,7 @@ impl Workspace {
         // and Remote access.
         self.first_mate_open = false;
         self.set_gateway_open(false, cx);
+        self.settings_open = false;
         self.selected = Some(id.clone());
         self.side_follow(cx);
         // On screen in a frontmost window: a turn that ends here is seen.
@@ -1038,9 +1087,14 @@ impl Workspace {
     fn panes_body(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let (_, _, w, h) = self.body_bounds(window);
         let tree = self.panes.entry(id.to_string()).or_default().tree.clone();
-        let several = tree.len() > 1;
+        let zoomed = self.zoomed_leaf(id);
+        let several = tree.len() > 1 && zoomed.is_none();
         let mut body = div().relative().flex_1().min_h_0().bg(theme::rgb(theme::bg()));
-        for (leaf, r) in tree.frames() {
+        let frames: Vec<(LeafId, Rect)> = match zoomed {
+            Some(leaf) => vec![(leaf, Rect { x: 0.0, y: 0.0, w: 1.0, h: 1.0 })],
+            None => tree.frames(),
+        };
+        for (leaf, r) in frames {
             let Some(view) = self.view_for(id, leaf, window, cx) else { continue };
             let mut pane = div()
                 .absolute()
@@ -1052,9 +1106,12 @@ impl Workspace {
             if several && leaf != tree.focused {
                 pane = pane.child(div().absolute().inset_0().bg(tokens::inactive_wash()));
             }
+            if let Some(corner) = self.pane_corner(id, leaf, cx) {
+                pane = pane.child(corner);
+            }
             body = body.child(pane);
         }
-        for d in tree.dividers() {
+        for d in tree.dividers().into_iter().filter(|_| zoomed.is_none()) {
             let worktree = id.to_string();
             let path = d.path.clone();
             let path2 = d.path.clone();
@@ -1255,12 +1312,23 @@ impl Focusable for Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected.clone().filter(|id| self.fleet.find(id).is_some());
-        let body = if self.gateway_open {
+        let body = if self.settings_open {
+            Some(div().flex_1().min_h_0().flex().child(self.settings_page.clone()).into_any_element())
+        } else if self.gateway_open {
             Some(div().flex_1().min_h_0().flex().child(self.gateway_page.clone()).into_any_element())
         } else if self.first_mate_open {
             Some(self.workbench(cx))
         } else {
-            selected.as_deref().map(|id| self.panes_body(id, window, cx))
+            selected.as_deref().map(|id| {
+                let content = match self.preview_active(id).then(|| self.preview_body(id)).flatten() {
+                    Some(p) => p,
+                    None => self.panes_body(id, window, cx),
+                };
+                match self.preview_strip(id, cx) {
+                    Some(strip) => div().flex_1().min_h_0().flex().flex_col().child(strip).child(content).into_any_element(),
+                    None => content,
+                }
+            })
         };
         if !self.watching_activation {
             self.watching_activation = true;
@@ -1272,20 +1340,21 @@ impl Render for Workspace {
             })
             .detach();
         }
-        if self.needs_focus && !self.gateway_open {
+        if self.needs_focus && !self.gateway_open && !self.settings_open && !selected.as_deref().is_some_and(|id| self.preview_active(id)) {
             if let Some(view) = selected.as_deref().and_then(|id| self.terminal_for(id, window, cx)) {
                 window.focus(&view.focus_handle(cx));
                 self.needs_focus = false;
             }
         }
         let title: SharedString = match selected.as_deref().and_then(|id| self.fleet.find(id)) {
+            _ if self.settings_open => "Settings".into(),
             _ if self.gateway_open => "Remote access".into(),
             _ if self.first_mate_open => "First Mate".into(),
             Some(item) => item.title.clone().into(),
             None => "Seahelm".into(),
         };
         let width = self.sidebar_width;
-        let cards = if self.first_mate_open || self.gateway_open { None } else { self.selected_worktree().and_then(|wt| self.card_strip(&wt, cx)) };
+        let cards = if self.first_mate_open || self.gateway_open || self.settings_open { None } else { self.selected_worktree().and_then(|wt| self.card_strip(&wt, cx)) };
 
         let mut root = div()
             .id("workspace")
@@ -1300,7 +1369,8 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &FocusPaneLeft, window, cx| w.focus_pane(Direction::Left, window, cx)))
             .on_action(cx.listener(|w, _: &FocusPaneRight, window, cx| w.focus_pane(Direction::Right, window, cx)))
             .on_action(cx.listener(|w, _: &FocusPaneUp, window, cx| w.focus_pane(Direction::Up, window, cx)))
-            .on_action(cx.listener(|w, _: &FocusPaneDown, window, cx| w.focus_pane(Direction::Down, window, cx)));
+            .on_action(cx.listener(|w, _: &FocusPaneDown, window, cx| w.focus_pane(Direction::Down, window, cx)))
+            .on_action(cx.listener(|w, _: &ZoomPane, _, cx| w.toggle_zoom(cx)));
         if self.dragging_divider || self.split_drag.as_ref().is_some_and(|d| d.axis == Axis::Horizontal) {
             root = root.cursor_col_resize();
         }
@@ -1340,10 +1410,6 @@ impl Render for Workspace {
             );
         }
         root = root.child(self.terminal_column(title, cards, body, window.is_maximized(), cx));
-        // Beside a worktree's terminals only, not over First Mate or Remote access.
-        if self.side_tab.is_some() && !self.gateway_open && !self.first_mate_open && selected.is_some() {
-            root = root.child(self.side_panel.clone());
-        }
         if self.sidebar_visible {
             root = root.child(self.divider(width, cx));
         }
@@ -1364,10 +1430,13 @@ impl Workspace {
             .flex_col()
             .bg(tokens::sidebar_tint())
             .child(self.sidebar_header(cx))
-            .child(self.fleet_header(cx))
-            .child(div().mt(px(11.)).h(px(1.)).w_full().bg(tokens::hairline()))
-            .child(self.fleet_list(cx))
-            .child(self.first_mate_dock(cx))
+            .when(self.side_tab.is_some(), |d| d.child(div().h(px(1.)).w_full().bg(tokens::hairline())).child(self.side_panel.clone()))
+            .when(self.side_tab.is_none(), |d| {
+                d.child(self.fleet_header(cx))
+                    .child(div().mt(px(11.)).h(px(1.)).w_full().bg(tokens::hairline()))
+                    .child(self.fleet_list(cx))
+                    .child(self.first_mate_dock(cx))
+            })
     }
 
     /// 40pt: the traffic lights' 70×14 slot on the left, the icon cluster on
@@ -1386,6 +1455,7 @@ impl Workspace {
             .gap(px(2.))
             .child(chrome_icon("contrast", !theme::is_dark()).id("toggle-theme").on_click(cx.listener(Self::toggle_theme)))
             .child(chrome_icon("share", self.gateway_open).id("toggle-gateway").on_click(cx.listener(Self::toggle_gateway)))
+            .child(chrome_icon("settings", self.settings_open).id("toggle-settings").on_click(cx.listener(Self::toggle_settings)))
             .child(
                 chrome_icon("folder", self.side_tab == Some(SideTab::Files))
                     .id("toggle-files")
@@ -1610,6 +1680,20 @@ impl Workspace {
                         .on_click(cx.listener(Self::toggle_gateway)),
                 )
             })
+            .when(self.settings_open, |d| {
+                d.child(
+                    div()
+                        .id("close-settings")
+                        .mr(px(12.))
+                        .px(px(6.))
+                        .cursor_pointer()
+                        .text_size(px(14.))
+                        .text_color(tokens::alpha(fg, 0.55))
+                        .hover(|s| s.text_color(fg))
+                        .child("×")
+                        .on_click(cx.listener(Self::toggle_settings)),
+                )
+            })
             .when(self.first_mate_open && !self.gateway_open, |d| {
                 d.child(
                     div()
@@ -1624,7 +1708,7 @@ impl Workspace {
                         .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.toggle_first_mate(window, cx))),
                 )
             })
-            .when(!self.first_mate_open && !self.gateway_open, |d| {
+            .when(!self.first_mate_open && !self.gateway_open && !self.settings_open, |d| {
                 d.child(
                     div().mr(px(8.)).child(
                         icon_button("columns-2", tokens::alpha(fg, 0.55))

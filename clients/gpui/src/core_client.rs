@@ -372,3 +372,63 @@ mod usage_tests {
         assert!(parse_usage(&json!({})).is_empty());
     }
 }
+
+/// What the core knows about one pane (by seahelmd session) that the pane's
+/// own corner shows: its `#n`, its agent, where the agent is working, and
+/// the Claude session a fork would resume.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PaneFacts {
+    pub handle: Option<u64>,
+    pub agent: String,
+    /// The worktree the agent's latest tool call or cwd is in
+    /// (`pane.locations`), when the core knows one.
+    pub location_worktree: Option<String>,
+    /// Claude's session id (`agent.sessions`, kind `id`).
+    pub claude_session: Option<String>,
+}
+
+/// Every pane's facts, by session: `pane.list`, `pane.locations` and
+/// `agent.sessions` in one go. Empty when the core does not answer.
+pub fn pane_facts() -> std::collections::HashMap<String, PaneFacts> {
+    let mut out: std::collections::HashMap<String, PaneFacts> = Default::default();
+    let Ok(list) = call("pane.list", json!({})) else { return out };
+    for p in list.get("panes").and_then(Value::as_array).into_iter().flatten() {
+        let Some(key) = p.get("pane_session_key").and_then(Value::as_str) else { continue };
+        out.insert(
+            key.to_string(),
+            PaneFacts {
+                handle: p.get("handle").and_then(Value::as_u64),
+                agent: p.get("agent_type").and_then(Value::as_str).unwrap_or_default().to_string(),
+                ..Default::default()
+            },
+        );
+    }
+    if let Ok(v) = call("pane.locations", json!({})) {
+        for (key, loc) in v.get("locations").and_then(Value::as_object).into_iter().flatten() {
+            if let (Some(f), Some(wt)) = (out.get_mut(key), loc.get("worktree").and_then(Value::as_str)) {
+                f.location_worktree = Some(wt.to_string());
+            }
+        }
+    }
+    if let Ok(v) = call("agent.sessions", json!({})) {
+        for (key, r) in v.get("agent_sessions").and_then(Value::as_object).into_iter().flatten() {
+            let is_claude = r.get("agent").and_then(Value::as_str) == Some("claude") && r.get("kind").and_then(Value::as_str) == Some("id");
+            if let (true, Some(f), Some(id)) = (is_claude, out.get_mut(key), r.get("session_id").and_then(Value::as_str)) {
+                f.claude_session = Some(id.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// `seahelm-core install-hooks` again, for the Settings page: what it said.
+pub fn install_hooks() -> Result<String, String> {
+    let out = std::process::Command::new(binary()).arg("install-hooks").output().map_err(|e| e.to_string())?;
+    let said = |b: &[u8]| String::from_utf8_lossy(b).trim().to_string();
+    if out.status.success() {
+        let text = said(&out.stdout);
+        Ok(if text.is_empty() { "Hooks are in place.".into() } else { text })
+    } else {
+        Err(said(&out.stderr))
+    }
+}

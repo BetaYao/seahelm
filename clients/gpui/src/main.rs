@@ -15,12 +15,15 @@ mod keys;
 mod notify;
 mod platform;
 mod session;
+mod settings_page;
 mod side_panel;
 mod split;
+mod terminal_text;
 mod terminal_view;
 mod text_input;
 mod theme;
 mod tokens;
+mod user_config;
 mod workspace;
 mod worktree_git;
 

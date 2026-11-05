@@ -1,11 +1,14 @@
-//! The selected worktree's side panel, opened from the header's folder and
-//! diff buttons (the macOS app's `WorktreeSidePanelViewController`):
+//! The selected worktree's Files and Changes, in the left column in place
+//! of the fleet, as the macOS app's `WorktreeSidePanelViewController`
+//! (picked with the sidebar header's folder and diff buttons):
 //!
 //! - Files: the worktree's files as git sees them (tracked, and untracked
-//!   but not ignored), as a tree; a file opens read-only below the header.
+//!   but not ignored), as a tree.
 //! - Changes: what still has to go in a PR — uncommitted work, then
-//!   committed work the base lacks (`worktree_git::changes`); a change opens
-//!   as its diff.
+//!   committed work the base lacks (`worktree_git::changes`).
+//!
+//! Picking a file or a change asks the workspace to open it
+//! (`OpenRequested`), as a tab in the main area (`preview_tabs`).
 //!
 //! Reads run off the UI thread. Changes are read again every few seconds
 //! while that tab is on screen; files when the panel opens or on ↻.
@@ -19,10 +22,9 @@ use gpui::{
 
 use crate::assets::icon;
 use crate::tokens::{self, MONO, SYSTEM};
-use crate::worktree_git::{self as wg, Change, Changes, LineKind, Preview, Stage, TreeRow};
+use crate::worktree_git::{self as wg, Change, Changes, LineKind, TreeRow};
 
-const WIDTH: f32 = 340.0;
-const HEADER_H: f32 = 40.0;
+const HEADER_H: f32 = 34.0;
 const ROW_H: f32 = 22.0;
 const LINE_H: f32 = 17.0;
 const CHANGES_EVERY: Duration = Duration::from_secs(4);
@@ -33,15 +35,17 @@ pub enum Tab {
     Changes,
 }
 
-/// The panel asks its owner to close it (its ×).
+/// The panel asks its owner to close it (its ×): the fleet comes back.
 pub struct CloseRequested;
 
-/// What is open below the header instead of the list.
-struct Opened {
-    title: String,
-    detail: String,
-    preview: Option<Preview>,
+/// A file or a change to open in the main area.
+#[derive(Clone, Debug)]
+pub enum OpenItem {
+    File { worktree: String, path: String },
+    Change { worktree: String, change: Change, changes: Changes },
 }
+
+pub struct OpenRequested(pub OpenItem);
 
 pub struct SidePanel {
     worktree: Option<String>,
@@ -53,7 +57,6 @@ pub struct SidePanel {
     rows: Vec<TreeRow>,
     changes: Changes,
     changes_for: Option<String>,
-    opened: Option<Opened>,
     /// Bumped whenever the worktree changes, so a read that finishes for the
     /// old one is dropped.
     generation: u64,
@@ -61,6 +64,7 @@ pub struct SidePanel {
 }
 
 impl EventEmitter<CloseRequested> for SidePanel {}
+impl EventEmitter<OpenRequested> for SidePanel {}
 
 impl SidePanel {
     pub fn new(_cx: &mut Context<Self>) -> Self {
@@ -74,7 +78,6 @@ impl SidePanel {
             rows: Vec::new(),
             changes: Changes::default(),
             changes_for: None,
-            opened: None,
             generation: 0,
             polling: false,
         }
@@ -83,10 +86,7 @@ impl SidePanel {
     /// On screen with `tab`, for `worktree`.
     pub fn show(&mut self, worktree: Option<String>, tab: Tab, cx: &mut Context<Self>) {
         self.visible = true;
-        if self.tab != tab {
-            self.tab = tab;
-            self.opened = None;
-        }
+        self.tab = tab;
         self.set_worktree(worktree, cx);
         self.load(cx);
         self.poll(cx);
@@ -105,7 +105,6 @@ impl SidePanel {
         }
         self.worktree = worktree;
         self.generation += 1;
-        self.opened = None;
         self.expanded.clear();
         self.files.clear();
         self.rows.clear();
@@ -176,7 +175,7 @@ impl SidePanel {
                     p.polling = false;
                     return false;
                 }
-                if p.tab == Tab::Changes && p.opened.is_none() {
+                if p.tab == Tab::Changes {
                     p.load_changes(cx);
                 }
                 true
@@ -196,14 +195,12 @@ impl SidePanel {
     fn set_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
         if self.tab != tab {
             self.tab = tab;
-            self.opened = None;
             self.load(cx);
             cx.notify();
         }
     }
 
     fn refresh(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.opened = None;
         self.load(cx);
         cx.notify();
     }
@@ -217,57 +214,13 @@ impl SidePanel {
     }
 
     fn open_file(&mut self, rel: String, cx: &mut Context<Self>) {
-        let Some(wt) = self.worktree.clone() else { return };
-        self.opened = Some(Opened { title: rel.clone(), detail: String::new(), preview: None });
-        let generation = self.generation;
-        cx.spawn(async move |this, cx| {
-            let r = rel.clone();
-            let preview = cx.background_executor().spawn(async move { wg::preview_file(&wt, &r) }).await;
-            let _ = this.update(cx, |p, cx| {
-                if p.generation == generation {
-                    if let Some(o) = p.opened.as_mut().filter(|o| o.title == rel) {
-                        o.preview = Some(preview);
-                        cx.notify();
-                    }
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+        let Some(worktree) = self.worktree.clone() else { return };
+        cx.emit(OpenRequested(OpenItem::File { worktree, path: rel }));
     }
 
     fn open_change(&mut self, change: Change, cx: &mut Context<Self>) {
-        let Some(wt) = self.worktree.clone() else { return };
-        let detail = match (&change.old_path, change.stage) {
-            (Some(old), _) => format!("renamed from {old}"),
-            (None, Stage::Uncommitted) => "uncommitted".into(),
-            (None, Stage::Committed) => format!("not in {}", self.base_label()),
-        };
-        self.opened = Some(Opened { title: change.path.clone(), detail, preview: None });
-        let changes = self.changes.clone();
-        let generation = self.generation;
-        cx.spawn(async move |this, cx| {
-            let c = change.clone();
-            let preview = cx.background_executor().spawn(async move { wg::preview_change(&wt, &c, &changes) }).await;
-            let _ = this.update(cx, |p, cx| {
-                if p.generation == generation {
-                    if let Some(o) = p.opened.as_mut().filter(|o| o.title == change.path) {
-                        o.preview = Some(preview);
-                        cx.notify();
-                    }
-                }
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn back(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.opened = None;
-        if self.tab == Tab::Changes {
-            self.load_changes(cx);
-        }
-        cx.notify();
+        let Some(worktree) = self.worktree.clone() else { return };
+        cx.emit(OpenRequested(OpenItem::Change { worktree, change, changes: self.changes.clone() }));
     }
 
     /// "main" for `origin/main`.
@@ -279,23 +232,17 @@ impl SidePanel {
 
 impl Render for SidePanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = match (&self.opened, self.worktree.is_some()) {
-            (_, false) => self.empty("Pick a worktree").into_any_element(),
-            (Some(_), true) => self.opened_view(cx).into_any_element(),
-            (None, true) => match self.tab {
-                Tab::Files => self.files_view(cx).into_any_element(),
-                Tab::Changes => self.changes_view(cx).into_any_element(),
-            },
+        let body = match (self.worktree.is_some(), self.tab) {
+            (false, _) => self.empty("Pick a worktree").into_any_element(),
+            (true, Tab::Files) => self.files_view(cx).into_any_element(),
+            (true, Tab::Changes) => self.changes_view(cx).into_any_element(),
         };
         div()
-            .w(px(WIDTH))
-            .h_full()
-            .flex_none()
+            .w_full()
+            .flex_1()
+            .min_h_0()
             .flex()
             .flex_col()
-            .border_l_1()
-            .border_color(tokens::hairline())
-            .bg(tokens::sidebar_tint())
             .child(self.header(cx))
             .child(div().h(px(1.)).w_full().bg(tokens::hairline()))
             .child(div().flex_1().min_h_0().flex().flex_col().child(body))
@@ -514,66 +461,11 @@ impl SidePanel {
                 )
             })
     }
-
-    fn opened_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(o) = &self.opened else { return div().into_any_element() };
-        let head = div()
-            .flex_none()
-            .px(px(6.))
-            .py(px(6.))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(4.))
-            .child(small_icon("chevron-left", "side-back").on_click(cx.listener(Self::back)))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .font_family(SYSTEM)
-                            .text_size(px(12.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(tokens::ink())
-                            .child(o.title.clone()),
-                    )
-                    .when(!o.detail.is_empty(), |d| {
-                        d.child(div().font_family(SYSTEM).text_size(px(10.5)).text_color(tokens::ink_faint()).child(o.detail.clone()))
-                    }),
-            );
-        let body = match &o.preview {
-            None => self.empty("Reading…").into_any_element(),
-            Some(Preview::Note(text)) => self.empty(text).into_any_element(),
-            Some(Preview::Text(lines)) => {
-                let lines: Vec<(LineKind, SharedString)> = lines.iter().map(|l| (LineKind::Context, SharedString::from(l.clone()))).collect();
-                code_lines("side-text", lines).into_any_element()
-            }
-            Some(Preview::Diff(lines)) => {
-                let lines: Vec<(LineKind, SharedString)> = lines.iter().map(|(k, l)| (*k, SharedString::from(l.clone()))).collect();
-                code_lines("side-diff", lines).into_any_element()
-            }
-        };
-        div()
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .child(head)
-            .child(div().h(px(1.)).w_full().bg(tokens::hairline()))
-            .child(body)
-            .into_any_element()
-    }
 }
 
 /// A file's lines or a diff's, drawn only where on screen; long lines are
 /// cut at the panel's edge.
-fn code_lines(id: &'static str, lines: Vec<(LineKind, SharedString)>) -> impl IntoElement {
+pub fn code_lines(id: &'static str, lines: Vec<(LineKind, SharedString)>) -> impl IntoElement {
     uniform_list(id, lines.len(), move |range, _window, _cx| {
         range
             .filter_map(|ix| lines.get(ix).cloned())

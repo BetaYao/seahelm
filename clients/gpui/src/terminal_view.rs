@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use futures::StreamExt;
 use gpui::{
     div, fill, outline, point, prelude::*, px, size, App, BorderStyle, Bounds, Context, CursorStyle, DispatchPhase,
-    Element, ElementId, ElementInputHandler, EntityInputHandler, FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior,
+    Element, ElementId, ElementInputHandler, EntityInputHandler, ExternalPaths, FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior,
     Hsla, InspectorElementId, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window,
 };
@@ -298,6 +298,39 @@ impl TerminalView {
         });
     }
 
+    /// Bytes for the program, as typed: used for the Esc a fork sends to
+    /// stop the original's turn.
+    pub fn send_bytes(&self, bytes: &[u8]) {
+        if let Some(session) = &self.session {
+            session.send(bytes);
+        }
+    }
+
+    /// Files dropped on the pane: their paths typed in, escaped, through
+    /// the paste path (so a program in bracketed-paste mode reads them as
+    /// pasted, and an agent takes an image path as an image).
+    fn drop_paths(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+        let text = crate::terminal_text::drop_text(paths.paths(), cfg!(windows));
+        if !text.is_empty() {
+            window.focus(&self.focus);
+            self.paste(&text);
+            cx.notify();
+        }
+    }
+
+    /// ⌘-click (Ctrl-click off macOS) on a URL opens it.
+    fn link_at(&self, event: &MouseDownEvent) -> Option<String> {
+        let opener = if crate::platform::MAC { event.modifiers.platform } else { event.modifiers.control };
+        if !opener || event.button != MouseButton::Left {
+            return None;
+        }
+        let at = self.pointer(event.position)?;
+        let text = |row: &Row| row.cells.iter().map(|c| c.text.clone()).collect::<Vec<String>>();
+        let row = self.rows.get(at.row as usize).map(text)?;
+        let next = self.rows.get(at.row as usize + 1).map(text);
+        crate::terminal_text::url_at(&row, at.col as usize, next.as_deref())
+    }
+
     fn paste(&mut self, text: &str) {
         self.to_live_screen();
         let Some(session) = &self.session else { return };
@@ -414,6 +447,10 @@ impl TerminalView {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus);
+        if let Some(url) = self.link_at(event) {
+            cx.open_url(&url);
+            return;
+        }
         if !event.modifiers.shift && self.program_has_mouse() {
             if let Some(b) = vt_button(event.button) {
                 let bytes = self.encode_mouse(MouseAction::Press, Some(b), &event.modifiers, event.position, true);
@@ -554,6 +591,8 @@ impl Render for TerminalView {
             .on_key_down(cx.listener(Self::on_key_down))
             .on_key_up(cx.listener(Self::on_key_up))
             .on_scroll_wheel(cx.listener(Self::on_scroll))
+            .on_drop(cx.listener(Self::drop_paths))
+            .drag_over::<ExternalPaths>(|style, _, _, _| style.border_2().border_color(crate::tokens::accent()))
             .size_full()
             .bg(theme::rgb(theme::bg()));
         if let Some(e) = &self.attach_error {
