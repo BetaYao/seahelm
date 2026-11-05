@@ -79,6 +79,7 @@ impl Cli {
             "wait" => self.wait(a),
             "worktree" => self.worktree(a),
             "habit" => self.habit(a),
+            "task-source" => self.task_source(a),
             "pane" => self.pane(a),
             other => die(&format!("unknown command: {other}"), 2),
         }
@@ -154,6 +155,25 @@ impl Cli {
     /// First Mate's habits: `seahelm habit list [--repo <path>] [--json]`
     /// (read-only), and `seahelm habit inventory [--preview] [--json]` — take
     /// the inventory again (one card per group; `--preview` only shows the groups).
+    fn task_source(&self, a: &[String]) {
+        let sub = first(a).unwrap_or("");
+        if !["add", "list", "remove", "test"].contains(&sub) { die("usage: seahelm task-source <add|list|remove|test> --repo PATH [--id ID] [--json SOURCE]; add reads credential JSON from stdin for Jira", 2); }
+        let repo = opt(a, "--repo").map(|r| absolute(&r)).unwrap_or_default();
+        let mut params = json!({"repo":repo,"id":opt(a,"--id")});
+        if sub == "add" {
+            let raw=opt(a,"--json").unwrap_or_else(||die("--json SOURCE required",2));
+            let mut source: Value=serde_json::from_str(&raw).unwrap_or_else(|_|die("invalid source JSON",2));
+            source["repo"]=json!(repo);
+            if source["kind"] != "github" {
+                use std::io::Read;
+                let mut secret=String::new(); std::io::stdin().read_to_string(&mut secret).unwrap_or_else(|_|die("cannot read credential JSON",2));
+                params["credential"]=serde_json::from_str(&secret).unwrap_or_else(|_|die("invalid credential JSON",2));
+            }
+            params["source"]=source;
+        }
+        pretty(&self.call(&format!("task-source.{sub}"),params,120.0,&[]));
+    }
+
     fn habit(&self, a: &[String]) {
         match first(a) {
             Some("list") => {
@@ -438,7 +458,7 @@ fn route(method: &str) -> &'static [Side] {
         }
         "worktree.create" | "worktree.delete" | "pane.close" => &[Side::App, Side::Core],
         // First Mate's habits live in the core alone.
-        "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
+        "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" | "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
         _ => &[Side::App],
     }
 }

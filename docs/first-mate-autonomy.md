@@ -1,6 +1,6 @@
 # First Mate autonomy: learning to take over the chores
 
-Status: phases 1–6 built (2026-11-05); the rest is design.
+Status: phases 1–6 and 8 built (2026-11-05); phases 7 and 9 remain design on this branch.
 Builds on `docs/first-mate-core.md` (First Mate lives in seahelm-core) and
 `docs/superpowers/specs/2026-11-04-first-mate-surfaces-design.md` (the island).
 
@@ -49,6 +49,10 @@ up**, so that is the first vertical slice.
 | D20 | `habits.propose` is a card-producing First Mate call. New habits, global or `repo` scoped, at most ask; existing ids are refused without changing level or evidence; core discards supplied evidence and grants. No habit is saved until the user answers. A prose `when` requires `judgement: true` on the proposal and persists with an explicit judgement tag; ordinary scalar conditions in habit files are refused with a note and never silently interpreted as judgement; a named habit action (`--habit`) is held at ask and must name an active granted deletion habit. Invalid measured objects are refused. | 2026-11-05 |
 | D21 | Tuning lives in budget.json under first-mate, with bounded N 2–10, M 3–20, expiry 1–7 days and cap 1–5. Six consistent outcomes move a knob one step; acceptance/decline adjusts N, auto promotion acceptance/decline (including subsequent auto demotions) adjusts M, answers within an hour / after a day adjust expiry, answered/expired cards adjust cap. Dismissal supplies neither an answer nor latency, rule approvals supply response timing only, and demotion supplies promotion evidence without resetting the expired streak. Each actual move writes an audit line and one brief note; it grants no level. | 2026-11-05 |
 | D22 | Core card delivery translates built-in option labels using first_mate_language. Clients answer by index or the card’s shown label, as the registry requires; island, web and Telegram currently send indices. The shown label resolves to a core-owned canonical key before any First Mate comparison. Arbitrary canonical keys and English aliases are not accepted on a Chinese card. Cards raised in English retain their own English labels across a language change. | 2026-11-05 |
+| D27 | Jira supports Cloud (email + API token, HTTP basic auth, `https://<site>.atlassian.net`) and Server/Data Center (personal access token, bearer). Credentials stay in `~/.config/seahelm/first-mate/secrets.json`, mode 0600, never in config.json or a repository; only the user may write them through `seahelm task-source …`, with kernel peer checks. | 2026-11-05 |
+| D28 | Task reads default to every 30 minutes per source; configurable from 5 minutes to 7 days. Each tick admits at most four due sources, each reads at most 50 issues and 1,000 recent PRs. Reads run off the First Mate thread, with request timeouts; failures never start work. Fetchers are injectable and tests use fakes. | 2026-11-05 |
+| D29 | `task.new` is internal candidate data. Only the daily brief lists tasks in “Could do / 可以做” and may raise one proactive selection card, with at most three ranked tasks plus Pass. Its answer is permission for that one `worktree.create`; pause, deny, budgets and deduplication still apply. No task event starts work or raises a card itself. | 2026-11-05 |
+| D30 | Ranking combines priority labels / Jira priority, assignment to the authenticated user, and bounded label preferences from `task.started` / `task.passed`. This is a judgement ranking habit, never an autonomy grant. Offers survive restart and are not offered twice; source content cannot become a memory directive. | 2026-11-05 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -585,7 +589,7 @@ other.
 **Gap.** `triage-issues` exists (GitHub, off by default); there is no Jira.
 
 **Design.** Per-project task sources in the project's settings: GitHub
-(assigned to me, labels) first, Jira later (open question Q3). The core polls
+(assigned to me, labels, milestone) and Jira (JQL), settled by D27. The core polls
 and raises `task.new` events, deduplicated against existing worktrees,
 branches and PRs. Tasks only ever appear in the brief; tapping one starts it
 (a card answer is the user's yes). Which tasks the user starts and which they
@@ -625,7 +629,14 @@ including dropping a job nobody reads.
 7. **Project memory and routing** (scenarios 5 and 2): memory files, project
    list and aliases, the user mandate, memory in briefs, learning from pane
    prompts.
-8. **Task sources**: GitHub, then Jira.
+8. **Task sources — As built** (`first_mate/task_sources.rs`, D27–D30):
+   per-project GitHub and Jira sources, bounded background polls, internal
+   `task.new` events, persisted offer deduplication, brief-only task choices,
+   one-tap worktree creation and ranking observations. GitHub reads through
+   `gh`; Jira Cloud uses `/rest/api/3/search/jql`, Server/DC `/rest/api/2/search`.
+   The authenticated identity is read for assignment ranking. Branch names and
+   PR bodies are checked again before starting; a failed read starts nothing.
+   No GitHub or Jira writeback is implemented: that is a later gated action.
 9. **Global schedules and the research repo.**
 
 Phases 1–5 solve the worktree pile-up end to end; phase 6 widens the learning loop.
@@ -635,11 +646,54 @@ Phases 1–5 solve the worktree pile-up end to end; phase 6 widens the learning 
 Q1 (memory location), Q2 (brief timing), Q5 (thresholds) and Q6 (the
 `start_agent` mandate) are settled by D7–D10.
 
-- **Q3. Jira.** Cloud (email + API token) or Server/DC (PAT)? Where the
-  credential is kept (Keychain vs the gateway, which already holds secrets).
+Q3 is settled by D27: both Jira variants, credentials in the local 0600 secrets file.
 - **Q4. Research.** Where the research repo lives, and whether reports also go
   out in full or only as the brief's summary.
 - **Q7. A plain-language request with no link** ("fix the login 500"): the
   mandate needs the project named or an alias. Should First Mate's own routing,
   once it has been right M times in a row for that kind of request, be
   promotable to `auto` like any habit?
+
+
+### Task sources: local operations (phase 8)
+
+Sources live in `first-mate/task-sources/<repo-key>.json`; poll timestamps,
+seen/offered identities, pending tasks and the bounded ranking preference live
+in `first-mate/tasks.json`. The repo-key is the existing habits repo-key.
+All four RPCs (`task-source.add/list/remove/test`) are user-only, including
+list and test. A pane process and an unreadable peer are refused even if their
+JSON claims to be a client. Source JSON rejects unknown fields, so credentials
+cannot be smuggled into the public source configuration. Credentials are
+accepted on stdin, never a CLI token argument; curl receives auth on stdin too.
+
+Examples (run from the user's terminal outside any seahelm pane):
+
+```sh
+seahelm task-source add --repo /path/to/project --json '{"id":"github","kind":"github","github":"owner/repo","assigned_to_me":true,"labels":["high"],"milestone":"v1","minutes":30}'
+seahelm task-source list --repo /path/to/project
+seahelm task-source test --repo /path/to/project --id github
+seahelm task-source remove --repo /path/to/project --id github
+# Jira add reads {"email":"…","token":"…"} (Cloud), or {"token":"…"}
+# (Server/DC), from stdin. Supply it from a private credential file or prompt.
+seahelm task-source add --repo /path/to/project --json '{"id":"jira","kind":"jira-cloud","site":"https://example.atlassian.net","jql":"assignee = currentUser() AND resolution = Unresolved","minutes":30}' < /private/path/to/credential.json
+```
+
+`test` reads the source through the same fetcher but creates no event, candidate,
+card or worktree. A poll creates candidates only while First Mate is enabled and
+not paused. Local branches include linked worktrees; GitHub PR head branches
+and bodies are read for GitHub sources and for Jira sources whose origin is
+GitHub. Exact key/number boundaries avoid treating #123 as #12. Offers are
+persisted before the card is used. Unselected items and explicit passes produce
+`task.passed`; successful creation produces `task.started`. Source removal and
+closed/disappeared fetched issues remove pending candidates. A task already
+started elsewhere is refused at click time. Issue text is labelled untrusted
+in the kickoff brief; the clear project-memory hook in `Task::params` is for
+phase 7 once that code is present on rebase.
+
+Current bounds and follow-ups: each source's filter should select a modest
+backlog (50 returned issues); PR deduplication considers up to 1,000 PRs.
+Custom Jira priority names currently rank as neutral unless they match
+highest/critical/blocker, high, medium, low/lowest. Pagination beyond these
+bounds and user-defined priority mappings remain design questions. Real
+GitHub/Jira authentication, live polling, app/Telegram rendering and actual
+agent startup are not exercised by the isolated tests.
