@@ -18,6 +18,9 @@ use crate::fleet::{self, Dot, GitStats, Group, Grouping, Item, Snapshot};
 use crate::gateway_page::GatewayPage;
 use crate::platform;
 use crate::session;
+#[path = "worktree_menu.rs"]
+mod worktree_menu;
+use worktree_menu::{CancelSheet, NewWorktree, RowMenu};
 use crate::side_panel::{self, SidePanel, Tab as SideTab};
 use crate::split::{Axis, Direction, LeafId, Rect, SplitTree};
 use crate::terminal_view::TerminalView;
@@ -60,6 +63,7 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("ctrl-alt-down", FocusPaneDown, None),
         ]);
     }
+    cx.bind_keys([KeyBinding::new("escape", CancelSheet, Some("NewWorktreeSheet"))]);
 }
 
 /// A worktree's panes: the split tree, kept across launches, and a
@@ -128,6 +132,10 @@ pub struct Workspace {
     side_tab: Option<SideTab>,
     side_panel: Entity<SidePanel>,
     _side_closed: Subscription,
+    /// The "New worktree" sheet, while open.
+    new_worktree: Option<NewWorktree>,
+    /// A row's right-click menu, while open.
+    row_menu: Option<RowMenu>,
 }
 
 impl Workspace {
@@ -169,6 +177,8 @@ impl Workspace {
             side_tab: None,
             side_panel,
             _side_closed: side_closed,
+            new_worktree: None,
+            row_menu: None,
         };
         Self::poll_core(cx);
         Self::listen_core(cx);
@@ -1337,6 +1347,9 @@ impl Render for Workspace {
         if self.sidebar_visible {
             root = root.child(self.divider(width, cx));
         }
+        if let Some(overlay) = self.overlays(cx) {
+            root = root.child(overlay);
+        }
         root
     }
 }
@@ -1434,7 +1447,8 @@ impl Workspace {
         }
         let now = fleet::now();
         for (gi, group) in self.display_groups(now).iter().enumerate() {
-            list = list.child(group_header(&group.title, gi == 0, group.items.len() >= 3));
+            let project = (!group.path.is_empty()).then(|| (group.path.clone(), group.title.clone()));
+            list = list.child(group_header(&group.title, gi == 0, group.items.len() >= 3, project, cx));
             let mut rows = div().flex().flex_col().gap(px(4.));
             for item in &group.items {
                 rows = rows.child(self.row(item, now, cx));
@@ -1512,7 +1526,11 @@ impl Workspace {
             .gap(px(7.))
             .when(selected, |d| d.bg(tokens::row_selected()))
             .when(!selected, |d| d.hover(|s| s.bg(tokens::row_hover())))
-            .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| w.select(id.clone(), window, cx)))
+            .on_click({
+                let id = id.clone();
+                cx.listener(move |w, _: &ClickEvent, window, cx| w.select(id.clone(), window, cx))
+            })
+            .on_mouse_down(MouseButton::Right, cx.listener(move |w, e: &MouseDownEvent, _, cx| w.open_row_menu(id.clone(), e, cx)))
             .child(div().w(px(5.5)).h(px(16.)).flex_none().flex().items_center().child(status_dot(item.dot(), self.spin_phase)))
             .child(
                 div()
@@ -1776,7 +1794,30 @@ fn chrome_icon(name: &str, active: bool) -> gpui::Div {
     icon_button(name, if active { tokens::accent() } else { tokens::chrome_icon() })
 }
 
-fn group_header(title: &str, first: bool, can_integrate: bool) -> impl IntoElement {
+/// `project` is the group's (main checkout, name) when the group is one
+/// project: then `+` makes a worktree in it and `×` takes it off the list.
+fn group_header(title: &str, first: bool, can_integrate: bool, project: Option<(String, String)>, cx: &mut Context<Workspace>) -> impl IntoElement {
+    let buttons = project.map(|(path, name)| {
+        let (p2, n2) = (path.clone(), name.clone());
+        div()
+            .flex()
+            .flex_row()
+            .gap(px(7.))
+            .child(
+                div()
+                    .id(SharedString::from(format!("new-wt-{path}")))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| w.open_new_worktree(path.clone(), name.clone(), window, cx)))
+                    .child(glyph("plus", 11., tokens::ink_faint())),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!("rm-project-{p2}")))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| w.remove_project(p2.clone(), n2.clone(), window, cx)))
+                    .child(glyph("x", 11., tokens::ink_faint())),
+            )
+    });
     div()
         // The spec's 13/7 come out tighter in AppKit's stack; these are
         // measured off the live window.
@@ -1789,8 +1830,7 @@ fn group_header(title: &str, first: bool, can_integrate: bool) -> impl IntoEleme
         .child(div().text_size(px(11.)).line_height(px(15.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink_dim()).child(title.to_string()))
         .child(div().flex_1())
         .when(can_integrate, |d| d.child(glyph("merge", 11., tokens::ink_faint())))
-        .child(glyph("plus", 11., tokens::ink_faint()))
-        .child(glyph("x", 11., tokens::ink_faint()))
+        .when_some(buttons, |d, b| d.child(b))
 }
 
 /// How often the running spinner steps, and in how many steps it turns.
