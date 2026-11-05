@@ -116,8 +116,25 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(MessageEvent(dict: ["seq": 1, "pane_id": "fm", "kind": "brief", "ts": 1.0, "text": text])?.kind, .brief)
     }
 
+    /// A suggestion is recorded before the reply it closes; it goes under it.
+    func testASuggestionGoesUnderItsReply() {
+        let items = ConversationItem.items(from: [
+            MessageEvent(seq: 1, paneId: "fm", paneSessionKey: "k", kind: .user, ts: Date(), text: "[seahelm event] pr.merged · rule cleanup-merged"),
+            MessageEvent(seq: 2, paneId: "fm", paneSessionKey: "k", kind: .decision, ts: Date(), text: "Delete · Keep"),
+            MessageEvent(seq: 3, paneId: "fm", paneSessionKey: "k", kind: .assistant, ts: Date(), text: "Safe to delete."),
+            MessageEvent(seq: 4, paneId: "fm", paneSessionKey: "k", kind: .decision, ts: Date(), text: "A · B"),
+        ])
+        XCTAssertEqual(items.map(\.id), [1, 3, 2, 4], "the reply first, its choices under it; a trailing one stays last")
+    }
+
+    func testFoldedReplyDropsBlankLines() {
+        XCTAssertEqual(OpenedSurfaceView.preview("Para one.\n\n- a\n\n- b"), "Para one.\n- a\n- b")
+        XCTAssertTrue(OpenedSurfaceView.isLongReply("one\n\ntwo"), "blank lines dropped means there is more to show")
+    }
+
     func testLongRepliesFoldToThreeLines() {
         XCTAssertFalse(OpenedSurfaceView.isLongReply("one\ntwo\nthree"))
+        XCTAssertEqual(FirstMateEventText.parse("[seahelm event] ci.failed · rule fix-ci").style, .ciFailed)
         XCTAssertTrue(OpenedSurfaceView.isLongReply("one\ntwo\nthree\nfour"))
         XCTAssertTrue(OpenedSurfaceView.isLongReply(String(repeating: "x", count: 200)))
     }
@@ -138,8 +155,8 @@ final class IslandFirstMateTests: XCTestCase {
             MessageEvent(seq: 2, paneId: "fm", paneSessionKey: "k", kind: .user, ts: Date(), text: "[seahelm] The user approved: Delete x"),
         ])
         XCTAssertEqual(items.map(\.kind), [
-            .event(headline: "PR merged · x", full: prompt),
-            .event(headline: "The user approved: Delete x", full: "[seahelm] The user approved: Delete x"),
+            .event(headline: "PR merged · x", full: prompt, style: .merged),
+            .event(headline: "The user approved: Delete x", full: "[seahelm] The user approved: Delete x", style: .outcome),
         ])
     }
 

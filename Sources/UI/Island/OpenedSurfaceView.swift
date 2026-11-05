@@ -186,11 +186,14 @@ struct OpenedSurfaceView: View {
         .onTapGesture(perform: action)
     }
 
+    /// First Mate's column: everything it says sits right of the event icons.
+    private static let gutter: CGFloat = 26
+
     private var conversation: some View {
         let items = ConversationItem.items(from: model.mateMessages)
         return ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 9) {
+                LazyVStack(alignment: .leading, spacing: 7) {
                     if items.isEmpty {
                         Text(model.mateRunning ? "Nothing said yet. Ask First Mate anything — a `/command` runs as one."
                                                : "First Mate is off. Turn it on in Settings ▸ First Mate.")
@@ -198,15 +201,25 @@ struct OpenedSurfaceView: View {
                             .foregroundStyle(.white.opacity(0.45))
                             .padding(.vertical, 8)
                     }
-                    ForEach(items) { item in
-                        row(item).id(item.id)
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        row(item)
+                            .id(item.id)
+                            // A new section (an event, the user speaking) gets air above it.
+                            .padding(.top, index > 0 && Self.startsSection(item) ? 12 : 0)
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, 4)
             }
             .frame(height: Self.maxListHeight * 0.85)
             .onAppear { proxy.scrollTo(items.last?.id, anchor: .bottom) }
             .onChange(of: items.last?.id) { proxy.scrollTo(items.last?.id, anchor: .bottom) }
+        }
+    }
+
+    static func startsSection(_ item: ConversationItem) -> Bool {
+        switch item.kind {
+        case .event, .user, .brief: return true
+        default: return false
         }
     }
 
@@ -215,103 +228,168 @@ struct OpenedSurfaceView: View {
         switch item.kind {
         case .user(let text):
             HStack {
-                Spacer(minLength: 40)
+                Spacer(minLength: 48)
                 Text(text)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12.5))
                     .foregroundStyle(.white.opacity(0.95))
-                    .padding(.horizontal, 10)
+                    .lineSpacing(2)
+                    .padding(.horizontal, 11)
                     .padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(IslandStyle.accent.opacity(0.22)))
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(IslandStyle.accent.opacity(0.2)))
                     .textSelection(.enabled)
             }
         case .assistant(let text, let tools):
             let open = expanded.contains(item.id)
             let long = Self.isLongReply(text)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(Self.markdown(text))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.92))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(Self.markdown(open ? text : Self.preview(text)))
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .lineSpacing(2.5)
                     .lineLimit(open ? nil : Self.replyPreviewLines)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 if long || tools != nil {
                     HStack(spacing: 8) {
                         if long {
-                            Text(open ? "Show less" : "Show more")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(IslandStyle.accent.opacity(0.8))
-                                .onTapGesture {
+                            HStack(spacing: 3) {
+                                Text(open ? "Less" : "More")
+                                Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 7, weight: .bold))
+                            }
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation(.easeInOut(duration: 0.15)) {
                                     if open { expanded.remove(item.id) } else { expanded.insert(item.id) }
                                 }
+                            }
                         }
                         Spacer(minLength: 0)
                         if let tools {
                             Text(tools)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.3))
+                                .font(.system(size: 9.5, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.28))
                                 .lineLimit(1)
                         }
                     }
                 }
             }
+            .padding(.leading, Self.gutter)
         case .thinking(let text):
             Text(text)
                 .font(.system(size: 11).italic())
-                .foregroundStyle(.white.opacity(0.42))
-                .lineLimit(2)
-        case .tools(let summary):
-            Text("› " + summary)
-                .font(.system(size: 10.5, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.4))
-                .lineLimit(1)
+                .lineLimit(2)
+                .padding(.leading, Self.gutter)
+        case .tools(let summary):
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini).scaleEffect(0.7).frame(width: 10, height: 10)
+                Text(summary)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .lineLimit(1)
+            }
+            .padding(.leading, Self.gutter)
         case .note(let text):
             Text(text)
                 .font(.system(size: 10.5))
                 .foregroundStyle(.white.opacity(0.4))
                 .lineLimit(2)
+                .padding(.leading, Self.gutter)
         case .brief(let text):
+            // The core's own block, with its own icon: full width, like an event.
             briefRow(text)
         case .decision(let options):
             decisionRow(options)
-        case .event(let headline, let full):
-            let open = expanded.contains(item.id)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    Image(systemName: "bolt.fill").font(.system(size: 9)).foregroundStyle(.yellow.opacity(0.75))
-                    Text(headline)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Image(systemName: open ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.35))
-                }
-                if open {
-                    Text(full)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
+                .padding(.leading, Self.gutter)
+                .padding(.top, 2)
+        case .event(let headline, let full, let style):
+            eventHeader(id: item.id, ts: item.ts, headline: headline, full: full, style: style)
+        }
+    }
+
+    /// An event as the header of what First Mate did about it: an icon in its
+    /// colour, what happened, when. The text seahelm sent sits behind a tap.
+    @ViewBuilder
+    private func eventHeader(id: UInt64, ts: Date, headline: String, full: String,
+                             style: FirstMateEventText.Style) -> some View {
+        let open = expanded.contains(id)
+        let look = Self.look(style)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: look.symbol)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(look.color)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(look.color.opacity(0.16)))
+                Text(headline)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text(Self.time(ts))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.32))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.25))
+                    .rotationEffect(.degrees(open ? 180 : 0))
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.04)))
             .contentShape(Rectangle())
             .onTapGesture {
-                if open { expanded.remove(item.id) } else { expanded.insert(item.id) }
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    if open { expanded.remove(id) } else { expanded.insert(id) }
+                }
+            }
+            if open {
+                Text(full)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineSpacing(1.5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.04)))
+                    .padding(.leading, Self.gutter)
             }
         }
     }
 
-    /// How many lines of a reply show before "Show more".
+    static func look(_ style: FirstMateEventText.Style) -> (symbol: String, color: Color) {
+        switch style {
+        case .ciFailed: return ("xmark", Color(red: 1, green: 0.42, blue: 0.42))
+        case .merged: return ("arrow.triangle.merge", Color(red: 0.69, green: 0.55, blue: 1))
+        case .scheduled: return ("clock", IslandStyle.accent)
+        case .outcome: return ("checkmark", Color(red: 0.4, green: 0.85, blue: 0.55))
+        case .other: return ("bolt.fill", .yellow.opacity(0.85))
+        }
+    }
+
+    /// "14:05" today, "Nov 4" before.
+    static func time(_ date: Date, now: Date = Date()) -> String {
+        guard date > .distantPast else { return "" }
+        let f = DateFormatter()
+        f.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "MMM d"
+        return f.string(from: date)
+    }
+
+    /// A folded reply: its blank lines dropped, so the preview lines carry words.
+    static func preview(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: true)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .joined(separator: "\n")
+    }
+
+    /// How many lines of a reply show before "More".
     static let replyPreviewLines = 3
 
-    /// Whether a reply runs past its preview lines (an estimate: the text's
-    /// own lines, or enough characters to wrap past them).
+    /// Whether a reply runs past its preview lines (an estimate: its non-blank
+    /// lines, or enough characters to wrap past them).
     static func isLongReply(_ text: String) -> Bool {
-        text.split(separator: "\n", omittingEmptySubsequences: false).count > replyPreviewLines || text.count > 160
+        let p = preview(text)
+        return p.split(separator: "\n").count > replyPreviewLines || p.count > 160 || p.count != text.count
     }
 
     /// First Mate's suggestion card for these options, while it still waits.
@@ -327,15 +405,17 @@ struct OpenedSurfaceView: View {
         HStack(spacing: 6) {
             ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                 let live = card != nil
+                let primary = live && index == 0
                 Text(option)
-                    .font(.system(size: 11, weight: live && index == 0 ? .semibold : .medium))
-                    .foregroundStyle(live ? (index == 0 ? Color.black.opacity(0.85) : .white.opacity(0.9)) : .white.opacity(0.4))
+                    .font(.system(size: 11, weight: primary ? .semibold : .medium))
+                    .foregroundStyle(primary ? Color.black.opacity(0.85) : .white.opacity(live ? 0.9 : 0.38))
                     .lineLimit(1)
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 11)
                     .padding(.vertical, 5)
-                    .background(
-                        Capsule().fill(live ? (index == 0 ? IslandStyle.accent : Color.white.opacity(0.12)) : Color.white.opacity(0.05))
-                    )
+                    // Waiting: filled, the first one in the accent. Answered: an
+                    // outline, so it reads as what was offered, not a control.
+                    .background(Capsule().fill(primary ? IslandStyle.accent : Color.white.opacity(live ? 0.12 : 0)))
+                    .overlay(Capsule().stroke(Color.white.opacity(live ? 0 : 0.12), lineWidth: 1))
                     .contentShape(Capsule())
                     .onTapGesture {
                         guard let card else { return }
@@ -619,67 +699,105 @@ struct ConversationItem: Identifiable, Equatable {
         /// First Mate's daily brief: a title, then a line per section.
         case brief(String)
         /// Choices First Mate put to the user (its suggestion): drawn as
-        /// buttons while the card is still waiting.
+        /// buttons while the card is still waiting, under the reply they go with.
         case decision([String])
         /// What seahelm itself handed First Mate (`[seahelm event] …`, an
-        /// approval's outcome): a readable headline, the whole text behind a tap.
-        case event(headline: String, full: String)
+        /// approval's outcome): a section header that reads as what happened,
+        /// the whole text behind a tap.
+        case event(headline: String, full: String, style: FirstMateEventText.Style)
     }
 
     let id: UInt64
     let kind: Kind
+    let ts: Date
+
+    init(id: UInt64, kind: Kind, ts: Date = .distantPast) {
+        self.id = id; self.kind = kind; self.ts = ts
+    }
 
     static func items(from messages: [MessageEvent]) -> [ConversationItem] {
         var out: [ConversationItem] = []
         var run: [(tool: String, count: Int)] = []
         var runId: UInt64 = 0
+        var runTs = Date.distantPast
         var summary: String? {
             run.isEmpty ? nil : run.map { $0.count > 1 ? "\($0.tool) ×\($0.count)" : $0.tool }.joined(separator: " · ")
+        }
+        /// A suggestion is recorded before the reply it closes, so it waits for
+        /// that reply and goes under it.
+        var held: ConversationItem?
+        func flush() {
+            if let held { out.append(held) }
+            held = nil
         }
         /// Something other than a reply ends the run: its calls led to no
         /// reply of their own, so they are dropped.
         func dropRun() { run = [] }
         for m in messages {
             let text = (m.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let item = { (kind: Kind) in ConversationItem(id: m.seq, kind: kind, ts: m.ts) }
             switch m.kind {
             case .tool:
                 guard let tool = m.tool, !tool.isEmpty else { continue }
-                if run.isEmpty { runId = m.seq }
+                if run.isEmpty { runId = m.seq; runTs = m.ts }
                 if run.last?.tool == tool { run[run.count - 1].count += 1 } else { run.append((tool, 1)) }
                 continue
             case .user where text.hasPrefix("[seahelm"):
-                dropRun(); out.append(ConversationItem(id: m.seq, kind: .event(headline: FirstMateEventText.headline(text), full: text)))
+                dropRun(); flush()
+                let parsed = FirstMateEventText.parse(text)
+                out.append(item(.event(headline: parsed.headline, full: text, style: parsed.style)))
             case .user where !text.isEmpty:
-                dropRun(); out.append(ConversationItem(id: m.seq, kind: .user(text)))
+                dropRun(); flush(); out.append(item(.user(text)))
             case .assistant where !text.isEmpty:
-                out.append(ConversationItem(id: m.seq, kind: .assistant(text, tools: summary)))
+                out.append(item(.assistant(text, tools: summary)))
                 run = []
+                flush()
             case .thinking where !text.isEmpty:
-                out.append(ConversationItem(id: m.seq, kind: .thinking(text)))
+                out.append(item(.thinking(text)))
             case .note where !text.isEmpty:
-                dropRun(); out.append(ConversationItem(id: m.seq, kind: .note(text)))
+                dropRun(); flush(); out.append(item(.note(text)))
             case .brief where !text.isEmpty:
-                dropRun(); out.append(ConversationItem(id: m.seq, kind: .brief(text)))
+                dropRun(); flush(); out.append(item(.brief(text)))
             // Notices ("Claude is waiting for your input") say what the title's
             // status already does, once per turn: left out.
             case .decision where !text.isEmpty:
-                dropRun()
+                dropRun(); flush()
                 let options = text.components(separatedBy: " · ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                out.append(ConversationItem(id: m.seq, kind: options.count > 1 ? .decision(options) : .note(text)))
+                if options.count > 1 { held = item(.decision(options)) } else { out.append(item(.note(text))) }
             case .status where m.status == AgentStatus.error.rawValue:
-                dropRun(); out.append(ConversationItem(id: m.seq, kind: .note("Stopped with an error")))
+                dropRun(); flush(); out.append(item(.note("Stopped with an error")))
             default:
                 continue
             }
         }
         // Calls with nothing after them: the turn is still under way.
-        if let summary { out.append(ConversationItem(id: runId, kind: .tools(summary))) }
+        if let summary { out.append(ConversationItem(id: runId, kind: .tools(summary), ts: runTs)) }
+        flush()
         return out
     }
 }
 
 /// Reads the messages seahelm hands First Mate. Pure.
 enum FirstMateEventText {
+    /// What kind of thing happened, for the header's icon and colour.
+    enum Style: Equatable {
+        case ciFailed, merged, scheduled
+        /// seahelm telling First Mate how the user answered (an approval).
+        case outcome
+        case other
+    }
+
+    static func parse(_ text: String) -> (headline: String, style: Style) {
+        let first = text.components(separatedBy: "\n").first ?? text
+        let style: Style
+        if first.hasPrefix("[seahelm event] ci.failed") { style = .ciFailed }
+        else if first.hasPrefix("[seahelm event] pr.merged") { style = .merged }
+        else if first.hasPrefix("[seahelm event] schedule") { style = .scheduled }
+        else if first.hasPrefix("[seahelm] ") { style = .outcome }
+        else { style = .other }
+        return (headline(text), style)
+    }
+
     /// `[seahelm event] pr.merged · rule cleanup-merged` + `PR: #12 …` reads
     /// "PR #12 merged": what happened and to what, not the rule plumbing
     /// (that stays in the full text). Anything else keeps its first line,
