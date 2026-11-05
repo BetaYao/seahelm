@@ -1301,7 +1301,7 @@ impl Core {
     /// A socket call, after the peer check for the guarded methods. The
     /// verdict is only worked out for those (it reads the process table).
     fn call_checked(self: Arc<Self>, method: &str, params: Value, pid: Option<u32>, verdict: impl FnOnce() -> crate::peer::Verdict) -> Reply {
-        if crate::peer::guarded(method) {
+        if crate::peer::guarded_call(method, &params) {
             if let Err(e) = self.admit(&verdict(), pid, method, &params) {
                 return Reply::Value(Err(e));
             }
@@ -1325,6 +1325,12 @@ impl Core {
             }
             Verdict::Client { .. } | Verdict::Outside => {}
             Verdict::InPane(why) | Verdict::Unknown(why) => {
+                if crate::peer::starts_inventory(method, p) {
+                    self.security(format!("Refused starting First Mate's inventory from pid {pid}: {why}. Only the user asks for it, through a seahelm client or their own terminal."), true);
+                    return Err(RpcError::forbidden(format!(
+                        "{method} refused: only the user starts the inventory, through a seahelm client; this caller is inside a seahelm pane or could not be identified ({why}). `preview: true` is read-only and allowed"
+                    )));
+                }
                 if crate::peer::speaks_as_user(method) {
                     self.security(format!("Refused {} from pid {pid}: {why}. Only the user speaks to First Mate as the user, through the app, the web or Telegram.", describe_speech(method)), true);
                     return Err(RpcError::forbidden(format!(
@@ -2172,6 +2178,31 @@ mod peer_gate_tests {
         // Another process is another line.
         assert!(value(core.clone().call_checked("autopilot.say", json!({"text": "hi"}), Some(11), dev)).is_ok());
         assert_eq!(audit(tmp.path()).lines().count(), 2);
+    }
+
+    #[test]
+    fn a_pane_cannot_start_the_inventory_but_may_preview_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        for p in [json!({}), json!({"preview": false})] {
+            let e = value(core.clone().call_checked("habits.inventory", p.clone(), Some(4242), agent)).unwrap_err();
+            assert_eq!(e.code, rpc::FORBIDDEN, "{p}");
+            assert!(e.message.contains("only the user starts the inventory"), "{}", e.message);
+            let e = value(core.clone().call_checked("habits.inventory", p, Some(4243), || Verdict::Unknown("the system did not say".into()))).unwrap_err();
+            assert_eq!(e.code, rpc::FORBIDDEN);
+        }
+        let log = audit(tmp.path());
+        assert_eq!(log.lines().count(), 4, "{log}");
+        assert!(log.contains("Refused starting First Mate's inventory from pid 4242"), "{log}");
+        // The preview only reads: a pane may look.
+        let r = value(core.clone().call_checked("habits.inventory", json!({"preview": true}), Some(4242), agent)).unwrap();
+        assert!(r["groups"].is_array(), "{r}");
+        assert_eq!(audit(tmp.path()).lines().count(), 4, "nothing more to report");
+        // A client gets through the check (and, with no First Mate here, is told so).
+        let e = value(core.clone().call_checked("habits.inventory", json!({}), Some(7), app)).unwrap_err();
+        assert_eq!(e.code, first_mate::REFUSED);
+        assert!(e.message.contains("not running"), "{}", e.message);
+        assert_eq!(audit(tmp.path()).lines().count(), 4);
     }
 
     #[test]
