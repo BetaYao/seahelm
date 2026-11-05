@@ -51,6 +51,10 @@ enum CommandSpecs {
             summary: "What a pane is doing",
             detail: "The pane's latest turn and its reply. Read-only. Bare `/show` reads the pane you are talking to."),
         CommandSpec(
+            verb: "notes", usage: "/notes [undo] @repo",
+            summary: "A project's notes (First Mate's project memory); undo the last change",
+            detail: "`/notes @repo` shows what First Mate remembers about the project and what every new agent there is told. `/notes undo @repo` restores the previous version. Not `/memory`: that is Claude Code's own command."),
+        CommandSpec(
             verb: "help", usage: "/help [command]",
             summary: "This list; with a command, its details",
             detail: "You are reading it."),

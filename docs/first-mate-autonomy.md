@@ -669,7 +669,7 @@ returns used/capacity and trust state. External edits raise a user confirmation
 card tied to the exact digest and stay out of context meanwhile. The CLI exposes
 `memory note`, `memory show`, `memory undo`, and `memory confirm` (the latter
 requires the digest returned by show). Undo and confirmation are user-only: restoring an older note can remove a user's
-restriction. Only note-writing admits the kernel-identified First Mate session. `/memory show @repo` and `/memory undo @repo`
+restriction. Only note-writing admits the kernel-identified First Mate session. `/notes @repo` and `/notes undo @repo` (renamed from `/memory`, which is Claude Code's own command)
 run directly through core-command from the island, web or Telegram. Rejection
 restores the remembered revision and clears the pending card; stale confirmations
 cannot approve a newer edit. The core writes

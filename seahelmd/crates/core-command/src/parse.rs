@@ -81,10 +81,16 @@ fn parse_verb(verb: &str, rest: &str, index: &FleetIndex) -> Result<Command, Err
             Some(t) => go_target(&t, index).map(|g| Command::Go(Some(g))),
         },
         "new" => parse_new(rest, index),
-        "memory" => {
+        // `/notes`, not `/memory`: Claude Code has a `/memory` of its own,
+        // and the same word doing something else in a pane was a trap.
+        "notes" => {
             let args: Vec<_> = rest.split_whitespace().collect();
-            if args.len() != 2 || !matches!(args[0], "show" | "undo") { return Err(Error::BadArgument { verb:"memory", token:rest.into() }); }
-            Ok(Command::Memory { verb:args[0].into(), repo:repo_ref(args[1],index)? })
+            let (verb, repo) = match args.as_slice() {
+                [repo] => ("show", *repo),
+                [verb, repo] if matches!(*verb, "show" | "undo") => (*verb, *repo),
+                _ => return Err(Error::BadArgument { verb:"notes", token:rest.into() }),
+            };
+            Ok(Command::Memory { verb:verb.into(), repo:repo_ref(repo,index)? })
         },
         "status" => match first {
             None => Ok(Command::Status),
