@@ -102,6 +102,7 @@ impl GatewayPage {
         let port = Field::new("2783", cx);
         let public_url = Field::new("http://<this machine's LAN address>:<port>", cx);
         let token = Field::new("From @BotFather, e.g. 123456:ABC…", cx);
+        token.input.update(cx, |i, cx| i.set_masked(true, cx));
         let users = Field::new("Telegram ids or @usernames, comma-separated", cx);
         let chat = Field::new("Chat id for notices (empty: the first allowed user)", cx);
         let subs = vec![
