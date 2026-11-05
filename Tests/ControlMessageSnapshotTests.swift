@@ -6,7 +6,6 @@ private final class MessageSnapshotFakeDS: ControlDataSource {
     func snapshotPanes() -> [PaneSnapshot] { panes }
     func liveLayouts() -> [String: [String: Any]]? { nil }
     func worktreeGroups(mode: String) -> [[String: Any]]? { nil }
-    func dismissDecision(paneId: String) -> Bool { false }
     func readPane(paneId: String, source: String, lines: Int) -> String? { nil }
     func ingestHook(json: [String: Any]) {}
     func messageSnapshot(paneId: String?) -> [[String: Any]] {
@@ -57,6 +56,23 @@ final class ControlMessageSnapshotTests: XCTestCase {
         }
         guard case .error = router.handle(method: "message.history", params: ["pane_id": "p"]) else {
             return XCTFail("before_seq is required")
+        }
+    }
+
+    /// The app's socket answers no cards: an agent in a pane can reach it,
+    /// and the app would pass the answer on to the core as itself
+    /// (docs/first-mate-autonomy.md, "Who may answer a card").
+    func testCardAnsweringMethodsAreGone() {
+        let router = ControlRouter(dataSource: MessageSnapshotFakeDS())
+        for (method, params) in [
+            ("autopilot.answer", ["card": "autopilot-1", "option": "Approve"]),
+            ("question.answer", ["pane_id": "p1", "index": 0] as [String: Any]),
+            ("decision.dismiss", ["pane_id": "p1"]),
+        ] {
+            guard case .error(let code, _) = router.handle(method: method, params: params) else {
+                return XCTFail("\(method) still answered")
+            }
+            XCTAssertEqual(code, ControlError.methodNotFound, method)
         }
     }
 }

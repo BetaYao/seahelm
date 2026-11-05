@@ -19,6 +19,8 @@ seahelm-core-scan = { path = "../core-scan" }
 seahelm-core-registry = { path = "../core-registry" }
 seahelm-core-messages = { path = "../core-messages" }
 seahelm-core-command = { path = "../core-command" }
+sha2 = "0.10"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -31,6 +31,11 @@ impl RpcError {
         Self { code: -32603, message: message.into() }
     }
 
+    /// The caller may not do this (a card answered from inside a pane).
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self { code: FORBIDDEN, message: message.into() }
+    }
+
     pub fn not_found(method: &str) -> Self {
         Self { code: -32601, message: format!("method not found: {method}") }
     }
@@ -44,6 +49,8 @@ impl RpcError {
 }
 
 pub const PANE_NOT_FOUND: i64 = -32004;
+/// The gateway's code for a call its caller may not make.
+pub const FORBIDDEN: i64 = -32003;
 
 pub type RpcResult = std::result::Result<Value, RpcError>;
 
@@ -58,6 +65,75 @@ pub trait Dispatch: Send + Sync + 'static {
     /// Takes the `Arc` so a stream can keep the dispatcher for as long as
     /// its connection lasts.
     fn call(self: std::sync::Arc<Self>, method: &str, params: Value) -> Reply;
+
+    /// A call that came in over the socket, with who connected. A
+    /// dispatcher that cares (the core, for card answers) looks at `peer`;
+    /// the rest answer it as any call.
+    fn call_from(self: std::sync::Arc<Self>, peer: &Peer, method: &str, params: Value) -> Reply {
+        let _ = peer;
+        self.call(method, params)
+    }
+}
+
+/// The process on the other end of a connection, as the kernel reports it
+/// when the connection is accepted: never what the caller says about itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Peer {
+    /// None where the platform will not say (or the call failed).
+    pub pid: Option<u32>,
+    /// The peer runs as another user. The socket is owner-only, so this
+    /// should never be seen; it is refused rather than looked into.
+    pub foreign_user: bool,
+}
+
+impl Peer {
+    /// Who is connected on `stream`: `LOCAL_PEERPID` (macOS), `SO_PEERCRED`
+    /// (Linux), `GetNamedPipeClientProcessId` (Windows).
+    pub fn of(stream: &Stream) -> Peer {
+        peer_of(stream)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn peer_of(stream: &Stream) -> Peer {
+    use std::os::fd::AsRawFd;
+    let fd = stream.as_raw_fd();
+    let mut pid: libc::pid_t = 0;
+    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+    // SAFETY: fd is a live socket for as long as `stream` is; pid and len are
+    // sized for LOCAL_PEERPID, which writes one pid_t.
+    let got = unsafe { libc::getsockopt(fd, libc::SOL_LOCAL, libc::LOCAL_PEERPID, (&mut pid as *mut libc::pid_t).cast(), &mut len) };
+    let (mut uid, mut gid): (libc::uid_t, libc::gid_t) = (0, 0);
+    // SAFETY: as above; getpeereid writes the two ids.
+    let ids = unsafe { libc::getpeereid(fd, &mut uid, &mut gid) };
+    let foreign_user = ids == 0 && uid != unsafe { libc::geteuid() };
+    Peer { pid: (got == 0 && pid > 0).then_some(pid as u32), foreign_user }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn peer_of(stream: &Stream) -> Peer {
+    use std::os::fd::AsRawFd;
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: the fd is a live socket; cred and len are sized for SO_PEERCRED.
+    let got = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&mut cred as *mut libc::ucred).cast(), &mut len) };
+    if got != 0 {
+        return Peer::default();
+    }
+    Peer { pid: (cred.pid > 0).then_some(cred.pid as u32), foreign_user: cred.uid != unsafe { libc::geteuid() } }
+}
+
+#[cfg(windows)]
+fn peer_of(stream: &Stream) -> Peer {
+    // The pipe's DACL is owner-only, so the client is this user.
+    Peer { pid: stream.client_process_id().ok(), foreign_user: false }
+}
+
+/// Another unix without a peer-pid call this code knows: nobody is
+/// identified, so guarded calls are refused (see `peer.rs`).
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux", target_os = "android"))))]
+fn peer_of(_stream: &Stream) -> Peer {
+    Peer::default()
 }
 
 /// The app's socket and ours: `~/.config/seahelm/`.
@@ -97,6 +173,7 @@ pub fn serve(listener: Listener, dispatch: std::sync::Arc<dyn Dispatch>) -> Resu
 }
 
 fn connection(stream: Stream, dispatch: std::sync::Arc<dyn Dispatch>) {
+    let peer = Peer::of(&stream);
     let Ok(read_half) = stream.try_clone() else { return };
     let mut writer = stream;
     let reader = BufReader::new(read_half);
@@ -110,7 +187,7 @@ fn connection(stream: Stream, dispatch: std::sync::Arc<dyn Dispatch>) {
                 let id = req.get("id").cloned().unwrap_or(Value::Null);
                 let method = req.get("method").and_then(Value::as_str).unwrap_or_default().to_string();
                 let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
-                (id, std::sync::Arc::clone(&dispatch).call(&method, params))
+                (id, std::sync::Arc::clone(&dispatch).call_from(&peer, &method, params))
             }
             Err(e) => (Value::Null, Reply::Value(Err(RpcError { code: -32700, message: format!("parse error: {e}") }))),
         };
@@ -214,5 +291,28 @@ mod tests {
         write_line(&mut s, &json!({"jsonrpc": "2.0", "id": 1, "method": "count"})).unwrap();
         let lines: Vec<String> = BufReader::new(s).lines().map_while(|l| l.ok()).collect();
         assert_eq!(lines.len(), 3);
+    }
+
+    /// Answers `whoami` with the peer the connection was accepted from.
+    struct Who;
+    impl Dispatch for Who {
+        fn call(self: Arc<Self>, _method: &str, _params: Value) -> Reply {
+            Reply::Value(Ok(json!({"peer": null})))
+        }
+        fn call_from(self: Arc<Self>, peer: &Peer, _method: &str, _params: Value) -> Reply {
+            Reply::Value(Ok(json!({"pid": peer.pid, "foreign": peer.foreign_user})))
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn the_kernel_names_the_peer() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("p.sock");
+        let listener = bind(&sock).unwrap();
+        std::thread::spawn(move || serve(listener, Arc::new(Who)));
+        let r = call(&sock, "whoami", json!({"_meta": {"caller": "someone-else"}})).unwrap();
+        assert_eq!(r["pid"], json!(std::process::id()), "the connecting process, whatever _meta says");
+        assert_eq!(r["foreign"], json!(false));
     }
 }

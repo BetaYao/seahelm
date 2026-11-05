@@ -24,6 +24,14 @@
 //! core asks on a confirmation card (`habit.confirm:`). Yes grants it; no
 //! writes the file back to the granted level.
 //!
+//! `.granted.json` is sealed (docs/first-mate-autonomy.md, "Who may answer
+//! a card"): the core keeps the text it last wrote, in memory and in
+//! `.granted.seal.json` with its SHA-256, and every read compares. A change
+//! the core did not make — First Mate's shell editing the file, a deleted
+//! file — is put back to the core's version and reported (a note in First
+//! Mate's timeline, an audit line). `.history/` needs no seal: it only feeds
+//! `undo`, which can only lower a grant.
+//!
 //! Measurable habits only in this phase: `when` must use the vocabulary
 //! (`Fact`); judgement habits arrive with phase 6. A habit whose `when`
 //! admits uncommitted, untracked, ignored or unpushed work, or busy panes,
@@ -1110,6 +1118,7 @@ pub struct Store {
 }
 
 const GRANTED: &str = ".granted.json";
+const SEAL: &str = ".granted.seal.json";
 const REPOS: &str = ".repos.json";
 const HISTORY: &str = ".history";
 
@@ -1127,7 +1136,69 @@ impl Store {
     }
 
     fn granted_all(&self) -> BTreeMap<String, BTreeMap<String, HabitLevel>> {
-        std::fs::read_to_string(self.dir.join(GRANTED)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        serde_json::from_str(&self.granted_text()).unwrap_or_default()
+    }
+
+    /// Compare `.granted.json` with the seal now (First Mate's tick), so a
+    /// change shows even when nothing reads the grants for a while.
+    pub fn check_grants(&self) {
+        let _ = self.granted_text();
+    }
+
+    /// `.granted.json` as the core last wrote it. A file that differs (or is
+    /// gone) is written back, and the change reported (`take_tamper_reports`).
+    fn granted_text(&self) -> String {
+        let _guard = seal::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let path = self.dir.join(GRANTED);
+        let on_disk = std::fs::read_to_string(&path).ok();
+        let known = seal::remembered(&path).or_else(|| self.read_seal());
+        match (known, on_disk) {
+            (Some(k), Some(d)) if k == d => d,
+            (Some(k), on_disk) => {
+                let what = if on_disk.is_some() { "was changed by something other than the core" } else { "was deleted" };
+                let _ = std::fs::create_dir_all(&self.dir);
+                let restored = write_atomic(&path, &k).is_ok();
+                self.write_seal(&k);
+                seal::report(
+                    &self.dir,
+                    format!(
+                        "First Mate's granted habit levels ({}) {what}; {}. Levels only go up through a card you answer.",
+                        path.display(),
+                        if restored { "put back to the core's version" } else { "could not be put back — the core keeps using its own version" }
+                    ),
+                );
+                k
+            }
+            // Before the seal existed (an upgrade): the file as found is the
+            // core's from here on.
+            (None, Some(d)) => {
+                self.write_seal(&d);
+                d
+            }
+            (None, None) => String::new(),
+        }
+    }
+
+    /// The sealed text, if the seal is intact. A seal that does not match
+    /// its own digest was altered too: nothing it says is trusted, and the
+    /// grants start over from nothing (down is always allowed; up needs a card).
+    fn read_seal(&self) -> Option<String> {
+        let text = std::fs::read_to_string(self.dir.join(SEAL)).ok()?;
+        let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        let sealed = v.get("text").and_then(Value::as_str);
+        match sealed {
+            Some(t) if v.get("sha256").and_then(Value::as_str) == Some(seal::digest(t).as_str()) => Some(t.to_string()),
+            _ => {
+                seal::report(&self.dir, format!("The seal on First Mate's granted habit levels ({}) was altered; every grant starts over from observe.", self.dir.join(SEAL).display()));
+                Some("{}".into())
+            }
+        }
+    }
+
+    fn write_seal(&self, text: &str) {
+        seal::remember(&self.dir.join(GRANTED), text);
+        let doc = json!({"sha256": seal::digest(text), "text": text});
+        let _ = write_atomic(&self.dir.join(SEAL), &serde_json::to_string_pretty(&doc).unwrap_or_default());
     }
 
     /// A book from its file. The global one, before it was ever written, is
@@ -1178,7 +1249,11 @@ impl Store {
     fn write_grants(&self, book: &Book) -> std::io::Result<()> {
         let mut all = self.granted_all();
         all.insert(book.key.clone(), book.grants());
-        write_atomic(&self.dir.join(GRANTED), &serde_json::to_string_pretty(&all).unwrap_or_default())
+        let text = serde_json::to_string_pretty(&all).unwrap_or_default();
+        let _guard = seal::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        write_atomic(&self.dir.join(GRANTED), &text)?;
+        self.write_seal(&text);
+        Ok(())
     }
 
     /// Put back the file as it was before the last write. Grants only come
@@ -1245,6 +1320,67 @@ fn history_stamp(p: &Path, prefix: &str) -> (u64, u64) {
     let stem = name.strip_prefix(prefix).and_then(|s| s.strip_suffix(".yml")).unwrap_or_default();
     let (ms, n) = stem.split_once('-').unwrap_or((stem, "0"));
     (ms.parse().unwrap_or(0), n.parse().unwrap_or(0))
+}
+
+/// What the core last wrote to each `.granted.json`, for the process: every
+/// `Store` (First Mate's, the sweep thread's, `habits.list`'s) checks
+/// against the same memory.
+mod seal {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, OnceLock};
+
+    use sha2::{Digest, Sha256};
+
+    /// One check-and-restore at a time.
+    pub static LOCK: Mutex<()> = Mutex::new(());
+
+    fn known() -> &'static Mutex<HashMap<PathBuf, String>> {
+        static K: OnceLock<Mutex<HashMap<PathBuf, String>>> = OnceLock::new();
+        K.get_or_init(Default::default)
+    }
+
+    fn reports() -> &'static Mutex<Vec<(PathBuf, String)>> {
+        static R: OnceLock<Mutex<Vec<(PathBuf, String)>>> = OnceLock::new();
+        R.get_or_init(Default::default)
+    }
+
+    pub fn remembered(path: &Path) -> Option<String> {
+        known().lock().unwrap_or_else(|e| e.into_inner()).get(path).cloned()
+    }
+
+    pub fn remember(path: &Path, text: &str) {
+        known().lock().unwrap_or_else(|e| e.into_inner()).insert(path.to_path_buf(), text.to_string());
+    }
+
+    /// A core that just started: nothing in memory.
+    #[cfg(test)]
+    pub fn forget(path: &Path) {
+        known().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+    }
+
+    pub fn digest(text: &str) -> String {
+        Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    pub fn report(dir: &Path, text: String) {
+        eprintln!("seahelm-core: security: {text}");
+        reports().lock().unwrap_or_else(|e| e.into_inner()).push((dir.to_path_buf(), text));
+    }
+
+    /// Reports for one habits directory (None: all of them).
+    pub fn take(dir: Option<&Path>) -> Vec<String> {
+        let mut all = reports().lock().unwrap_or_else(|e| e.into_inner());
+        let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut *all).into_iter().partition(|(d, _)| dir.is_none_or(|x| x == d));
+        *all = rest;
+        mine.into_iter().map(|(_, t)| t).collect()
+    }
+}
+
+/// Changes to `.granted.json` the core caught and undid since last asked,
+/// for First Mate to tell the user.
+pub fn take_tamper_reports(dir: Option<&Path>) -> Vec<String> {
+    seal::take(dir)
 }
 
 fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
@@ -1761,6 +1897,87 @@ mod tests {
         std::fs::write(store.path(GLOBAL), "[]\n").unwrap();
         assert!(!store.ensure_seed(TODAY, NOW).unwrap());
         assert!(store.load(GLOBAL, TODAY).habits.is_empty());
+    }
+
+    /// The grants the core wrote, as a map.
+    fn grants_on_disk(store: &Store) -> Value {
+        serde_json::from_str(&std::fs::read_to_string(store.dir.join(GRANTED)).unwrap_or_default()).unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn a_tampered_grant_is_put_back_and_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::new(tmp.path().join("habits"));
+        store.ensure_seed(TODAY, NOW).unwrap();
+        assert_eq!(grants_on_disk(&store)[GLOBAL][SEED_ID], "ask");
+        assert!(take_tamper_reports(Some(&store.dir)).is_empty());
+
+        // First Mate's shell grants itself auto, file and all.
+        let forged = r#"{"_global": {"delete-merged-clean": "auto"}}"#;
+        std::fs::write(store.dir.join(GRANTED), forged).unwrap();
+        std::fs::write(store.path(GLOBAL), std::fs::read_to_string(store.path(GLOBAL)).unwrap().replace("level: ask", "level: auto")).unwrap();
+        let b = store.load(GLOBAL, TODAY);
+        assert_eq!(b.level(&b.habits[0]), HabitLevel::Ask, "held at what the core granted");
+        assert_eq!(grants_on_disk(&store)[GLOBAL][SEED_ID], "ask", "the file is the core's again");
+        let reports = take_tamper_reports(Some(&store.dir));
+        assert_eq!(reports.len(), 1, "{reports:?}");
+        assert!(reports[0].contains("was changed by something other than the core") && reports[0].contains("put back"), "{}", reports[0]);
+        // Once put back, nothing more to say.
+        store.check_grants();
+        assert!(take_tamper_reports(Some(&store.dir)).is_empty());
+
+        // Deleted: put back too.
+        std::fs::remove_file(store.dir.join(GRANTED)).unwrap();
+        store.check_grants();
+        assert_eq!(grants_on_disk(&store)[GLOBAL][SEED_ID], "ask");
+        assert!(take_tamper_reports(Some(&store.dir))[0].contains("was deleted"));
+
+        // The core's own writes are not tampering.
+        let mut b = store.load(GLOBAL, TODAY);
+        b.rejected(SEED_ID);
+        store.save(&b, NOW + 1.0).unwrap();
+        assert_eq!(grants_on_disk(&store)[GLOBAL][SEED_ID], "suggest");
+        assert!(take_tamper_reports(Some(&store.dir)).is_empty());
+    }
+
+    #[test]
+    fn the_seal_outlives_a_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::new(tmp.path().join("habits"));
+        store.ensure_seed(TODAY, NOW).unwrap();
+        let granted = store.dir.join(GRANTED);
+        // Tampered while the core was down: the seal on disk still knows.
+        std::fs::write(&granted, r#"{"_global": {"delete-merged-clean": "auto"}}"#).unwrap();
+        seal::forget(&granted);
+        store.check_grants();
+        assert_eq!(grants_on_disk(&store)[GLOBAL][SEED_ID], "ask");
+        assert_eq!(take_tamper_reports(Some(&store.dir)).len(), 1);
+
+        // Both changed, the seal's digest not recomputed: the seal is not
+        // believed, and every grant starts over.
+        let forged = r#"{"_global": {"delete-merged-clean": "auto"}}"#;
+        std::fs::write(&granted, forged).unwrap();
+        std::fs::write(store.dir.join(SEAL), json!({"sha256": seal::digest("{}"), "text": forged}).to_string()).unwrap();
+        seal::forget(&granted);
+        let b = store.load(GLOBAL, TODAY);
+        assert_eq!(b.level(&b.habits[0]), HabitLevel::Observe);
+        assert_eq!(grants_on_disk(&store), json!({}));
+        let reports = take_tamper_reports(Some(&store.dir));
+        assert!(reports.iter().any(|r| r.contains("seal") && r.contains("starts over")), "{reports:?}");
+    }
+
+    #[test]
+    fn grants_from_before_the_seal_are_adopted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::new(tmp.path().join("habits"));
+        std::fs::create_dir_all(&store.dir).unwrap();
+        std::fs::write(store.dir.join(GRANTED), r#"{"_global": {"delete-merged-clean": "ask"}}"#).unwrap();
+        store.check_grants();
+        assert!(take_tamper_reports(Some(&store.dir)).is_empty());
+        assert!(store.dir.join(SEAL).exists());
+        std::fs::write(store.dir.join(GRANTED), r#"{"_global": {"delete-merged-clean": "auto"}}"#).unwrap();
+        store.check_grants();
+        assert_eq!(grants_on_disk(&store)[GLOBAL][SEED_ID], "ask");
     }
 
     #[test]

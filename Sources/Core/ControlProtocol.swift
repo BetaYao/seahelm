@@ -78,21 +78,11 @@ protocol ControlDataSource: AnyObject {
     /// The dashboard's own worktree groups for `mode`, already computed Mac-side
     /// so a remote client cannot drift from the desktop.
     func worktreeGroups(mode: String) -> [[String: Any]]?
-    /// Decline a pane's open suggestion. False if there was nothing to decline.
-    func dismissDecision(paneId: String) -> Bool
     /// Remove a worktree the way its row's Delete does (with that path's checks).
     func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError>
     /// First Mate as a remote client draws it: on or off, what it is doing, its
     /// pane, and the cards waiting on the user. Nil when there is no First Mate.
     func firstMateState() -> [String: Any]?
-    /// The user answered one of First Mate's cards from a remote client.
-    func answerFirstMateCard(card: String, option: String) -> Bool
-    /// Answer row `index` of a pane's open question card, the way a tap on the
-    /// card answers it. nil when the pane has no card to answer; otherwise
-    /// `card` is the question still standing afterwards (a multi-select one
-    /// with its new ticks, or the next of a multi-question ask), absent when
-    /// the ask is done.
-    func answerQuestion(paneId: String, index: Int) -> [String: Any]?
     /// A client has shown this pane to its user: a finished turn it held is
     /// now seen. False when there was nothing unseen.
     func markPaneSeen(paneId: String) -> Bool
@@ -432,14 +422,6 @@ final class ControlRouter {
             case .failure(let e): return .error(code: e.code, message: e.message)
             }
 
-        case "decision.dismiss":
-            let paneRef = (params["pane_id"] as? String)
-                ?? (params["pane_session_key"] as? String) ?? ""
-            guard !paneRef.isEmpty else {
-                return .error(code: ControlError.invalidParams, message: "pane required")
-            }
-            return .ok(["dismissed": dataSource?.dismissDecision(paneId: paneRef) ?? false])
-
         case "pane.seen":
             let paneRef = (params["pane_id"] as? String)
                 ?? (params["pane_session_key"] as? String) ?? ""
@@ -447,17 +429,6 @@ final class ControlRouter {
                 return .error(code: ControlError.invalidParams, message: "pane required")
             }
             return .ok(["seen": dataSource?.markPaneSeen(paneId: paneRef) ?? false])
-
-        case "question.answer":
-            let paneRef = (params["pane_id"] as? String)
-                ?? (params["pane_session_key"] as? String) ?? ""
-            guard !paneRef.isEmpty, let index = params["index"] as? Int, index >= 0 else {
-                return .error(code: ControlError.invalidParams, message: "pane and index required")
-            }
-            guard let result = dataSource?.answerQuestion(paneId: paneRef, index: index) else {
-                return .error(code: ControlError.notFound, message: "no open question")
-            }
-            return .ok(result)
 
         case "layout.live":
             guard let layouts = dataSource?.liveLayouts() else {
@@ -498,15 +469,6 @@ final class ControlRouter {
                 return .error(code: ControlError.notFound, message: "no First Mate here")
             }
             return .ok(state)
-
-        case "autopilot.answer":
-            guard let card = params["card"] as? String, let option = params["option"] as? String else {
-                return .error(code: ControlError.invalidParams, message: "card and option are required")
-            }
-            guard dataSource?.answerFirstMateCard(card: card, option: option) == true else {
-                return .error(code: ControlError.notFound, message: "that card is gone")
-            }
-            return .ok(["answered": true])
 
         case "worktree.delete":
             let path = (params["worktree_path"] as? String) ?? ""
@@ -755,11 +717,8 @@ final class ControlRouter {
 /// Defaults keep existing conformers — including test fakes — compiling: a data
 /// source with no window to mirror simply reports nothing to mirror.
 extension ControlDataSource {
-    func dismissDecision(paneId: String) -> Bool { false }
     func deleteWorktree(path: String) -> Result<[String: Any], ControlCreateError> { .failure(.unavailable) }
     func firstMateState() -> [String: Any]? { nil }
-    func answerFirstMateCard(card: String, option: String) -> Bool { false }
-    func answerQuestion(paneId: String, index: Int) -> [String: Any]? { nil }
     func markPaneSeen(paneId: String) -> Bool { false }
     func liveLayouts() -> [String: [String: Any]]? { nil }
     func worktreeGroups(mode: String) -> [[String: Any]]? { nil }
