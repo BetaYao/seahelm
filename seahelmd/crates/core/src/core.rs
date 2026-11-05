@@ -454,6 +454,7 @@ impl Core {
                 st.visible = st.clients.values().filter(|(_, a)| *a).flat_map(|(w, _)| w.iter().cloned()).collect();
                 if active {
                     let shown: Vec<String> = shows.into_iter().collect();
+                    if let Some(fm) = self.first_mate.get() { fm.send(first_mate::Msg::ResearchSeen { worktrees: shown.clone() }); }
                     for wt in shown {
                         st.registry.mark_worktree_seen(&wt);
                     }
@@ -553,6 +554,13 @@ impl Core {
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" => first_mate::task_sources::rpc(method, &p),
             "memory.note" | "memory.show" | "memory.undo" | "memory.confirm" => first_mate::memory::rpc(&self, method, &p),
+
+            "schedule.add" | "schedule.list" | "schedule.remove" | "schedule.run_now" | "research.summary" => {
+                match self.first_mate.get() {
+                    Some(fm) => fm.research(method, p),
+                    None => Err(first_mate::refused("First Mate is not running")),
+                }
+            }
             "habits.list" => Ok(first_mate::learning::rpc(method, &p).unwrap_or_default()),
             // When the user is there, as the brief's timing reads it (read-only).
             "presence.state" => Ok(self.presence().to_json(now, crate::usage::local_offset(now))),
@@ -1432,6 +1440,9 @@ impl Dispatch for Core {
     /// Calls off the socket. Answering for the user is for the clients the
     /// user answers through, never for a process in a pane (`peer.rs`).
     fn call_from(self: Arc<Self>, peer: &rpc::Peer, method: &str, params: Value) -> Reply {
+        if method == "research.summary" && (!fm_policy::is_first_mate(&params) || !crate::peer::first_mate_peer(peer)) {
+            return Reply::Value(Err(first_mate::refused("research.summary requires First Mate's real session")));
+        }
         let pid = peer.pid;
         self.call_checked(method, params, pid, || crate::peer::identify(peer))
     }
@@ -1441,7 +1452,7 @@ impl Dispatch for Core {
 /// proposals and habit cards): a card raised over the socket may not carry
 /// one, or the user's answer to it would reach First Mate as the answer to
 /// the real card.
-const CORE_PAYLOADS: [&str; 4] = ["habit.", "autopilot-", "proposal-", "task-start-"];
+const CORE_PAYLOADS: [&str; 5] = ["habit.", "autopilot-", "proposal-", "task-start-", "research.stop:"];
 
 impl Core {
     /// A socket call, after the peer check for the guarded methods. The
@@ -2500,12 +2511,21 @@ mod peer_gate_tests {
         let tmp = tempfile::tempdir().unwrap();
         let core = Core::for_test(tmp.path());
         raise(&core, "report-1");
-        for payload in ["habit.promote:_global/delete-merged-clean:auto:n-1", "habit.sweep:x", "autopilot-0000abcd", "proposal-1", "report-1"] {
+        for payload in ["habit.promote:_global/delete-merged-clean:auto:n-1", "habit.sweep:x", "autopilot-0000abcd", "proposal-1", "research.stop:news", "report-1"] {
             let p = json!({"kind": "approval", "message": "Tidy whitespace?", "options": ["Yes", "No"], "payload": payload});
             let e = value(core.clone().call_checked("cards.raise", p, Some(1), app)).unwrap_err();
             assert_eq!(e.code, rpc::FORBIDDEN, "{payload}");
         }
         assert_eq!(core.lock().cards.list().len(), 1);
+    }
+
+    #[test]
+    fn research_summary_rejects_spoofed_meta_without_an_identifiable_peer() {
+        let tmp = tempfile::tempdir().unwrap(); let core = Core::for_test(tmp.path());
+        let peer = rpc::Peer { pid: None, foreign_user: false };
+        let p = json!({"name": "news", "summary": "spoofed", "_meta": {"caller": "seahelm-first-mate"}});
+        let error = value(core.call_from(&peer, "research.summary", p)).unwrap_err();
+        assert!(error.message.contains("real session"));
     }
 
     #[test]

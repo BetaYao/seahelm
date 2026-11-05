@@ -28,7 +28,7 @@ pub fn classify(method: &str) -> Class {
         | "agent.explain" | "worktree.list" | "fleet.status" | "pr.list" | "pane.wait_agent_status" | "wait.agent_status"
         | "pane.wait_for_output" | "wait.output"
         | "usage.summary" | "cards.list" | "autopilot.state" | "message.snapshot" | "message.history"
-        | "habits.list" | "memory.note" | "memory.show" => Class::Open,
+        | "habits.list" | "memory.note" | "memory.show" | "schedule.list" | "research.summary" => Class::Open,
         "pane.run" | "pane.send_text" | "pane.send_keys" => Class::Gated(Action::MessagePane),
         "worktree.create" => Class::Gated(Action::StartAgent),
         "worktree.delete" => Class::Gated(Action::DeleteWorktree),

@@ -36,7 +36,7 @@ fn main() {
         args.drain(..2);
     }
     let Some((group, rest)) = args.split_first() else {
-        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|integration|worktree|habit> ...", 2)
+        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|integration|worktree|habit|schedule> ...", 2)
     };
     let cli = Cli { note };
     cli.run(group, rest);
@@ -92,6 +92,15 @@ impl Cli {
             "worktree" => self.worktree(a),
             "habit" => self.habit(a),
             "task-source" => self.task_source(a),
+            "schedule" => {
+                let sub = first(a).unwrap_or("list");
+                let rest = a.get(1..).unwrap_or_default();
+                let method = match sub { "add" => "schedule.add", "list" => "schedule.list", "remove" => "schedule.remove", "run-now" => "schedule.run_now", _ => die("usage: seahelm schedule add|list|remove|run-now", 2) };
+                let params = if sub == "add" {
+                    json!({"name": rest.first(), "cron": opt(rest, "--cron"), "brief": opt(rest, "--brief"), "enabled": !has(rest, "--disabled"), "budget": {"max_minutes": opt(rest, "--max-minutes").and_then(|v| v.parse::<u32>().ok()).unwrap_or(30), "pause_above_usage": opt(rest, "--pause-above-usage").and_then(|v| v.parse::<f64>().ok()).unwrap_or(80.0)}})
+                } else { json!({"name": rest.first()}) };
+                pretty(&self.call(method, params, 180.0, &[]));
+            }
             "pane" => self.pane(a),
             other => die(&format!("unknown command: {other}"), 2),
         }
@@ -479,7 +488,7 @@ fn route(method: &str) -> &'static [Side] {
         }
         "worktree.create" | "worktree.delete" | "pane.close" => &[Side::App, Side::Core],
         // First Mate's habits live in the core alone.
-        "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" | "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
+        "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" | "schedule.add" | "schedule.list" | "schedule.remove" | "schedule.run_now" | "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
         "memory.note" | "memory.show" | "memory.undo" | "memory.confirm" => &[Side::Core],
         _ => &[Side::App],
     }
@@ -711,6 +720,8 @@ mod tests {
         assert_eq!(route("habits.list"), [Side::Core], "habits live in the core alone");
         assert_eq!(route("habits.inventory"), [Side::Core]);
         for method in ["memory.note", "memory.show", "memory.undo", "memory.confirm"] { assert_eq!(route(method), [Side::Core]); }
+
+        for method in ["schedule.add", "schedule.list", "schedule.remove", "schedule.run_now"] { assert_eq!(route(method), [Side::Core]); }
         // Only the side drawing the panes can do these.
         for m in ["pane.split", "pane.focus", "pane.zoom", "pane.move", "pane.fork", "pane.exec", "layout.apply"] {
             assert_eq!(route(m), [Side::App], "{m}");

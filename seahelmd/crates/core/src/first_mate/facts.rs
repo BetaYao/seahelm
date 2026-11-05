@@ -226,6 +226,12 @@ pub fn git(dir: &Path, args: &[&str]) -> Option<String> {
 /// merge whose branch GitHub deleted, the commits live only under the PR.
 fn unpushed(worktree: &Path, pr: Option<&PrStatus>, fetch: bool) -> (Option<u32>, bool) {
     let mut args = vec!["rev-list", "--count", "HEAD", "--not", "--remotes", "--glob=refs/pull/*"];
+    // In a local-only repository the base is the durable copy. Unknown
+    // remote configuration stays conservative.
+    let local_base = if git(worktree, &["remote"]).is_some_and(|s| s.trim().is_empty()) {
+        ["main", "master"].into_iter().find(|base| has_commit(worktree, base))
+    } else { None };
+    if let Some(base) = local_base { args.push(base); }
     let mut checked = false;
     let head = pr.and_then(|p| p.head_oid.as_deref().map(|o| (p.number, o)));
     if let Some((number, oid)) = head {
@@ -604,5 +610,17 @@ mod tests {
         assert!(fetch_pull_head(&other, 9));
         assert!(has_commit(&other, &head));
         assert!(run(&other, &["for-each-ref", "refs/pull"]).is_empty(), "no ref written");
+    }
+}
+
+#[cfg(test)] mod local_repo_tests {
+    #[test] fn base_commits_are_safe_but_unique_local_commits_are_not() {
+        let tmp = tempfile::tempdir().unwrap(); let dir = tmp.path();
+        let git = |args: &[&str]| { assert!(std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap().status.success()); };
+        git(&["init", "-b", "main"]);
+        let commit = || git(&["-c", "user.name=test", "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "Test"]);
+        commit(); assert_eq!(super::unpushed(dir, None, false).0, Some(0));
+        git(&["checkout", "-b", "run"]); commit(); assert_eq!(super::unpushed(dir, None, false).0, Some(1));
+        git(&["branch", "-f", "main", "HEAD"]); assert_eq!(super::unpushed(dir, None, false).0, Some(0));
     }
 }

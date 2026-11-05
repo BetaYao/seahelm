@@ -227,7 +227,7 @@ pub fn guarded(method: &str) -> bool {
 /// inventory (`habits.inventory` without `preview`), which puts cards in
 /// front of the user in First Mate's name. The read-only preview is not.
 pub fn guarded_call(method: &str, params: &serde_json::Value) -> bool {
-    method.starts_with("task-source.") || guarded(method) || starts_inventory(method, params) || matches!(method, "memory.note" | "memory.undo" | "memory.confirm")
+    method.starts_with("task-source.") || guarded(method) || starts_inventory(method, params) || matches!(method, "memory.note" | "memory.undo" | "memory.confirm" | "schedule.add" | "schedule.remove" | "schedule.run_now")
 }
 
 pub fn starts_inventory(method: &str, params: &serde_json::Value) -> bool {
@@ -419,4 +419,29 @@ mod tests {
 /// Only the kernel-observed First Mate session gets the note exception; undo belongs to the user.
 pub fn first_mate_memory(method: &str, pid: Option<u32>) -> bool {
     method == "memory.note" && pid.is_some_and(|pid| gather(pid).chain.iter().any(|p| session_of(p).as_deref() == Some(crate::first_mate::policy::SESSION)))
+}
+
+#[cfg(test)]
+mod research_checks {
+    #[test] fn every_schedule_rpc_is_user_only() { for m in ["schedule.add", "schedule.remove", "schedule.run_now"] { assert!(super::guarded_call(m, &serde_json::json!({}))); } }
+}
+
+/// Environment claims cannot establish First Mate's identity.
+pub fn real_first_mate(f: &Facts) -> bool {
+    f.chain.iter().filter_map(session_of).next().as_deref() == Some(crate::first_mate::policy::SESSION)
+}
+pub fn first_mate_peer(peer: &crate::rpc::Peer) -> bool {
+    peer.pid.is_some_and(|pid| real_first_mate(&gather(pid))) && !matches!(identify(peer), Verdict::Unknown(_))
+}
+
+#[cfg(test)] mod research_identity_tests {
+    use super::*;
+    #[test] fn ignores_spoofed_environment_and_requires_the_nearest_session() {
+        let mut f = Facts { env: Some(vec![("SEAHELM_PANE_ID".into(), "seahelm-first-mate".into())]), ..Default::default() };
+        assert!(!real_first_mate(&f));
+        f.chain.push(Proc { exe: "seahelmd".into(), argv: vec!["seahelmd".into(), "__serve".into(), "other".into(), "--".into()], ..Default::default() });
+        assert!(!real_first_mate(&f));
+        f.chain[0].argv[2] = "seahelm-first-mate".into(); assert!(real_first_mate(&f));
+        assert!(!guarded_call("schedule.list", &serde_json::json!({})));
+    }
 }
