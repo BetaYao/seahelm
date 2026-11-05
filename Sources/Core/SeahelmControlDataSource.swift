@@ -453,15 +453,17 @@ final class SeahelmControlDataSource: ControlDataSource {
         }
     }
 
-    /// "Claude Code #7": the agent in the calling pane and the pane's handle —
-    /// the same `#n` chat commands take. A pane with no agent is just its handle.
+    /// "Claude Code #7": the agent in the calling pane and the core's handle
+    /// for it — the same `#n` chat commands take. A pane with no agent is
+    /// "Pane #7"; one the core has not numbered yet goes without.
     static func presenceActor(_ station: Station) -> String {
-        let key = PaneHandleRegistry.key(sessionKey: station.paneSessionKey ?? "", paneId: station.id)
-        let handle = "#\(PaneHandleRegistry.shared.handle(for: key))"
-        guard let agent = Fleet.shared.pane(for: station.id)?.agentType, agent.isAIAgent else {
-            return "Pane \(handle)"
-        }
-        return "\(agent.displayName) \(handle)"
+        let agent = Fleet.shared.pane(for: station.id)?.agentType
+        return actorName(agent: agent?.isAIAgent == true ? agent?.displayName : nil,
+                         handle: CoreLink.shared.handle(forSession: station.paneSessionKey))
+    }
+
+    static func actorName(agent: String?, handle: Int?) -> String {
+        [agent ?? "Pane", handle.map { "#\($0)" }].compactMap { $0 }.joined(separator: " ")
     }
 
     private func station(for paneId: String) -> Station? {

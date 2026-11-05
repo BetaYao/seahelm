@@ -15,18 +15,12 @@ final class CoreLinkTests: XCTestCase {
         XCTAssertNil(adoptable["/r"], "the app's own pane is not up for adoption")
     }
 
-    func testTheCoresHandlesWin() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("handles-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: url) }
-        let registry = PaneHandleRegistry(url: url)
-        XCTAssertEqual(registry.handle(for: "a"), 1)
-        XCTAssertEqual(registry.handle(for: "b"), 2)
-        // The core numbered b as 1 and a as 7.
-        registry.adopt(["b": 1, "a": 7])
-        XCTAssertEqual(registry.existingHandle(for: "b"), 1)
-        XCTAssertEqual(registry.existingHandle(for: "a"), 7)
-        XCTAssertEqual(registry.handle(for: "c"), 8, "new panes start above every number in use")
-        // Survives a relaunch.
-        XCTAssertEqual(PaneHandleRegistry(url: url).existingHandle(for: "a"), 7)
+    func testThePresencePillNamesTheCoresHandle() {
+        XCTAssertEqual(SeahelmControlDataSource.actorName(agent: "Claude Code", handle: 7), "Claude Code #7")
+        XCTAssertEqual(SeahelmControlDataSource.actorName(agent: nil, handle: 3), "Pane #3")
+        XCTAssertEqual(SeahelmControlDataSource.actorName(agent: "Codex", handle: nil), "Codex",
+                       "a pane the core has not numbered yet goes without")
+        XCTAssertNil(CoreLink.shared.handle(forSession: ""))
+        XCTAssertNil(CoreLink.shared.handle(forSession: nil))
     }
 }

@@ -5,7 +5,7 @@ import Foundation
 /// multiplexer via the `seahelm` CLI. The first rule is the SEAHELM_ENV guard:
 /// an agent must not touch the CLI unless it is actually inside a seahelm pane.
 enum SeahelmSkillInstaller {
-    private static let versionMarker = "<!-- seahelm-skill v10 -->"
+    private static let versionMarker = "<!-- seahelm-skill v11 -->"
 
     static func skillContents() -> String {
         return """
@@ -38,6 +38,11 @@ enum SeahelmSkillInstaller {
 
         Your own pane is `$SEAHELM_PANE_ID`. Pass it (or another pane id) to the
         commands below; omit the id to target the currently focused pane.
+
+        Listing, reading, typing into and waiting on panes (`pane list|read|run|
+        send-text|send-keys|explain`, `wait`, `events`) are answered by
+        seahelm-core and work while the Seahelm window is closed. Split, focus,
+        zoom, move, fork, close, `exec` and layouts need the app running.
 
         ## Concepts
 

@@ -2,10 +2,9 @@ import Foundation
 
 /// One pane as the command language sees it.
 struct PaneRef: Equatable {
-    /// The stable, per-install number: what `#7` means on every surface.
-    let handle: Int
-    /// The key the handle was minted for — see `PaneHandleRegistry.key`.
-    let handleKey: String
+    /// seahelm-core's stable `#n` (`CoreLink.handles`): what `#7` means on
+    /// every surface. Nil until the core has listed the pane.
+    let handle: Int?
     /// Station id, Fleet's key for the live pane.
     let id: String
     /// `SEAHELM_PANE_ID`. Empty for a local (non-seahelmd) pane.
@@ -20,11 +19,10 @@ struct PaneRef: Equatable {
     let status: AgentStatus
     let lastMessage: String
 
-    init(handle: Int, handleKey: String, id: String, sessionKey: String = "",
+    init(handle: Int?, id: String, sessionKey: String = "",
          project: String, branch: String, worktreePath: String,
          type: String, title: String, status: AgentStatus = .unknown, lastMessage: String = "") {
         self.handle = handle
-        self.handleKey = handleKey
         self.id = id
         self.sessionKey = sessionKey
         self.project = project
@@ -74,11 +72,9 @@ struct RepoRef: Equatable {
     let path: String
 }
 
-/// The fleet frozen for one parse: everything a command can name.
-///
-/// Built by the app layer from live state and handed to the parser, so the
-/// parser stays pure — no singletons, no IO — and a test can hand it any
-/// fleet it likes.
+/// The fleet as the Helm line's autocomplete offers it (`#` panes, `@`
+/// repos and worktrees), built from live state. The commands themselves are
+/// seahelm-core's (`command.run`).
 struct FleetIndex: Equatable {
     var panes: [PaneRef]
     var worktrees: [WorktreeRef]
@@ -92,28 +88,7 @@ struct FleetIndex: Equatable {
         self.repos = repos
     }
 
-    // MARK: - Panes
-
-    func pane(handle: Int) -> PaneRef? {
-        panes.first { $0.handle == handle }
-    }
-
-    func pane(handleKey: String) -> PaneRef? {
-        panes.first { $0.handleKey == handleKey }
-    }
-
-    func pane(id: String) -> PaneRef? {
-        panes.first { $0.id == id }
-    }
-
-    /// Panes in one worktree, lowest handle first — the oldest pane is the
-    /// one a worktree-level binding falls back to.
-    func panes(inWorktree path: String) -> [PaneRef] {
-        panes.filter { $0.worktreePath == path }.sorted { $0.handle < $1.handle }
-    }
-
     // MARK: - Worktrees
-
 
     /// `@name`, or `@repo/name` when the bare one would be ambiguous.
     /// The listing prints this form, so what you read is what you can type.
@@ -125,16 +100,4 @@ struct FleetIndex: Equatable {
     func worktree(path: String) -> WorktreeRef? {
         worktrees.first { $0.path == path }
     }
-
-    // MARK: - Repos
-
-    func repo(named name: String) -> RepoRef? {
-        let needle = name.lowercased()
-        return repos.first { $0.name.lowercased() == needle }
-    }
-}
-
-extension PaneRef {
-    /// How a chat names a pane: `#3 seahelm/main`.
-    var target: String { "#\(handle) \(project)/\(branch)" }
 }

@@ -175,7 +175,7 @@
       <li>配置与密钥：bot token、host_gateway、配对密钥迁入 gateway 自己的配置文件，不再与 App 设置混在 config.json。</li>
     </ol></div>
   </section>
-  <p class="note">此图描述目标边界，连接表示通信关系，不代表代码依赖方向。当前迁移进度（2026-11-04）：</p>
+  <p class="note">此图描述目标边界，连接表示通信关系，不代表代码依赖方向。当前迁移进度（2026-11-05）：</p>
   <table class="status">
     <tr><th>连接</th><th>状态</th><th>说明</th></tr>
     <tr><td>GPUI ↔ core</td><td class="done">已接通</td><td>状态、PR、用量、卡片、First Mate 工作台；消息流接口已就绪，GPUI 尚未使用</td></tr>
@@ -184,6 +184,7 @@
     <tr><td>core ↔ seahelmd</td><td class="done">已接通</td><td>快照、发送按键、建会话（First Mate、新 worktree）、结束会话</td></tr>
     <tr><td>hooks → core</td><td class="done">已接通</td><td>有无 App 都直达 core</td></tr>
     <tr><td>First Mate 回路</td><td class="done">已接通</td><td>只由 core 托管：autopilot_enabled 打开即由 core 运行</td></tr>
+    <tr><td>agent 命令行</td><td class="done">已接通</td><td>seahelm CLI 的业务动词（读、写、等待 pane，事件流）先找 core，App 关着也能用；分屏、聚焦、缩放、移动、fork、布局等界面动词仍由 App 回答</td></tr>
     <tr><td>文本命令接口</td><td class="done">已接通</td><td>command.run（crates/core-command）；#n 编号由 core 发放</td></tr>
     <tr><td>gateway 独立配置</td><td class="done">已接通</td><td>~/.config/seahelm/gateway/（config / secrets / state）；首次启动从 config.json 导入，配对根密钥原样保留；设置经 gateway.sock 读写</td></tr>
     <tr><td>Web / Telegram</td><td class="done">已接通</td><td>独立的 seahelm-gateway（seahelmd/crates/gateway）：Web 接入、按设备发 token、分享链接、终端直连 seahelmd、Telegram 适配；macOS 与 GPUI 都会拉起它。邮件渠道已删除</td></tr>

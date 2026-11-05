@@ -13,8 +13,9 @@ import Foundation
 /// - **The fleet**: every 2 s, the panes as `pane.list` answers them
 ///   (`pane.sync`) and every worktree (`worktrees.set`), so the core watches
 ///   exactly what the app shows.
-/// - **Handles**: the core's `#n` win (`PaneHandleRegistry.adopt`), so a
-///   chat and the desktop name a pane the same way.
+/// - **Handles**: the core numbers every pane (`#n`, in `pane.list`) and the
+///   app shows its numbers (`handles`), so a chat and the desktop name a
+///   pane the same way. A pane the core has not listed yet has none.
 /// - **Sessions the core started** (`/new` from a chat): a worktree the app
 ///   opens for the first time takes the core's session for its first pane
 ///   instead of starting an empty one beside it.
@@ -30,6 +31,9 @@ final class CoreLink {
     /// Since when the core has not answered (from `start` until the first
     /// sync it answers); nil while it does. Main thread.
     private(set) var unreachableSince: Date?
+    /// The core's `#n` for each pane, by seahelmd session name, from its last
+    /// `pane.list`. Main thread.
+    private(set) var handles: [String: Int] = [:]
     private var lastEnsure: Date?
     static let ensureInterval: TimeInterval = 15
     /// Worktree path → a live session the core has there that no app pane
@@ -74,6 +78,12 @@ final class CoreLink {
         return now.timeIntervalSince(last) >= ensureInterval
     }
 
+    /// The core's `#n` for the pane on this seahelmd session, if it has one.
+    func handle(forSession key: String?) -> Int? {
+        guard let key, !key.isEmpty else { return nil }
+        return handles[key]
+    }
+
     /// The core's session for a worktree the app is about to give its first
     /// pane, taken once.
     func takeAdoptableSession(forWorktree path: String) -> String? {
@@ -104,7 +114,7 @@ final class CoreLink {
                 self.unreachableSince = nil
                 let rows = list["panes"] as? [[String: Any]] ?? []
                 let (handles, adoptable) = Self.read(rows, appSessions: Set(panes.compactMap { $0["pane_session_key"] as? String }))
-                PaneHandleRegistry.shared.adopt(handles)
+                self.handles = handles
                 self.adoptable = adoptable
             }
         }

@@ -26,6 +26,9 @@ enum CoreEvent {
     /// The core ended a pane at someone's request (`pane.close`, from the web;
     /// `pane.closed` with `by_request: true`). Its session is already gone.
     case paneClosedByRequest(paneSessionKey: String, terminalID: String?)
+    /// One pane at work on another through the core (`pane.presence`: a
+    /// `seahelm` CLI call the core answered), for the presence pill.
+    case presence(caller: String, target: String, note: String?)
     /// Every event, as the core sent it, for the app's own subscribers
     /// (`EventHub`: the control socket's subscribers).
     case raw([String: Any])
@@ -51,7 +54,7 @@ final class CoreClient {
     private static let types = [
         "pane.status_changed", "pane.updated", "pane.notice", "pane.unseen_changed", "pane.location",
         "pane.closed", "pane.rehomed", "pane.registered", "cards.changed", "card.answered", "agent.session",
-        "worktree.discovered",
+        "worktree.discovered", "pane.presence",
     ]
 
     /// Add an observer. Main thread.
@@ -179,6 +182,11 @@ final class CoreClient {
             let session = pane["pane_session_key"] as? String ?? key
             guard !session.isEmpty, let path = pane["worktree_path"] as? String, !path.isEmpty else { return }
             emit(.paneRegistered(paneSessionKey: session, worktreePath: path))
+        case "pane.presence":
+            guard let caller = ev["caller"] as? String, !caller.isEmpty,
+                  let target = ev["pane_id"] as? String, !target.isEmpty else { return }
+            let note = ev["note"] as? String
+            emit(.presence(caller: caller, target: target, note: note?.isEmpty == true ? nil : note))
         case "pane.closed":
             guard ev["by_request"] as? Bool == true, !key.isEmpty else { return }
             emit(.paneClosedByRequest(paneSessionKey: key, terminalID: id))

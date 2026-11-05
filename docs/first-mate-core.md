@@ -285,6 +285,7 @@ The grey areas, settled:
    `config.json` with the app's settings (which is how they kept being
    dropped by a settings save).
 
-Still to build for this boundary: the core's text-command call (the command
-language is the app's today: `CommandParser`, `CommandExecutor`,
-`PaneHandleRegistry`), and the gateway itself with its own config.
+Both are built since: the core's text-command call (`command.run`,
+`crates/core-command`) and seahelm-gateway with its own config
+(`~/.config/seahelm/gateway/`). The `seahelm` CLI now sends business verbs
+to the core too, keeping the app for the interface's.
