@@ -1140,29 +1140,34 @@ class TabCoordinator {
                                               destinationPath: destination.path,
                                               destinationName: "@" + name)
         delegate?.tabCoordinatorRequestUpdateTitleBar(self)
-        sendForkNotice(origin: origin, forkSession: sessionName, destinationName: "@" + name,
-                       destinationPath: destination.path, waited: 0)
+        sendForkNotice(origin: origin, fork: forkStationId, forkSession: sessionName,
+                       destinationName: "@" + name, destinationPath: destination.path, waited: 0)
     }
 
-    /// Send the notice once the interrupted turn has ended (`PaneFork.noticeIsDue`).
-    /// The fork's `#n` is read at send time: seahelm-core numbers a pane only
-    /// once it has listed it, which a pane this new may not be yet. A pane
-    /// closed in the meantime gets nothing.
-    private func sendForkNotice(origin stationId: String, forkSession: String, destinationName: String,
-                                destinationPath: String, waited: TimeInterval) {
+    /// Send the notice once the fork has started and the interrupted turn has
+    /// ended (`PaneFork.noticeIsDue`). The fork's `#n` is read at send time:
+    /// seahelm-core numbers a pane only once it has listed it. A pane closed in
+    /// the meantime gets nothing.
+    private func sendForkNotice(origin stationId: String, fork forkId: String, forkSession: String,
+                                destinationName: String, destinationPath: String, waited: TimeInterval) {
         guard StationRegistry.shared.station(forId: stationId) != nil else { return }
-        let status = Fleet.shared.pane(for: stationId)?.status
-        if PaneFork.noticeIsDue(status: status, waited: waited) {
-            let notice = PaneFork.originNotice(handle: CoreLink.shared.handle(forSession: forkSession),
-                                               destinationName: destinationName,
+        let handle = CoreLink.shared.handle(forSession: forkSession)
+        let forkPane = Fleet.shared.pane(for: forkId)
+        let forkReady = PaneFork.forkIsReady(agentType: forkPane?.agentType, status: forkPane?.status,
+                                             handle: handle)
+        if PaneFork.noticeIsDue(originStatus: Fleet.shared.pane(for: stationId)?.status,
+                                forkReady: forkReady, waited: waited) {
+            let notice = PaneFork.originNotice(handle: handle, destinationName: destinationName,
                                                destinationPath: destinationPath)
             PaneInput.shared.sendCommand(to: stationId, command: notice)
+            delegate?.tabCoordinatorRequestUpdateTitleBar(self)
             return
         }
         let step = PaneFork.noticePollInterval
         DispatchQueue.main.asyncAfter(deadline: .now() + step) { [weak self] in
-            self?.sendForkNotice(origin: stationId, forkSession: forkSession, destinationName: destinationName,
-                                 destinationPath: destinationPath, waited: waited + step)
+            self?.sendForkNotice(origin: stationId, fork: forkId, forkSession: forkSession,
+                                 destinationName: destinationName, destinationPath: destinationPath,
+                                 waited: waited + step)
         }
     }
 

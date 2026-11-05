@@ -109,16 +109,31 @@ enum PaneFork {
     /// before the notice goes in.
     static let noticePollInterval: TimeInterval = 0.5
     static let noticeMaxWait: TimeInterval = 20
+    static let forkReadyMaxWait: TimeInterval = 300
 
-    /// Whether the notice can be sent now. It waits for the interrupted turn to
-    /// end, so it reads as a new message rather than landing in the middle of
-    /// one; past `noticeMaxWait` it goes anyway — the agent queues a message
-    /// typed while it runs, and a notice that never arrives is the bug this
-    /// exists to fix.
-    static func noticeIsDue(status: AgentStatus?, waited: TimeInterval) -> Bool {
+    /// Whether the fork has read its transcript: seahelm-core sees Claude in
+    /// its pane at a settled status, and has numbered it. Until then the notice
+    /// must not go in — the fork copies the original session when it starts,
+    /// so a notice written before that lands in the fork's own history too,
+    /// telling the pane that carries on the task not to.
+    static func forkIsReady(agentType: AgentType?, status: AgentStatus?, handle: Int?) -> Bool {
+        guard agentType == .claudeCode, handle != nil, let status else { return false }
+        return status != .unknown
+    }
+
+    /// Whether the notice can be sent now: the fork is up (`forkIsReady`) and
+    /// the interrupted turn has ended, so it reads as a new message rather than
+    /// landing in the middle of one. The turn is waited on for `noticeMaxWait`
+    /// at most — the agent queues a message typed while it runs, and a notice
+    /// that never arrives is the bug this exists to fix. The fork is waited on
+    /// far longer (`forkReadyMaxWait`): a fork that is not on screen may not
+    /// start until its pane attaches, and a notice sent before it starts ends
+    /// up in its history.
+    static func noticeIsDue(originStatus: AgentStatus?, forkReady: Bool, waited: TimeInterval) -> Bool {
+        guard forkReady else { return waited >= forkReadyMaxWait }
         if waited >= noticeMaxWait { return true }
-        guard let status else { return false }
-        return status != .running
+        guard let originStatus else { return false }
+        return originStatus != .running
     }
 }
 

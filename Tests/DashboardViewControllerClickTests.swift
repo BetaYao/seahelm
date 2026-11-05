@@ -187,6 +187,29 @@ final class DashboardViewControllerClickTests: XCTestCase {
                        "the fleet list is still highlighting the previous worktree")
     }
 
+    /// Bringing a pane on screen from the terminal side — `seahelm pane focus`,
+    /// a fork revealing its pane, the forked badge, a notification — goes
+    /// through `selectPane` alone. It swapped the terminal and left the fleet
+    /// list highlighting the worktree it had left.
+    func testSelectPaneMovesTheOverviewHighlightWithTheTerminal() {
+        let vc = DashboardViewController()
+        vc.dashboardDelegate = DashboardDelegateSpy()
+        vc.loadViewIfNeeded()
+        vc.updatePanes([
+            makePane(name: "agent-a", worktreePath: "/repo/a"),
+            makePane(name: "agent-b", worktreePath: "/repo/b"),
+        ])
+        vc.adoptChromeCollapse(false, activePane: .firstMate)
+        vc.handleWorktreeRowClickForTesting(path: "/repo/a")
+
+        vc.selectPane(byWorktreePath: "/repo/b", focusTerminal: false)
+
+        XCTAssertEqual(vc.selectedWorktreeId, "/repo/b")
+        XCTAssertEqual(vc.overviewSelectedIdForTesting, "/repo/b",
+                       "the fleet list is still highlighting the previous worktree")
+        XCTAssertEqual(vc.renderedOverviewSelectionForTesting, "/repo/b")
+    }
+
     /// Cycling to a worktree that has no row yet (the list hasn't rendered) must
     /// still leave the highlight pointing at it, so the next render agrees.
     func testCycleToWorktreeTracksSelectionWithoutARenderedRow() {
