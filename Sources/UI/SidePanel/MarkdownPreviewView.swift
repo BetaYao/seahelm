@@ -4,7 +4,7 @@ import WebKit
 
 /// WebView-backed preview for Markdown and HTML files. Markdown is converted to
 /// styled HTML via a compact dependency-free renderer; HTML is loaded as-is.
-final class PreviewWebView: NSView {
+final class PreviewWebView: NSView, WKNavigationDelegate {
 
     /// Markdown is loaded with a nil `baseURL`, and WKWebView refuses `file://`
     /// subresources from such a page regardless of what we put in `src`. Local
@@ -17,6 +17,9 @@ final class PreviewWebView: NSView {
     /// Identity of the last page handed to WebKit. Toggling the preview on an
     /// unchanged document should not pay for a full reload.
     private var lastRenderKey: Int?
+    /// Where to scroll once the page now loading has finished: the position
+    /// the previous version of the page was at, for a reload of the same file.
+    private var pendingScroll: CGPoint?
 
     override init(frame frameRect: NSRect) {
         let config = WKWebViewConfiguration()
@@ -29,6 +32,7 @@ final class PreviewWebView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
     private func setup() {
+        webView.navigationDelegate = self
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.setValue(false, forKey: "drawsBackground") // transparent until HTML paints
         addSubview(webView)
@@ -49,7 +53,9 @@ final class PreviewWebView: NSView {
 
     /// Render the given markdown, themed for the current appearance.
     /// `baseDirectory` is the document's folder, used to resolve relative images.
-    func render(markdown: String, baseDirectory: URL?) {
+    /// `keepScroll` holds the reader's place: the page comes back at the scroll
+    /// offset the old one was at (a reload of the same file changed on disk).
+    func render(markdown: String, baseDirectory: URL?, keepScroll: Bool = false) {
         let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         var hasher = Hasher()
         hasher.combine(markdown)
@@ -68,7 +74,10 @@ final class PreviewWebView: NSView {
             let page = PreviewWebView.page(body: body, dark: isDark)
             DispatchQueue.main.async {
                 guard let self, self.lastRenderKey == key else { return }
-                self.webView.loadHTMLString(page, baseURL: nil)
+                self.load(keepScroll: keepScroll) { [weak self] in
+                    guard let self, self.lastRenderKey == key else { return }
+                    self.webView.loadHTMLString(page, baseURL: nil)
+                }
             }
         }
     }
@@ -81,7 +90,7 @@ final class PreviewWebView: NSView {
     /// the document base at that custom scheme so relative `href`/`src` (and
     /// relative `url(...)` inside those CSS files) resolve through
     /// `LocalResourceSchemeHandler`.
-    func renderHTML(_ html: String, baseURL: URL?) {
+    func renderHTML(_ html: String, baseURL: URL?, keepScroll: Bool = false) {
         var hasher = Hasher()
         hasher.combine(html)
         hasher.combine(baseURL)
@@ -90,7 +99,35 @@ final class PreviewWebView: NSView {
         lastRenderKey = key
         resourceHandler.rootDirectory = baseURL
         let schemeBase = baseURL.flatMap { Self.localResourceBaseURL(forDirectory: $0) }
-        webView.loadHTMLString(html, baseURL: schemeBase)
+        load(keepScroll: keepScroll) { [weak self] in
+            guard let self, self.lastRenderKey == key else { return }
+            self.webView.loadHTMLString(html, baseURL: schemeBase)
+        }
+    }
+
+    /// Run `load`, first reading the current scroll offset when `keepScroll`
+    /// so `didFinish` can put the new page back there.
+    private func load(keepScroll: Bool, _ load: @escaping () -> Void) {
+        guard keepScroll else {
+            pendingScroll = nil
+            load()
+            return
+        }
+        webView.evaluateJavaScript("[window.scrollX, window.scrollY]") { [weak self] result, _ in
+            guard let self else { return }
+            let xy = (result as? [NSNumber])?.map { CGFloat($0.doubleValue) }
+            self.pendingScroll = xy.flatMap { $0.count == 2 ? CGPoint(x: $0[0], y: $0[1]) : nil }
+            load()
+        }
+    }
+
+    /// `didFinish` comes after the load event, so images have their size and
+    /// the offset lands where it did before.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let point = pendingScroll else { return }
+        pendingScroll = nil
+        guard point != .zero else { return }
+        webView.evaluateJavaScript("window.scrollTo(\(point.x), \(point.y))")
     }
 
     /// `seahelm-local://local/<abs-dir>/` — trailing slash so RFC 3986 relative
