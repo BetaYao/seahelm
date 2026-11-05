@@ -67,6 +67,7 @@
 		28F64A45113C9031DE991377 /* WrappedPathAtClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03EF8621D5464BAE7F393215 /* WrappedPathAtClickTests.swift */; };
 		29FFE70A579739BDA4A737AC /* GitHubPRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A864EF5AD3DEA27B0135D7D1 /* GitHubPRService.swift */; };
 		2AB9FBCF955A1C0BC01C1C3C /* IntegrationWorktreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90EF92DD407F1B5BBC3F3FC1 /* IntegrationWorktreeTests.swift */; };
+		2B61DED1F987B20A0BD475FD /* EditLayoutContainerViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7E1CFC323F7E5093AC18F8A /* EditLayoutContainerViewTests.swift */; };
 		2BC7A5243BDCCBADED457B44 /* SplitContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF31BD8D110A45D923D8B7D /* SplitContainerView.swift */; };
 		2CE3679CE395A49CDD452CEB /* FuzzyMatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358662BE2D7B5944F3C610F9 /* FuzzyMatchTests.swift */; };
 		2D473084E59DC7776E010F78 /* WorktreeGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448BBAB293764647E8FDB894 /* WorktreeGroupingTests.swift */; };
@@ -876,6 +877,7 @@
 		F5C834279572F6B0C73A94B6 /* JetBrainsMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Medium.ttf"; sourceTree = "<group>"; };
 		F749E954C706D5C69B5BCD0C /* GhosttyConfigImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfigImporter.swift; sourceTree = "<group>"; };
 		F75D8071B308F62A8D6D3379 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		F7E1CFC323F7E5093AC18F8A /* EditLayoutContainerViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditLayoutContainerViewTests.swift; sourceTree = "<group>"; };
 		F83941DD060F1359E8CFF1B3 /* PaneAwayIndicatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneAwayIndicatorTests.swift; sourceTree = "<group>"; };
 		F8EB5177E50619DFE89D88CC /* LayoutPopoverPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutPopoverPage.swift; sourceTree = "<group>"; };
 		F94DD13F50BE3F52F6B4B0B0 /* AutopilotRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopilotRulesTests.swift; sourceTree = "<group>"; };
@@ -1314,6 +1316,7 @@
 				5FF03037A58F3583369D621C /* DashboardOverviewGroupingTests.swift */,
 				42E7300FEE6468E0C6CDD629 /* DashboardViewControllerClickTests.swift */,
 				DB46E04B9C586F82DE064E39 /* DoubleTapDetectorTests.swift */,
+				F7E1CFC323F7E5093AC18F8A /* EditLayoutContainerViewTests.swift */,
 				4897B4E1D168C012F56E8C79 /* EditTabStripViewTests.swift */,
 				911314F4B91E512511E3FC21 /* EventHubTests.swift */,
 				E692C68E666458A948841530 /* FileChangeWatcherTests.swift */,
@@ -1860,6 +1863,7 @@
 				B7A8FEFA89D2783828B0FA1B /* DashboardOverviewGroupingTests.swift in Sources */,
 				D6494907C3E68AED14842187 /* DashboardViewControllerClickTests.swift in Sources */,
 				E46A1A608721E6D3C2DFA00F /* DoubleTapDetectorTests.swift in Sources */,
+				2B61DED1F987B20A0BD475FD /* EditLayoutContainerViewTests.swift in Sources */,
 				A02B7AE16DE638F82673C1ED /* EditTabStripViewTests.swift in Sources */,
 				0828C3010E294CFD37CFFE70 /* EventHubTests.swift in Sources */,
 				AD72DC21B2C16CA072879125 /* FileChangeWatcherTests.swift in Sources */,

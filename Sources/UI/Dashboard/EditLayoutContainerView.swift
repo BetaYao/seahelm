@@ -74,6 +74,20 @@ final class EditLayoutContainerView: NSView, DividerDelegate {
 
     override func layout() {
         super.layout()
+        layoutColumns()
+    }
+
+    /// The columns are frame-laid, and AppKit does not reliably run `layout()`
+    /// when Auto Layout resizes this view: zooming or going full screen left
+    /// both columns at their old size in the bottom-left corner, with the rest
+    /// of the area blank. A frame change always comes through here, as it does
+    /// for `SplitContainerView`.
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        layoutColumns()
+    }
+
+    private func layoutColumns() {
         let w = bounds.width
         let h = bounds.height
         guard w > 0, h > 0 else { return }
@@ -87,6 +101,8 @@ final class EditLayoutContainerView: NSView, DividerDelegate {
         divider.parentSplitSize = w
         divider.currentRatio = ratio
     }
+
+    var columnFramesForTesting: (left: CGRect, right: CGRect) { (leftColumn.frame, rightColumn.frame) }
 
     // MARK: - DividerDelegate
 
