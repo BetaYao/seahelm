@@ -24,6 +24,9 @@ pub enum Kind {
     /// First Mate's daily brief, composed by the core (no turn): several
     /// lines, a title then one per section. Clients draw it as a block.
     Brief,
+    /// A card's lifecycle row in First Mate's timeline (no turn). Clients
+    /// merge rows by `card_id`; clients that do not know this kind drop it.
+    Card,
 }
 
 impl Kind {
@@ -38,6 +41,7 @@ impl Kind {
             Kind::Thinking => "thinking",
             Kind::Note => "note",
             Kind::Brief => "brief",
+            Kind::Card => "card",
         }
     }
 
@@ -52,6 +56,7 @@ impl Kind {
             "thinking" => Kind::Thinking,
             "note" => Kind::Note,
             "brief" => Kind::Brief,
+            "card" => Kind::Card,
             _ => return None,
         })
     }
@@ -74,6 +79,20 @@ pub struct Message {
     pub status: Option<String>,
     pub old_status: Option<String>,
     pub count: u32,
+    /// Card lifecycle fields; absent on every other message kind.
+    pub card_id: Option<String>,
+    pub card_kind: Option<String>,
+    pub source: Option<CardSource>,
+    pub options: Option<Vec<String>>,
+    pub state: Option<String>,
+    pub option: Option<String>,
+    pub via: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CardSource {
+    pub pane: String,
+    pub label: String,
 }
 
 impl Message {
@@ -91,6 +110,13 @@ impl Message {
             status: None,
             old_status: None,
             count: 1,
+            card_id: None,
+            card_kind: None,
+            source: None,
+            options: None,
+            state: None,
+            option: None,
+            via: None,
         }
     }
 
@@ -126,6 +152,13 @@ impl Message {
         opt("is_error", self.is_error.map(|v| json!(v)));
         opt("status", self.status.as_ref().map(|v| json!(v)));
         opt("old_status", self.old_status.as_ref().map(|v| json!(v)));
+        opt("card_id", self.card_id.as_ref().map(|v| json!(v)));
+        opt("card_kind", self.card_kind.as_ref().map(|v| json!(v)));
+        opt("source", self.source.as_ref().map(|s| json!({"pane": s.pane, "label": s.label})));
+        opt("options", self.options.as_ref().map(|v| json!(v)));
+        opt("state", self.state.as_ref().map(|v| json!(v)));
+        opt("option", self.option.as_ref().map(|v| json!(v)));
+        opt("via", self.via.as_ref().map(|v| json!(v)));
         if self.count > 1 {
             d.insert("count".into(), json!(self.count));
         }
@@ -148,6 +181,16 @@ impl Message {
             status: s("status"),
             old_status: s("old_status"),
             count: v.get("count").and_then(Value::as_u64).unwrap_or(1) as u32,
+            card_id: s("card_id"),
+            card_kind: s("card_kind"),
+            source: v.get("source").and_then(Value::as_object).and_then(|s| Some(CardSource {
+                pane: s.get("pane")?.as_str()?.to_string(),
+                label: s.get("label")?.as_str()?.to_string(),
+            })),
+            options: v.get("options").and_then(Value::as_array).map(|xs| xs.iter().filter_map(Value::as_str).map(str::to_string).collect()),
+            state: s("state"),
+            option: s("option"),
+            via: s("via"),
         })
     }
 }
@@ -175,5 +218,25 @@ mod tests {
         let v = brief.to_json();
         assert_eq!(v["kind"], "brief");
         assert_eq!(Message::from_json(&v), Some(brief));
+        let card = Message {
+            card_id: Some("c-1".into()),
+            card_kind: Some("question".into()),
+            source: Some(CardSource { pane: "seahelm-a".into(), label: "#7 · island".into() }),
+            options: Some(vec!["Yes".into(), "No".into()]),
+            state: Some("pending".into()),
+            ..Message::new("seahelm-first-mate", "seahelm-first-mate", Kind::Card, 13.0).with_text("Continue?")
+        };
+        let v = card.to_json();
+        assert_eq!(v["kind"], "card");
+        assert_eq!(v["card_id"], "c-1");
+        assert_eq!(Message::from_json(&v), Some(card));
+        assert!(Message::from_json(&json!({
+            "seq": 14,
+            "pane_id": "seahelm-first-mate",
+            "pane_session_key": "seahelm-first-mate",
+            "kind": "future-card-kind",
+            "ts": 14.0
+        }))
+        .is_none());
     }
 }
