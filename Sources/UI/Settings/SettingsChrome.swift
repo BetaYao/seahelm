@@ -470,7 +470,7 @@ final class SettingsSidebarView: NSView {
 
         NSLayoutConstraint.activate([
             searchField.topAnchor.constraint(equalTo: topAnchor,
-                                             constant: SettingsChrome.titlebarInset),
+                                             constant: 20),
             searchField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             searchField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
 
@@ -551,6 +551,9 @@ final class SettingsSidebarView: NSView {
             addSubview(badgeLabel)
 
             setAccessibilityIdentifier("settings.sidebar.\(item.id)")
+            setAccessibilityElement(true)
+            setAccessibilityRole(.button)
+            setAccessibilityLabel(item.title)
 
             NSLayoutConstraint.activate([
                 heightAnchor.constraint(equalToConstant: 32),
@@ -571,6 +574,11 @@ final class SettingsSidebarView: NSView {
         required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
         override func mouseDown(with event: NSEvent) { onClick?() }
+
+        override func accessibilityPerformPress() -> Bool {
+            onClick?()
+            return true
+        }
 
         private func updateAppearance() {
             layer?.backgroundColor = isSelected ? SettingsPalette.sidebarSelected.cgColor

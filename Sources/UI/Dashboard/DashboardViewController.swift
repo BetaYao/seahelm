@@ -230,6 +230,7 @@ class DashboardViewController: NSViewController {
 
     // Center overlay
     private var centerOverlay: CenterOverlayView?
+    private var centerOverlayOnDismiss: (() -> Void)?
 
     // MARK: - Edit-mode (split file-preview layout)
 
@@ -1386,7 +1387,8 @@ extension DashboardViewController {
         title: String,
         onSave: (() -> Void)? = nil,
         onPreview: (() -> Void)? = nil,
-        chromeless: Bool = false
+        chromeless: Bool = false,
+        onDismiss: (() -> Void)? = nil
     ) -> CenterOverlayView {
         dismissCenterOverlay()
 
@@ -1406,6 +1408,7 @@ extension DashboardViewController {
         ])
 
         centerOverlay = overlay
+        centerOverlayOnDismiss = onDismiss
         onCenterOverlayTitleChange?(title)
         overlay.window?.makeFirstResponder(overlay)
         return overlay
@@ -1415,6 +1418,9 @@ extension DashboardViewController {
     func dismissCenterOverlay() {
         guard let overlay = centerOverlay else { return }
         centerOverlay = nil
+        let onDismiss = centerOverlayOnDismiss
+        centerOverlayOnDismiss = nil
+        onDismiss?()
         onCenterOverlayTitleChange?(nil)
         // Pull out of the hierarchy immediately so the click feels instant;
         // CodeEdit/SwiftUI teardown is deferred to the next turn.

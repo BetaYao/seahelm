@@ -77,8 +77,7 @@ class MainWindowController: NSWindowController {
     /// The approvals popover's content while it is open; nil otherwise.
     /// Re-reads First Mate's memory for the header while it is shown.
     private var config = Config.load()
-    private var pairingWindowController: PairingWindowController?
-    private var settingsWindowController: SettingsWindowController?
+    private var settingsViewController: SettingsViewController?
     /// Fleet row lit while a context-menu `/return` is assessing. Cleared when
     /// a sheet appears, the command fails, or the tear-down finishes.
     private var pendingReturnPath: String?
@@ -259,9 +258,6 @@ class MainWindowController: NSWindowController {
         return tc
     }()
 
-    // Dialog presentation
-    private lazy var dialogPresenter = DialogPresenter()
-
     // Auto-update
     private lazy var updateCoordinator: UpdateCoordinator = {
         let uc = UpdateCoordinator(config: config)
@@ -435,43 +431,31 @@ class MainWindowController: NSWindowController {
         }
     }
 
-    /// Held strongly so the window survives this call, and reused so ⌘, twice
-    /// raises the existing one instead of stacking a second copy with stale
-    /// config.
-    /// Settings, opened on one page.
+    /// Open Settings over the center panel, preserving the terminal underneath.
     func showSettingsPage(_ page: String) {
         showSettings()
-        settingsWindowController?.showPage(page)
+        settingsViewController?.selectPage(page)
     }
 
     @objc func showSettings() {
-        if let existing = settingsWindowController {
-            // Reused windows still hold the SettingsVC's private Config copy from
-            // first open — refresh it, and the gateway pages re-read the gateway.
-            existing.reload(config: config)
-            existing.show()
+        guard let dashboard = dashboardVC else { return }
+        if settingsViewController != nil {
+            window?.makeKeyAndOrderFront(nil)
             return
         }
-        let wc = dialogPresenter.makeSettings(config: config, settingsDelegate: self)
-        settingsWindowController = wc
-        wc.show()
+        let settings = SettingsViewController(config: config)
+        settings.settingsDelegate = self
+        settingsViewController = settings
+        dashboard.showCenterOverlay(settings.view, title: "Settings", onDismiss: { [weak self] in
+            self?.settingsViewController?.commitPendingEdits()
+            self?.settingsViewController = nil
+        })
+        window?.makeKeyAndOrderFront(nil)
     }
 
-    /// Browser pairing window: the code, the access URL and the paired
-    /// devices, all from seahelm-gateway. Held strongly so it survives past
-    /// this call; reused so the menu item twice raises one window.
+    /// Keep the menu shortcut, with all pairing controls in Settings.
     @objc func showPairing() {
-        if let existing = pairingWindowController {
-            existing.reload()
-            existing.showWindow(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-        let wc = PairingWindowController()
-        wc.showWindow(nil)
-        wc.window?.center()
-        NSApp.activate(ignoringOtherApps: true)
-        pairingWindowController = wc
+        showSettingsPage("pairing")
     }
 
     @objc func showNewBranchDialog() {
@@ -1784,15 +1768,10 @@ extension MainWindowController: NSWindowDelegate {
         terminalCoordinator.cleanup()
     }
 
-    /// Settings and pairing are separate windows, so they keep the app alive past
-    /// the main window's close — `applicationShouldTerminateAfterLastWindowClosed`
-    /// only fires on the *last* one. Leaving them up strands a config editor over
-    /// an app whose coordinators this very method is about to tear down.
+    /// Commit embedded settings before teardown.
     private func closeAuxiliaryWindows() {
-        settingsWindowController?.close()
-        settingsWindowController = nil
-        pairingWindowController?.close()
-        pairingWindowController = nil
+        settingsViewController?.commitPendingEdits()
+        settingsViewController = nil
     }
 
     func cleanupBeforeTermination() {

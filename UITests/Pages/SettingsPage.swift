@@ -1,6 +1,6 @@
 import XCTest
 
-/// Page object for the settings sheet.
+/// Page object for the Settings center overlay.
 class SettingsPage {
     private let app: XCUIApplication
 
