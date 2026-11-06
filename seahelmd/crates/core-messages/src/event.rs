@@ -75,7 +75,7 @@ pub struct Message {
     pub text: Option<String>,
     pub tool: Option<String>,
     pub detail: Option<String>,
-    /// Choices attached to a decision row. Other row kinds leave this empty.
+    /// Choices attached to a decision or card row. Other row kinds leave this empty.
     pub options: Option<Vec<String>>,
     pub is_error: Option<bool>,
     pub status: Option<String>,
@@ -85,7 +85,6 @@ pub struct Message {
     pub card_id: Option<String>,
     pub card_kind: Option<String>,
     pub source: Option<CardSource>,
-    pub options: Option<Vec<String>>,
     pub state: Option<String>,
     pub option: Option<String>,
     pub via: Option<String>,
@@ -116,7 +115,6 @@ impl Message {
             card_id: None,
             card_kind: None,
             source: None,
-            options: None,
             state: None,
             option: None,
             via: None,
@@ -164,7 +162,6 @@ impl Message {
         opt("card_id", self.card_id.as_ref().map(|v| json!(v)));
         opt("card_kind", self.card_kind.as_ref().map(|v| json!(v)));
         opt("source", self.source.as_ref().map(|s| json!({"pane": s.pane, "label": s.label})));
-        opt("options", self.options.as_ref().map(|v| json!(v)));
         opt("state", self.state.as_ref().map(|v| json!(v)));
         opt("option", self.option.as_ref().map(|v| json!(v)));
         opt("via", self.via.as_ref().map(|v| json!(v)));
@@ -203,7 +200,6 @@ impl Message {
                 pane: s.get("pane")?.as_str()?.to_string(),
                 label: s.get("label")?.as_str()?.to_string(),
             })),
-            options: v.get("options").and_then(Value::as_array).map(|xs| xs.iter().filter_map(Value::as_str).map(str::to_string).collect()),
             state: s("state"),
             option: s("option"),
             via: s("via"),
