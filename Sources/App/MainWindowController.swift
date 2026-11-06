@@ -2092,6 +2092,8 @@ extension MainWindowController {
         guard NSClassFromString("XCTestCase") == nil else { return }
 
         let model = islandController.model
+        let language = IslandLanguage.readConfig()
+        if model.language != language { model.language = language }
         model.onNavigate = { [weak self] worktreePath, paneIndex in
             self?.tabCoordinator.handleNavigateToWorktree(worktreePath: worktreePath, paneIndex: paneIndex)
             self?.window?.makeKeyAndOrderFront(nil)
@@ -2138,7 +2140,7 @@ extension MainWindowController {
             self?.tabCoordinator.firstMate.interrupt()
         }
         islandController.install()
-        // The conversation reads First Mate's timeline while it shows.
+        // The opened island reads First Mate's timeline while it shows.
         islandMateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refreshIslandConversation()
         }
@@ -2219,7 +2221,7 @@ extension MainWindowController {
         guard config.islandEnabled else { return }
         let model = islandController.model
         let firstMate = tabCoordinator.firstMate
-        let (word, _) = FirstMateStateText.describe(firstMate.state.activity)
+        let (word, _) = FirstMateStateText.describe(firstMate.state.activity, isChinese: model.language.isChinese)
         let tone = FirstMateStateText.tone(firstMate.state)
         if model.mateActivity != word { model.mateActivity = word }
         if model.mateTone != tone { model.mateTone = tone }
@@ -2228,10 +2230,10 @@ extension MainWindowController {
         if model.mateBusy != busy { model.mateBusy = busy }
     }
 
-    /// While the conversation is on screen: First Mate's timeline, read off main.
+    /// While the opened island is on screen: First Mate's timeline, read off main.
     fileprivate func refreshIslandConversation() {
         let model = islandController.model
-        guard config.islandEnabled, model.isOpened, model.page == .conversation, !islandMateFetching else { return }
+        guard config.islandEnabled, model.isOpened, !islandMateFetching else { return }
         islandMateFetching = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let messages = FirstMateLink.timeline()
@@ -2298,13 +2300,28 @@ extension MainWindowController {
         // even when nothing changed.
         let orders = IslandModel.newestSuggestions(from: tabCoordinator.cards.cards)
         if model.orders != orders { model.orders = orders }
+        let index = fleetIndex()
+        var sourceLabels: [String: String] = [:]
+        for card in orders where card.paneSessionKey != FirstMatePane.sessionName && !card.isFirstMates {
+            guard let pane = index.panes.first(where: {
+                (!card.paneSessionKey.isEmpty && $0.sessionKey == card.paneSessionKey)
+                    || (!card.terminalID.isEmpty && $0.id == card.terminalID)
+            }) else {
+                let worktreeName = WorktreeRef.name(branch: card.branch, path: card.worktreePath)
+                sourceLabels[card.id] = worktreeName.isEmpty ? card.project : worktreeName
+                continue
+            }
+            sourceLabels[card.id] = index.cardSourceLabel(for: pane)
+        }
+        if model.liveCardSourceLabels != sourceLabels { model.liveCardSourceLabels = sourceLabels }
 
         // A core that does not answer is invisible everywhere else: every pane
         // just stops changing, indistinguishable from a fleet with nothing to
         // say.
         let warning = IslandWarning.current(
             coreUnreachableSince: CoreLink.shared.unreachableSince,
-            controlChannel: tabCoordinator.terminalCoordinator?.controlSocketServer?.state)
+            controlChannel: tabCoordinator.terminalCoordinator?.controlSocketServer?.state,
+            isChinese: model.language.isChinese)
         if model.warning != warning { model.warning = warning }
 
         // A new suggestion is actionable — expand so the card is visible
@@ -2317,7 +2334,9 @@ extension MainWindowController {
             let targetVisible = fresh.allSatisfy {
                 tabCoordinator.isWorktreeVisible($0.worktreePath)
             }
-            islandController.openForEvent(targetVisible: targetVisible)
+            if let target = fresh.first(where: { !$0.options.isEmpty }) {
+                islandController.openForEvent(targetVisible: targetVisible, targetCardID: target.id)
+            }
         }
         islandController.updateVisibility()
     }
@@ -2450,6 +2469,9 @@ extension MainWindowController: SettingsDelegate {
         tabCoordinator.applyAutopilotConfig()
         updateCoordinator.config = merged
         dashboardVC?.integrationEnabled = merged.integrationEnabled
+        let language = IslandLanguage.readConfig()
+        if islandController.model.language != language { islandController.model.language = language }
+        refreshIsland()
         normalizeBackendAvailabilityIfNeeded()
 
         let newPaths = Set(config.workspacePaths)

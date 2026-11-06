@@ -6,14 +6,14 @@ import AppKit
 enum FirstMateStateText {
     enum Tone: Equatable { case quiet, watching, working, wantsYou }
 
-    static func describe(_ activity: FirstMateLink.State.Activity) -> (String, NSColor) {
+    static func describe(_ activity: FirstMateLink.State.Activity, isChinese: Bool = false) -> (String, NSColor) {
         switch activity {
-        case .off: return ("off", SemanticColors.subtle)
-        case .starting: return ("starting", SemanticColors.subtle)
-        case .idle: return ("watching", SemanticColors.accent)
-        case .thinking: return ("working", SemanticColors.running)
-        case .needsYou: return ("needs you", SemanticColors.attention)
-        case .paused: return ("paused", SemanticColors.subtle)
+        case .off: return (isChinese ? "已关闭" : "off", SemanticColors.subtle)
+        case .starting: return (isChinese ? "启动中" : "starting", SemanticColors.subtle)
+        case .idle: return (isChinese ? "观察中" : "watching", SemanticColors.accent)
+        case .thinking: return (isChinese ? "工作中" : "working", SemanticColors.running)
+        case .needsYou: return (isChinese ? "需要你" : "needs you", SemanticColors.attention)
+        case .paused: return (isChinese ? "已暂停" : "paused", SemanticColors.subtle)
         }
     }
 

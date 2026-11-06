@@ -7,10 +7,10 @@ import SwiftUI
 /// inside this fixed transparent window. Clicks outside the current visual
 /// content pass through via `IslandHostingView.hitTest`.
 final class IslandPanelController {
-    static let maxOpenedContentHeight: CGFloat = 520
     private static let shadowInset: CGFloat = 24
 
     let model = IslandModel()
+    var maxOpenedContentHeight: CGFloat { model.maxOpenedContentHeight }
 
     private var panel: IslandPanel?
     private var eventMonitors = IslandEventMonitors()
@@ -57,6 +57,9 @@ final class IslandPanelController {
         }
 
         self.panel = panel
+        model.onMaximumOpenedHeightChanged = { [weak self] in
+            self?.resizePanelForCurrentScreen()
+        }
         panel.orderFrontRegardless()
 
         eventMonitors.start { [weak self] location in
@@ -118,10 +121,13 @@ final class IslandPanelController {
         presentCommandBar { model.pendingCommandFocus = true }
     }
 
-    /// ⌘J again shuts what ⌘J opened.
+    /// ⌘J opens First Mate. When already open, it focuses the composer and
+    /// returns the timeline to its newest messages.
     func toggleFirstMate() {
-        if model.isOpened, model.page == .conversation {
-            closeCommandBar()
+        if model.isOpened {
+            model.focusFirstMateComposer()
+            NSApp.activate(ignoringOtherApps: true)
+            panel?.makeKey()
         } else {
             openFirstMate()
         }
@@ -145,12 +151,12 @@ final class IslandPanelController {
         guard let panel else { return }
         if !panel.isVisible { panel.orderFrontRegardless() }
         prepare()
-        model.open(reason: .click, page: .conversation)
+        model.open(reason: .click)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKey()
     }
 
-    /// Auto-expand for an arriving suggestion so the card is visible without
+    /// Auto-expand for an arriving card so it is visible without
     /// hovering. Collapses again after a timeout if the pointer never comes,
     /// or as soon as it leaves after having engaged.
     ///
@@ -159,13 +165,13 @@ final class IslandPanelController {
     /// sidebar carries it. Frontmost on a *different* worktree still pops —
     /// that sidebar shows its own worktree's cards, so nothing else would
     /// surface this one and it used to arrive silently.
-    func openForEvent(targetVisible: Bool) {
+    func openForEvent(targetVisible: Bool, targetCardID: String) {
         guard !(NSApp.isActive && targetVisible) else { return }
         guard let panel, !model.isOpened else { return }
         if !panel.isVisible { updateVisibility() }
         guard panel.isVisible else { return }
         eventOpenEngaged = false
-        model.open(reason: .event)
+        model.open(reason: .event, targetCardID: targetCardID)
         scheduleEventAutoClose()
     }
 
@@ -263,6 +269,12 @@ final class IslandPanelController {
         }
     }
 
+    private func resizePanelForCurrentScreen() {
+        guard let panel, let screen = targetScreen() else { return }
+        let frame = panelFrame(on: screen)
+        if panel.frame != frame { panel.setFrame(frame, display: true) }
+    }
+
     // MARK: - Geometry
 
     private func targetScreen() -> NSScreen? {
@@ -290,11 +302,12 @@ final class IslandPanelController {
                 : 30
         }
         model.openedWidth = max(360, min(540, screen.visibleFrame.width - 32))
+        model.visibleScreenHeight = screen.visibleFrame.height
     }
 
     private func panelFrame(on screen: NSScreen) -> NSRect {
         let width = model.openedWidth + Self.shadowInset * 2
-        let height = model.notchHeight + Self.maxOpenedContentHeight
+        let height = model.notchHeight + maxOpenedContentHeight
         return NSRect(
             x: screen.frame.midX - width / 2,
             y: screen.frame.maxY - height,
@@ -309,9 +322,10 @@ final class IslandPanelController {
         guard let panel else { return nil }
         let frame = panel.frame
         if model.isOpened {
+            let maximumVisibleHeight = model.notchHeight + maxOpenedContentHeight
             let height = model.measuredOpenedHeight > 0
-                ? min(model.measuredOpenedHeight, Self.maxOpenedContentHeight)
-                : Self.maxOpenedContentHeight
+                ? min(model.measuredOpenedHeight, maximumVisibleHeight)
+                : maximumVisibleHeight
             return NSRect(
                 x: frame.midX - model.openedWidth / 2,
                 y: frame.maxY - height,
