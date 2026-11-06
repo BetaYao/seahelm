@@ -54,7 +54,7 @@ struct OpenedSurfaceView: View {
                 rebuildTimeline()
                 consumePrefill()
                 consumeFocusRequest()
-                performRequestedScroll(using: proxy)
+                performRequestedScroll(using: proxy, animated: false)
             }
             .onChange(of: model.timelineRevision) { rebuildTimeline() }
             .onChange(of: model.isFilteringTimeline) { rebuildDisplayRows() }
@@ -220,6 +220,8 @@ struct OpenedSurfaceView: View {
             })
         }
         .coordinateSpace(name: "island.timeline")
+        // Start at the newest row: no visible scroll from the top on open.
+        .defaultScrollAnchor(.bottom)
         .overlay(GeometryReader { geo in
             Color.clear.preference(key: TimelineLayoutKey.self,
                                    value: TimelineLayoutValue(viewportHeight: geo.size.height))
@@ -336,14 +338,21 @@ struct OpenedSurfaceView: View {
             }
     }
 
-    private func performRequestedScroll(using proxy: ScrollViewProxy) {
+    /// `animated: false` on open: the island appears already at its place
+    /// (the bottom, or the card it opened for) instead of scrolling there in
+    /// front of the user. Later requests (send, a card reveal) animate.
+    private func performRequestedScroll(using proxy: ScrollViewProxy, animated: Bool = true) {
         let target = model.timelineScrollTarget ?? "timeline-bottom"
         let cardID = model.consumeTimelineHighlightCardID()
         highlightedCardID = cardID
-        DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo(target, anchor: target == "timeline-bottom" ? .bottom : .center)
+        let anchor: UnitPoint = target == "timeline-bottom" ? .bottom : .center
+        if animated {
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(target, anchor: anchor) }
             }
+        } else {
+            proxy.scrollTo(target, anchor: anchor)
+            DispatchQueue.main.async { proxy.scrollTo(target, anchor: anchor) }
         }
         guard let cardID else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {

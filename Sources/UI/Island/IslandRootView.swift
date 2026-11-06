@@ -22,11 +22,17 @@ struct IslandRootView: View {
             if model.isOpened {
                 OpenedSurfaceView(model: model)
                     .background(
+                        // The click-outside test and the hit test read this
+                        // height. Through a preference it stuck at the first
+                        // layout (163 pt) while the island grew to ~700, so every
+                        // click on its lower part counted as outside: the island
+                        // shut on "更多" or text, and a card's tap never fired.
                         GeometryReader { geo in
-                            Color.clear.preference(
-                                key: OpenedHeightKey.self,
-                                value: geo.size.height
-                            )
+                            Color.clear
+                                .onAppear { model.measuredOpenedHeight = Self.openedHeight(geo.size.height, notch: model.notchHeight) }
+                                .onChange(of: geo.size.height) { _, height in
+                                    model.measuredOpenedHeight = Self.openedHeight(height, notch: model.notchHeight)
+                                }
                         }
                     )
                     // Container owns the shape morph; content just settles in
@@ -62,9 +68,8 @@ struct IslandRootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onPreferenceChange(OpenedHeightKey.self) { height in
-            // Full opened height for hit testing = header band + surface.
-            model.measuredOpenedHeight = height > 0 ? height + model.notchHeight : 0
+        .onChange(of: model.isOpened) { _, opened in
+            if !opened { model.measuredOpenedHeight = 0 }
         }
     }
 
@@ -107,9 +112,9 @@ struct IslandRootView: View {
     }
 }
 
-private struct OpenedHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+extension IslandRootView {
+    /// Full opened height for hit testing: the header band plus the surface.
+    static func openedHeight(_ surface: CGFloat, notch: CGFloat) -> CGFloat {
+        surface > 0 ? surface + notch : 0
     }
 }

@@ -577,4 +577,9 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(FirstMateEventText.headline("[seahelm event] schedule · rule triage-issues\nrepo: /r"), "Scheduled · triage-issues")
         XCTAssertEqual(FirstMateEventText.headline("[seahelm event] issue.opened · rule x"), "issue.opened · rule x")
     }
+
+    func testOpenedHitHeightCoversHeaderAndSurface() {
+        XCTAssertEqual(IslandRootView.openedHeight(700, notch: 32), 732)
+        XCTAssertEqual(IslandRootView.openedHeight(0, notch: 32), 0)
+    }
 }
