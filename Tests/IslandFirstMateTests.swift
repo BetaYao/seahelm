@@ -79,6 +79,48 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(model.timelineScrollRequest, requestBeforeRefresh + 1)
     }
 
+    func testAnsweringCardLeavesIslandOpenAndShowsOtherWaitingCards() {
+        let answered = order("answered", kind: .question)
+        let next = order("next", kind: .approval)
+        let model = IslandModel()
+        model.orders = [answered, next]
+        model.open(reason: .click)
+        model.toggleTimelineFilter()
+        var answer: (String, String)?
+        model.onOptionTapped = { card, option in
+            answer = (card.id, option)
+            model.orders = model.orders.filter { $0.id != card.id }
+        }
+
+        model.answerCard(answered, optionText: "Approve")
+
+        XCTAssertEqual(answer?.0, answered.id)
+        XCTAssertEqual(answer?.1, "Approve")
+        XCTAssertTrue(model.isOpened)
+        XCTAssertTrue(model.isFilteringTimeline)
+        XCTAssertEqual(model.pendingCardCount, 1)
+        XCTAssertEqual(model.orders.map(\.id), [next.id])
+    }
+
+    func testStoppingFirstMateKeepsIslandOpenAndFocusesComposer() {
+        let model = IslandModel()
+        model.orders = [order("pending", kind: .question)]
+        model.open(reason: .click)
+        model.toggleTimelineFilter()
+        var interrupted = false
+        model.onInterruptFirstMate = { interrupted = true }
+        let priorScrollRequest = model.timelineScrollRequest
+
+        model.stopFirstMate()
+
+        XCTAssertTrue(interrupted)
+        XCTAssertTrue(model.isOpened)
+        XCTAssertFalse(model.isFilteringTimeline)
+        XCTAssertTrue(model.pendingCommandFocus)
+        XCTAssertEqual(model.timelineScrollRequest, priorScrollRequest + 1)
+        XCTAssertNil(model.timelineScrollTarget)
+    }
+
     func testAutoOpenTargetsAndHighlightsTheNewCard() {
         let model = IslandModel()
         model.open(reason: .event, targetCardID: "new-card")
@@ -255,12 +297,13 @@ final class IslandFirstMateTests: XCTestCase {
         model.open(reason: .click)
         model.toggleTimelineFilter()
         let requestBeforeReveal = model.timelineScrollRequest
+        let targetBeforeReveal = model.timelineScrollTarget
         model.revealCard(firstMateCard)
         XCTAssertEqual(revealed.map(\.id), [worktreeCard.id], "First Mate cards do not navigate to a worktree")
         XCTAssertTrue(model.isOpened)
-        XCTAssertFalse(model.isFilteringTimeline)
-        XCTAssertNil(model.timelineScrollTarget, "The First Mate conversation is shown at its bottom")
-        XCTAssertEqual(model.timelineScrollRequest, requestBeforeReveal + 1)
+        XCTAssertTrue(model.isFilteringTimeline)
+        XCTAssertEqual(model.timelineScrollTarget, targetBeforeReveal)
+        XCTAssertEqual(model.timelineScrollRequest, requestBeforeReveal, "Tapping a First Mate card leaves the viewport in place")
     }
 
     func testWaitingCardMessageFoldsToThreeLinesAndSuggestionsUseCompactOptions() {

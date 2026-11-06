@@ -298,16 +298,26 @@ final class IslandModel {
         requestTimelineScroll(toCardID: nil)
     }
 
+    func answerCard(_ card: Card, optionText: String) {
+        onOptionTapped?(card, optionText)
+    }
+
+    func dismissCard(_ card: Card) {
+        onDismissOrder?(card)
+    }
+
+    func stopFirstMate() {
+        onInterruptFirstMate?()
+        focusFirstMateComposer()
+    }
+
     /// Card content is a navigation target; its answer controls remain owned
-    /// by the live CardDeck card. First Mate cards stay in the island and bring
-    /// its conversation back to the newest message.
+    /// by the live CardDeck card. First Mate cards stay in the island and keep
+    /// the current conversation position.
     func revealCard(_ card: Card) {
         if card.paneSessionKey == FirstMatePane.sessionName || card.isFirstMates {
             if !isOpened {
                 open(reason: .click)
-            } else {
-                isFilteringTimeline = false
-                requestTimelineScroll(toCardID: nil)
             }
             return
         }

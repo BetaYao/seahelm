@@ -115,10 +115,7 @@ struct OpenedSurfaceView: View {
                 .foregroundStyle(toneColor)
             Spacer(minLength: 0)
             if model.mateBusy {
-                pill(model.language.stop, systemImage: "stop.fill", tint: .white.opacity(0.75)) {
-                    model.onInterruptFirstMate?()
-                    model.close()
-                }
+                pill(model.language.stop, systemImage: "stop.fill", tint: .white.opacity(0.75)) { model.stopFirstMate() }
             }
             if model.shouldShowTimelineFilter {
                 filterPill {
@@ -527,14 +524,8 @@ struct OpenedSurfaceView: View {
                             || liveCard.isFirstMates ? "First Mate"
                             : (worktreeName.isEmpty ? liveCard.project : worktreeName)))
                     : entry.sourceLabel,
-                onOption: { optionText in
-                    model.onOptionTapped?(liveCard, optionText)
-                    model.close()
-                },
-                onDismiss: {
-                    model.onDismissOrder?(liveCard)
-                    model.close()
-                },
+                onOption: { optionText in model.answerCard(liveCard, optionText: optionText) },
+                onDismiss: { model.dismissCard(liveCard) },
                 onReveal: { model.revealCard(liveCard) }
             )
         } else {
@@ -696,8 +687,7 @@ struct OpenedSurfaceView: View {
                     .contentShape(Capsule())
                     .onTapGesture {
                         guard let card else { return }
-                        model.onOptionTapped?(card, card.labels.indices.contains(index) ? card.labels[index] : option)
-                        model.close()
+                        model.answerCard(card, optionText: card.labels.indices.contains(index) ? card.labels[index] : option)
                     }
             }
             Spacer(minLength: 0)
