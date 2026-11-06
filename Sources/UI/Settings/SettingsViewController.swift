@@ -111,9 +111,7 @@ class SettingsViewController: NSViewController {
         contentScroll.hasVerticalScroller = true
         contentScroll.drawsBackground = false
         contentScroll.automaticallyAdjustsContentInsets = false
-        // Content clears the transparent titlebar the traffic lights float in.
-        contentScroll.contentInsets = NSEdgeInsets(top: SettingsChrome.titlebarInset,
-                                                   left: 0, bottom: 0, right: 0)
+        contentScroll.contentInsets = NSEdgeInsetsZero
         contentScroll.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(contentScroll)
 
