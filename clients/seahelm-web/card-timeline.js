@@ -17,10 +17,51 @@
     const raw = value && (value.ts ?? value.created_at ?? value.timestamp);
     if (typeof raw === 'string' && !/^\d+(\.\d+)?$/.test(raw)) {
       const parsed = Date.parse(raw);
-      return Number.isFinite(parsed) ? parsed : null;
+      return Number.isFinite(parsed) ? parsed / 1000 : null;
     }
     const n = Number(raw);
     return Number.isFinite(n) ? n : null;
+  }
+
+  const FIRST_MATE_PANE = 'seahelm-first-mate';
+  const DECISION_CARD_WINDOW_SECONDS = 60;
+
+  function normalizedOptions(value) {
+    const options = value && (Array.isArray(value.options) ? value.options
+      : Array.isArray(value.labels) ? value.labels : null);
+    if (!options || !options.length) return null;
+    return options.map(option => String(option)
+      .replace(/^\s*\d+\s*[.)]\s*/, '')
+      .replace(/^\s*[☑☐✓✔]\s*/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase());
+  }
+
+  function isFirstMateCard(item) {
+    const source = item.source || {};
+    const card = item.card || {};
+    return source.pane === FIRST_MATE_PANE
+      || card.pane_session_key === FIRST_MATE_PANE
+      || card.pane_id === FIRST_MATE_PANE
+      || source.label === 'First Mate';
+  }
+
+  function sameOptions(a, b) {
+    const left = normalizedOptions(a), right = normalizedOptions(b);
+    return !!left && !!right && left.length === right.length
+      && left.every((option, i) => option === right[i]);
+  }
+
+  function nearInTime(a, b) {
+    const left = timeOf(a), right = timeOf(b);
+    return left != null && right != null
+      && Math.abs(left - right) <= DECISION_CARD_WINDOW_SECONDS;
+  }
+
+  function timeDistance(a, b) {
+    const left = timeOf(a), right = timeOf(b);
+    return left == null || right == null ? Infinity : Math.abs(left - right);
   }
 
   function compare(a, b) {
@@ -45,7 +86,7 @@
   }
 
   /** Merge fixture/core card rows with the current cards feed. */
-  function merge(messages, cards) {
+  function merge(messages, cards, { cardsReady = true } = {}) {
     const live = new Map();
     for (const card of cards || []) {
       const id = cardId(card);
@@ -88,7 +129,7 @@
       item.suggestion = item.cardKind === 'suggestion';
       item.text = String(item.first.text || (card && card.message) || '');
       item.source = item.source || sourceForCard(card);
-      item.state = latestState === 'pending' && !card ? 'gone' : latestState;
+      item.state = latestState === 'pending' && !card && cardsReady ? 'gone' : latestState;
       if (item.state === 'pending') item.card = card;
       item.option = item.latest.option || null;
       item.via = item.latest.via || null;
@@ -108,7 +149,24 @@
       });
     }
 
-    return output.sort(compare);
+    // First Mate's TUI decisions also appear as `decision` message rows. When
+    // their options and timestamp identify the matching First Mate card, keep
+    // the actionable card in that position instead of drawing both rows.
+    const duplicateDecisions = new Set();
+    for (const item of merged.values()) {
+      if (!isFirstMateCard(item)) continue;
+      const options = normalizedOptions(item.first) ? item.first : item.card;
+      if (!normalizedOptions(options)) continue;
+      const decision = output.filter(entry => entry.type === 'message'
+        && entry.message && entry.message.kind === 'decision'
+        && !duplicateDecisions.has(entry.id)
+        && sameOptions(options, entry.message)
+        && nearInTime(item.first, entry.message))
+        .sort((a, b) => timeDistance(item.first, a.message) - timeDistance(item.first, b.message))[0];
+      if (decision) duplicateDecisions.add(decision.id);
+    }
+
+    return output.filter(item => !duplicateDecisions.has(item.id)).sort(compare);
   }
 
   function isSuggestion(item) {
@@ -118,7 +176,7 @@
   /** Suggestions stay in their original positions; older ones fold at the oldest. */
   function capSuggestions(items, limit, expanded) {
     const max = Math.max(0, Number.isFinite(limit) ? limit : 3);
-    const suggestions = items.filter(isSuggestion);
+    const suggestions = items.filter(item => isSuggestion(item) && item.state === 'pending');
     if (suggestions.length <= max) return items.slice();
     const older = suggestions.slice(0, suggestions.length - max);
     const olderIds = new Set(older.map(item => item.id));
@@ -156,7 +214,7 @@
     const flush = () => {
       if (!hidden.length) return;
       const first = hidden[0], last = hidden[hidden.length - 1];
-      const id = `hidden:${first.id}:${last.id}`;
+      const id = `hidden:${first.id}`;
       const group = { type: 'hidden-run', id, seq: first.seq, ts: first.ts, count: hidden.length, items: hidden };
       if (expandedRuns.has(id)) {
         out.push({ ...group, type: 'hidden-less' }, ...hidden);

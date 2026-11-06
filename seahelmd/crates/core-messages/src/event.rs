@@ -70,6 +70,8 @@ pub struct Message {
     pub text: Option<String>,
     pub tool: Option<String>,
     pub detail: Option<String>,
+    /// Choices attached to a decision row. Other row kinds leave this empty.
+    pub options: Option<Vec<String>>,
     pub is_error: Option<bool>,
     pub status: Option<String>,
     pub old_status: Option<String>,
@@ -87,6 +89,7 @@ impl Message {
             text: None,
             tool: None,
             detail: None,
+            options: None,
             is_error: None,
             status: None,
             old_status: None,
@@ -96,6 +99,11 @@ impl Message {
 
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
         self.text = Some(text.into());
+        self
+    }
+
+    pub fn with_options(mut self, options: Vec<String>) -> Self {
+        self.options = Some(options);
         self
     }
 
@@ -123,6 +131,7 @@ impl Message {
         opt("text", self.text.as_ref().map(|v| json!(v)));
         opt("tool", self.tool.as_ref().map(|v| json!(v)));
         opt("detail", self.detail.as_ref().map(|v| json!(v)));
+        opt("options", self.options.as_ref().map(|v| json!(v)));
         opt("is_error", self.is_error.map(|v| json!(v)));
         opt("status", self.status.as_ref().map(|v| json!(v)));
         opt("old_status", self.old_status.as_ref().map(|v| json!(v)));
@@ -144,6 +153,13 @@ impl Message {
             text: s("text"),
             tool: s("tool"),
             detail: s("detail"),
+            options: v.get("options").and_then(Value::as_array).map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            }),
             is_error: v.get("is_error").and_then(Value::as_bool),
             status: s("status"),
             old_status: s("old_status"),
@@ -166,6 +182,12 @@ mod tests {
         let v = m.to_json();
         assert_eq!(v, json!({"seq": 3, "pane_id": "p", "pane_session_key": "seahelm-x", "kind": "tool", "ts": 10.5, "tool": "Bash", "detail": "cargo test", "count": 2}));
         assert_eq!(Message::from_json(&v), Some(m));
+        let decision = Message::new("p", "seahelm-x", Kind::Decision, 11.0)
+            .with_text("Allow this action?")
+            .with_options(vec!["1. Yes".into(), "2. No".into()]);
+        let decision_json = decision.to_json();
+        assert_eq!(decision_json["options"], json!(["1. Yes", "2. No"]));
+        assert_eq!(Message::from_json(&decision_json), Some(decision));
         assert!(Message::from_json(&json!({"seq": 1})).is_none());
         let note = Message::new("seahelm-first-mate", "seahelm-first-mate", Kind::Note, 11.0).with_text("Deleted 2 worktrees by habit: a · b.");
         let v = note.to_json();

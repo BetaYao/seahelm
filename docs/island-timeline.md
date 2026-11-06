@@ -32,6 +32,10 @@ latest row gives its state. A pending card's buttons come from the live card
 drop the row (as for `note` / `brief`). Text is the card's own (already in
 `first_mate_language` for First Mate's cards); labels are the shown labels.
 
+Core `decision` message rows carry their option labels too. A client can fold a
+nearby First Mate decision into its card when the options match, while keeping
+unrelated pane decisions in the timeline. Older decision rows may omit options.
+
 ## Out of scope here
 
 The web client draws card rows in a follow-up; Telegram keeps sending cards

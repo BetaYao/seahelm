@@ -75,7 +75,7 @@ push:     {"type":"notify","method","params"}
 | `timeline-scroll.js` | the timeline sticks to the bottom while you are at it and holds your row when you are not — a rebuild replaces every row, so the place has to be taken and put back by hand |
 | `timeline-patch.js` | plans the smallest DOM change from the timeline on screen to the next one: a new message appends, a growing run of calls or the `live` line rewrites the tail, and only a different pane or history paged in above rebuilds |
 | `card-model.js` | the core's card list → one decision per pane plus First Mate's cards, danger, multi-select ticks |
-| `card-timeline.js` | card-row merging, suggestion cap, waiting filter, and collapsed message runs for First Mate's timeline |
+| `card-timeline.js` | card-row merging, First Mate decision deduplication, waiting-only suggestion cap, waiting filter, and collapsed message runs |
 | `pane-pick.js` | which pane a worktree opens on, and the words a row uses for its status |
 | `composer-action.js` | what the composer's one button means right now — send, stop, or nothing. Typed text always wins, so an agent being busy never refuses the message you just wrote |
 | `devbroker/` | dependency-free node unit tests for the modules above, plus the result collector for `bench.html` |

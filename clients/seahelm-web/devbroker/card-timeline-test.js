@@ -33,6 +33,66 @@ console.log('card timeline fixtures');
 }
 
 {
+  const rows = [
+    row(20, 'decision', { ts: 100, text: 'Allow this action?', options: ['1. Approve', '2. Reject'] }),
+    row(21, 'card', {
+      ts: 101, card_id: 'mate-approval', card_kind: 'approval',
+      source: { pane: 'seahelm-first-mate', label: 'First Mate' },
+      text: 'Allow this action?', options: ['Approve', 'Reject'], state: 'pending',
+    }),
+  ];
+  const live = card('mate-approval', 'approval', {
+    pane_session_key: 'seahelm-first-mate', labels: ['Approve', 'Reject'],
+  });
+  const items = merge(rows, [live]);
+  check(items.map(x => x.type).join() === 'card' && items[0].cardId === 'mate-approval',
+    'a nearby First Mate decision with matching options folds into its card');
+
+  const mismatched = merge([
+    rows[0],
+    row(22, 'card', {
+      ts: 101, card_id: 'other-pane', card_kind: 'approval',
+      source: { pane: 'pane-7', label: '#7 · saas-mono' },
+      text: 'Allow this action?', options: ['Approve', 'Reject'], state: 'pending',
+    }),
+  ], [card('other-pane', 'approval', { pane_session_key: 'pane-7', labels: ['Approve', 'Reject'] })]);
+  check(mismatched.some(x => x.type === 'message' && x.message.kind === 'decision'),
+    'matching options do not fold a decision from another pane');
+
+  const differentChoices = merge([
+    row(25, 'decision', { ts: 100, text: 'Allow this action?', options: ['Approve', 'Always', 'Reject'] }),
+    row(26, 'card', {
+      ts: 101, card_id: 'mate-different-options', card_kind: 'approval',
+      source: { pane: 'seahelm-first-mate', label: 'First Mate' },
+      text: 'Allow this action?', options: ['Approve', 'Reject'], state: 'pending',
+    }),
+  ], [card('mate-different-options', 'approval', { pane_session_key: 'seahelm-first-mate' })]);
+  check(differentChoices.some(x => x.type === 'message' && x.message.kind === 'decision'),
+    'a nearby First Mate decision with different options remains in the timeline');
+
+  const tooOld = merge([
+    row(30, 'decision', { ts: 1, text: 'Allow this action?', options: ['Approve', 'Reject'] }),
+    row(31, 'card', {
+      ts: 100, card_id: 'later-mate-card', card_kind: 'approval',
+      source: { pane: 'seahelm-first-mate', label: 'First Mate' },
+      text: 'Allow this action?', options: ['Approve', 'Reject'], state: 'pending',
+    }),
+  ], [card('later-mate-card', 'approval', { pane_session_key: 'seahelm-first-mate' })]);
+  check(tooOld.some(x => x.type === 'message' && x.message.kind === 'decision'),
+    'a matching decision outside the near-time window remains in the timeline');
+}
+
+{
+  const rows = [row(2, 'card', {
+    card_id: 'not-yet-loaded', card_kind: 'approval', text: 'Confirm?', state: 'pending',
+  })];
+  const beforeNotify = merge(rows, [], { cardsReady: false });
+  const afterNotify = merge(rows, [], { cardsReady: true });
+  check(beforeNotify[0].state === 'pending', 'a pending row stays pending before the first cards notify');
+  check(afterNotify[0].state === 'gone', 'a missing card becomes gone after the cards feed is ready');
+}
+
+{
   const [item] = merge([row(2, 'card', { card_id: 'c-gone', card_kind: 'question', text: 'Continue?', state: 'pending' })], []);
   check(item.state === 'gone', 'a pending row with no current live card becomes a gone line');
 }
@@ -76,6 +136,23 @@ console.log('card timeline fixtures');
 }
 
 {
+  const suggestions = [
+    { type: 'card', id: 'resolved-a', suggestion: true, state: 'answered', seq: 1 },
+    { type: 'card', id: 'pending-a', suggestion: true, state: 'pending', seq: 2 },
+    { type: 'card', id: 'pending-b', suggestion: true, state: 'pending', seq: 3 },
+    { type: 'card', id: 'resolved-b', suggestion: true, state: 'dismissed', seq: 4 },
+    { type: 'card', id: 'pending-c', suggestion: true, state: 'pending', seq: 5 },
+    { type: 'card', id: 'pending-d', suggestion: true, state: 'pending', seq: 6 },
+  ];
+  const visible = present(suggestions, { suggestionLimit: 3 });
+  check(visible.some(x => x.id === 'resolved-a') && visible.some(x => x.id === 'resolved-b'),
+    'resolved suggestions remain as their one-line records');
+  check(visible.find(x => x.type === 'suggestions-more').count === 1
+    && visible.filter(x => x.type === 'card' && x.state === 'pending').map(x => x.id).join() === 'pending-b,pending-c,pending-d',
+  'the suggestion cap applies only to waiting suggestions');
+}
+
+{
   const items = [
     { type: 'message', id: 'm1', seq: 1 },
     { type: 'card', id: 'a', seq: 2, state: 'pending', suggestion: false },
@@ -89,6 +166,22 @@ console.log('card timeline fixtures');
   check(filtered[0].count === 1 && filtered[0].items[0].id === 'm1', 'a hidden run expands from its original position');
   const expanded = present(items, { filtered: true, expandedRuns: new Set([filtered[0].id]) });
   check(expanded[0].type === 'hidden-less' && expanded[1].id === 'm1', 'an expanded run has an in-place collapse control');
+
+}
+
+{
+  const before = present([
+    { type: 'message', id: 'first', seq: 10 },
+    { type: 'message', id: 'second', seq: 11 },
+  ], { filtered: true });
+  const after = present([
+    { type: 'message', id: 'first', seq: 10 },
+    { type: 'message', id: 'second', seq: 11 },
+    { type: 'message', id: 'third', seq: 12 },
+  ], { filtered: true, expandedRuns: new Set([before[0].id]) });
+  check(before[0].id === after[0].id && after[0].type === 'hidden-less'
+    && after.slice(1).map(x => x.id).join() === 'first,second,third',
+  'an expanded hidden run keeps its first-item id as later messages extend it');
 }
 
 check(waitingCount([card('c1', 'question'), card('c2', 'approval'), card('c3', 'suggestion')]) === 2,

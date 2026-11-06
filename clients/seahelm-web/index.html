@@ -810,7 +810,7 @@ const S = {
   focus:null, dnd:null, events:new Map(), cards:[], cardsReady:false,
   todoFilter:false, todoExpanded:new Set(), suggestionsExpanded:false,
   cardSelections:new Map(), cardActions:new Set(), cardActionSignatures:new Map(), timelineJumpCard:null,
-  timelineHighlightCard:null,
+  timelineHighlightCard:null, timelineHighlightPainted:null, timelineHighlightTimer:null,
   // Tool runs the reader has opened, by the run's first `seq` (tool-group.js).
   toolOpen:new Set(),
   // `sel` is the selected worktree path; `selPane` the pane whose terminal is shown.
@@ -841,6 +841,11 @@ const S = {
   rowTimes:new Map(),
 };
 const FM_KEY = 'seahelm-first-mate';
+function setSelectedPane(key){
+  if (S.selPane === FM_KEY && key !== FM_KEY && S.todoFilter) S.todoFilter = false;
+  S.selPane = key;
+  renderMateTodoToggle();
+}
 // Opening size only. The relay reports no geometry and has no resize verb, so the
 // bridge reads the session's real grid from outside (pid → tty → `stty size`)
 // and ships it with the snapshot; we resize to that before replaying. These
@@ -1416,7 +1421,7 @@ function onPaneClosed(p){
   delete S.history[key];
   if (S.selPane === key) {
     // Stay on the worktree if it still has panes; otherwise there is nothing to show.
-    S.selPane = null;
+    setSelectedPane(null);
     if (!buildFleet().some(r => r.path === S.sel)) S.sel = null;
     S.vt.worktree = null;              // remount rather than keep a dead pane on screen
     renderDetail();
@@ -1576,26 +1581,28 @@ function messageRowHTML(m){
   }
 }
 
-function firstMateTimelineSource(item){
+function firstMateTimelineSource(item, fleetRows){
   const source = item.source || {};
   if (source.label) return String(source.label);
   const card = item.card || {};
   const key = source.pane || card.pane_session_key || card.pane_id;
   if (!key) return 'First Mate';
   const pane = S.panes.get(key);
-  const worktree = pane && buildFleet().find(row => row.path === pane.worktree_path);
+  const worktree = pane && (fleetRows || []).find(row => row.path === pane.worktree_path);
   const project = card.project || (pane && pane.project) || (worktree && worktree.project) || '';
   const alias = card.pane_id || (pane && pane.pane_id) || key;
   const ref = `#${shortId(alias)}`;
   return project ? `${ref} · ${project}` : `${ref} · ${pane ? paneLabel(pane).text : 'Pane'}`;
 }
 
-function renderFirstMateCard(item){
-  const source = firstMateTimelineSource(item);
+function renderFirstMateCard(item, fleetRows){
+  const source = firstMateTimelineSource(item, fleetRows);
   const body = item.text || (item.card && item.card.message) || '';
   if (item.state !== 'pending' || !item.card) {
     const state = String(item.state || 'gone').toLowerCase();
-    const status = state === 'answered'
+    const status = state === 'pending'
+      ? (webUsesChinese() ? '卡片同步中' : 'syncing card')
+      : state === 'answered'
       ? (webUsesChinese() ? '已回答' : 'answered')
       : state === 'dismissed' ? (webUsesChinese() ? '已跳过' : 'dismissed')
       : state === 'expired' ? (webUsesChinese() ? '已过期' : 'expired')
@@ -1625,8 +1632,8 @@ function renderFirstMateCard(item){
     + `<button type="button" class="tl-card-skip" data-card-dismiss>${skip}</button></section>`;
 }
 
-function renderFirstMateEntry(item){
-  if (item.type === 'card') return renderFirstMateCard(item);
+function renderFirstMateEntry(item, fleetRows){
+  if (item.type === 'card') return renderFirstMateCard(item, fleetRows);
   if (item.type === 'message') return renderMessageRow(item.message);
   const count = Number(item.count) || 0;
   if (item.type === 'hidden-run' || item.type === 'hidden-less') {
@@ -1669,11 +1676,22 @@ function timelineCardNode(id){
 
 function paintNewCardHighlight(){
   const id = S.timelineHighlightCard;
-  if (!id) return;
+  if (!id || S.timelineHighlightPainted === id) return;
+  if (S.timelineHighlightPainted) {
+    const old = timelineCardNode(S.timelineHighlightPainted);
+    if (old) old.classList.remove('highlight');
+  }
+  S.timelineHighlightPainted = id;
   const node = timelineCardNode(id);
-  if (!node) return;
-  node.classList.add('highlight');
-  if (tl.follow) $('messageTimeline').scrollTop = $('messageTimeline').scrollHeight;
+  if (node) node.classList.add('highlight');
+  clearTimeout(S.timelineHighlightTimer);
+  S.timelineHighlightTimer = setTimeout(() => {
+    if (S.timelineHighlightCard === id) S.timelineHighlightCard = null;
+    if (S.timelineHighlightPainted === id) S.timelineHighlightPainted = null;
+    const current = timelineCardNode(id);
+    if (current) current.classList.remove('highlight');
+    S.timelineHighlightTimer = null;
+  }, 2300);
 }
 
 function renderMessageTimeline(key, options = {}){
@@ -1692,7 +1710,7 @@ function renderMessageTimeline(key, options = {}){
   }
   const all = S.messages[key] || [];
   const timeline = key === FM_KEY
-    ? SeahelmCardTimeline.present(SeahelmCardTimeline.merge(all, S.cards), {
+    ? SeahelmCardTimeline.present(SeahelmCardTimeline.merge(all, S.cards, { cardsReady: S.cardsReady }), {
         filtered: S.todoFilter,
         expandedRuns: S.todoExpanded,
         suggestionsExpanded: S.suggestionsExpanded,
@@ -1725,13 +1743,14 @@ function renderMessageTimeline(key, options = {}){
     : h.loading ? '<div class="tl-more">Loading earlier messages…</div>'
     : h.done ? '<div class="tl-more">No earlier messages</div>' : '';
   const shown = top ? [{ id: 'top', html: top }] : [];
+  const fleetRows = key === FM_KEY ? buildFleet() : null;
   items.forEach((it, i) => {
     // Only the newest line can be the one being run, and only while the
     // pane is working — a finished turn's last call must not keep breathing.
     const now = live && i === items.length - 1;
     if (it.kind === 'tools') { shown.push({ id: `t${it.key}`, html: renderToolGroup(it, now) }); return; }
     if (key === FM_KEY) {
-      const html = renderFirstMateEntry(it);
+      const html = renderFirstMateEntry(it, fleetRows);
       if (html) shown.push({ id: it.id || `r${it.seq}`, html });
       return;
     }
@@ -1891,7 +1910,8 @@ function toggleToolGroup(head){
 function sendTimelineCardAction(id, { index = null, dismiss = false } = {}){
   const cardId = String(id || '');
   if (!cardId || !isLinked() || S.cardActions.has(cardId)) return;
-  const item = SeahelmCardTimeline.merge(S.messages[FM_KEY] || [], S.cards).find(x => x.type === 'card' && x.cardId === cardId);
+  const item = SeahelmCardTimeline.merge(S.messages[FM_KEY] || [], S.cards, { cardsReady: S.cardsReady })
+    .find(x => x.type === 'card' && x.cardId === cardId);
   const card = item && item.card;
   if (!card) return;
   let previousSelection = null;
@@ -2186,7 +2206,7 @@ function sendComposerText(byTap){
     const action = SeahelmComposerKeys.composerKeyAction(ev);
     if (action === 'send') { ev.preventDefault(); sendComposerText(); }
     if (action === 'esc') {
-      if (S.todoFilter) { ev.preventDefault(); setMateTodoFilter(false); return; }
+      if (S.selPane === FM_KEY && S.todoFilter) { ev.preventDefault(); setMateTodoFilter(false); return; }
       const key = S.selPane;
       const pane = S.panes.get(key) || {};
       const paneId = pane.pane_id || key;
@@ -2581,6 +2601,8 @@ function renderReplyBar(){
   bar.innerHTML = '';
   if (!e) return;
   const question = e.type === 'question';
+  const actionId = String(e.id || '');
+  const actionDisabled = S.cardActions.has(actionId);
   const card = document.createElement('div');
   card.className = 'rb-card';
   card.setAttribute('role', 'group');
@@ -2594,28 +2616,46 @@ function renderReplyBar(){
     + `${esc(question ? (e.prompt || 'Needs your approval') : 'What next?')}</span>`
     + '<button class="rb-skip" type="button">Skip</button>';
   card.setAttribute('aria-label', question ? (e.prompt || 'Needs your approval') : 'What next?');
-  head.querySelector('.rb-skip').onclick = () => {
-    sendCommand('cards.dismiss', { id: e.id }, (r) => {
-      if (r && r.ok === false) showActionToast((r.error && r.error.message) || 'Not sent', true);
-    });
-  };
-  card.appendChild(head);
-  bar.appendChild(card);
-  const opts = document.createElement('div');
   const multi = question && !!e.multi_select;
   const options = e.options || [];
   const details = e.details || [];
-  opts.className = 'rb-opts' + (multi ? ' multi' : '') + (details.length ? ' detailed' : '');
   const checked = new Set(e.checked || []);
   // A multi-select row only toggles: the card stays up, ticked, and Done —
   // index options.length, the card's last label — is what answers it.
-  const answer = (i, toggle) => {
-    sendCommand('cards.answer', { id: e.id, index: i }, (r) => {
-      if (r && r.ok === false) {
-        showActionToast((r.error && r.error.message) || 'Not sent', true);
-      }
-    });
+  const answer = (i, toggle, dismiss = false) => {
+    if (!actionId || S.cardActions.has(actionId)) return;
+    const currentCard = e.card || S.cards.find(candidate => String(candidate && candidate.id) === actionId);
+    S.cardActions.add(actionId);
+    if (currentCard) S.cardActionSignatures.set(actionId, cardActionSignature(currentCard));
+    if (toggle) {
+      S.events.set(pid, Object.assign({}, e, { checked: SeahelmCardModel.toggleChecked([...checked], i) }));
+    } else {
+      S.events.delete(pid);
+    }
+    renderSuggestions();
+    sendCommand(dismiss ? 'cards.dismiss' : 'cards.answer', dismiss
+      ? { id: actionId } : { id: actionId, index: i }, (r) => {
+        if (r && r.ok === false) {
+          S.cardActions.delete(actionId);
+          S.cardActionSignatures.delete(actionId);
+          if (S.cardsReady) {
+            const current = SeahelmCardModel.buildDecisions(S.cards).byPane.get(pid);
+            if (current) S.events.set(pid, current); else S.events.delete(pid);
+          } else {
+            S.events.set(pid, e);
+          }
+          renderSuggestions();
+          showActionToast((r.error && r.error.message) || 'Not sent', true);
+        }
+      });
   };
+  const skip = head.querySelector('.rb-skip');
+  skip.disabled = actionDisabled;
+  skip.onclick = () => answer(null, false, true);
+  card.appendChild(head);
+  bar.appendChild(card);
+  const opts = document.createElement('div');
+  opts.className = 'rb-opts' + (multi ? ' multi' : '') + (details.length ? ' detailed' : '');
   options.forEach((opt, i) => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -2632,6 +2672,7 @@ function renderReplyBar(){
       b.setAttribute('role', 'checkbox');
       b.setAttribute('aria-checked', checked.has(i) ? 'true' : 'false');
     }
+    b.disabled = actionDisabled;
     b.onclick = () => answer(i, multi);
     opts.appendChild(b);
   });
@@ -2639,6 +2680,7 @@ function renderReplyBar(){
     const done = document.createElement('button');
     done.type = 'button';
     done.className = 'rb-done';
+    done.disabled = actionDisabled;
     done.textContent = checked.size ? `Done · ${checked.size} selected` : 'Done';
     done.onclick = () => answer(options.length, false);
     opts.appendChild(done);
@@ -2653,6 +2695,10 @@ function renderReplyBar(){
 // wait) that opens its pane like any other — timeline, terminal, composer —
 // with its approval and proposal cards answered above the composer.
 function webUsesChinese(){
+  const mateLanguage = S.firstMate && S.firstMate.language;
+  if (mateLanguage != null && String(mateLanguage).trim()) {
+    return String(mateLanguage).toLowerCase().startsWith('zh');
+  }
   return String((navigator && navigator.language) || document.documentElement.lang || '').toLowerCase().startsWith('zh');
 }
 
@@ -2701,7 +2747,7 @@ function setMateTodoFilter(on){
   const host = $('messageTimeline');
   let anchor = null;
   if (S.selPane === FM_KEY && loadSurfaceMode() === 'text') {
-    const visible = SeahelmCardTimeline.present(SeahelmCardTimeline.merge(S.messages[FM_KEY] || [], S.cards), {
+    const visible = SeahelmCardTimeline.present(SeahelmCardTimeline.merge(S.messages[FM_KEY] || [], S.cards, { cardsReady: S.cardsReady }), {
       filtered: !!on, expandedRuns: S.todoExpanded, suggestionsExpanded: S.suggestionsExpanded,
     });
     const ids = new Set(visible.filter(item => item.type === 'card').map(item => item.cardId));
@@ -2718,11 +2764,6 @@ function notifyNewTimelineCard(id){
     S.timelineJumpCard = null;
     S.timelineHighlightCard = String(id);
     scheduleTimeline();
-    setTimeout(() => {
-      if (S.timelineHighlightCard === String(id)) S.timelineHighlightCard = null;
-      const card = [...$('messageTimeline').querySelectorAll('[data-card-id]')].find(x => x.dataset.cardId === String(id));
-      if (card) card.classList.remove('highlight');
-    }, 2300);
   } else {
     S.timelineJumpCard = String(id);
     renderTimelineToBottom();
@@ -2734,7 +2775,10 @@ function applyFirstMate(state){
   S.firstMate = state || null;
   const pane = state && state.enabled && state.pane;
   if (pane) S.panes.set(FM_KEY, Object.assign({}, S.panes.get(FM_KEY) || {}, pane));
-  else S.panes.delete(FM_KEY);
+  else {
+    S.panes.delete(FM_KEY);
+    if (S.selPane === FM_KEY) S.todoFilter = false;
+  }
   renderMateButton();
   refreshFleetSoon(false);
   if (S.selPane === FM_KEY) { renderDetailChrome(); renderReplyBar(); renderMateTodoToggle(); }
@@ -3185,6 +3229,7 @@ function renderDetailChrome(){
  *  back — the iOS edge swipe included — returns to the list, as ‹ does. */
 function showScreen(screen){
   const was = document.body.dataset.screen;
+  if (screen !== 'detail' && S.selPane === FM_KEY && S.todoFilter) S.todoFilter = false;
   document.body.dataset.screen = screen;
   if (screen === 'detail' && was !== 'detail' && NARROW.matches) {
     history.pushState({ seahelmScreen: 'detail' }, '');
@@ -3217,7 +3262,7 @@ window.addEventListener('popstate', () => {
 function selectWorktree(row, paneKey, { navigate = true } = {}){
   S.sel = row.path;
   const known = paneKey && row.panes.some(([k]) => k === paneKey);
-  S.selPane = (known ? paneKey : leadPane(row)[0]) || null;
+  setSelectedPane((known ? paneKey : leadPane(row)[0]) || null);
   if (S.selPane) lastPaneByPath.set(row.path, S.selPane);
   if (navigate) showScreen('detail');
   renderTree();
@@ -3345,7 +3390,7 @@ function nwSubmit(){
  *  opens on its pane at once and the list catches up as the snapshot does. */
 function openNewWorktree(path, paneKey, repoName, agentLabel){
   S.sel = path;
-  S.selPane = paneKey || null;
+  setSelectedPane(paneKey || null);
   showScreen('detail');
   $('detailHead').textContent = repoName || 'New worktree';
   $('detailSub').textContent = `Starting ${agentLabel}…`;
@@ -3696,8 +3741,8 @@ function paneAction(method){
     gwSend('session.snapshot', {}, (snap) => {
       if (snap && snap.panes) applySessionSnapshot(snap);
       // Land on the new pane once it is in the list.
-      if (added && S.panes.has(added)) S.selPane = added;
-      else if (S.selPane && !S.panes.has(S.selPane)) S.selPane = null;
+      if (added && S.panes.has(added)) setSelectedPane(added);
+      else if (S.selPane && !S.panes.has(S.selPane)) setSelectedPane(null);
       S.vt.worktree = null;        // force a remount of the changed worktree
       if (S.sel && !buildFleet().some(row => row.path === S.sel)) S.sel = null;
       renderTree();
@@ -3854,7 +3899,7 @@ function mountPanes(tree, focusKey, path){
     const key = wanted && wanted.pane_session_key;
     // The composer sends to `S.selPane`; when the chosen pane is not in this
     // layout, the tabs have to follow or they name a pane the text will not reach.
-    if (key && key !== S.selPane) { S.selPane = key; renderTree(); }
+    if (key && key !== S.selPane) { setSelectedPane(key); renderTree(); }
     S.vt.focus = key;
     applySurfaceMode();
     if (key) renderMessageTimeline(key);
@@ -4078,7 +4123,7 @@ function focusPane(key){
   for (const [k, entry] of S.vt.panes) entry.el.classList.toggle('on', k === key);
   // Clicking into a mirrored pane is choosing it: the tabs follow.
   if (key && key !== S.selPane && S.panes.has(key)) {
-    S.selPane = key;
+    setSelectedPane(key);
     if (S.sel) lastPaneByPath.set(S.sel, key);
     renderDetailChrome();
     renderSendButton();
@@ -4370,7 +4415,7 @@ document.addEventListener('pointerdown', (ev) => {
   if (!ev.target.closest('.menu, [aria-haspopup="menu"]')) closeMenus();
 }, true);
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape' && S.todoFilter && !SeahelmComposerKeys.isComposing(ev)) {
+  if (ev.key === 'Escape' && S.selPane === FM_KEY && S.todoFilter && !SeahelmComposerKeys.isComposing(ev)) {
     ev.preventDefault();
     setMateTodoFilter(false);
   }

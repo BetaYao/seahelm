@@ -1229,6 +1229,7 @@ impl FirstMate {
             "pending": pending,
             "queued": self.queue.len(),
             "agent": self.config.agent.raw(),
+            "language": self.config.language.pick("en", "zh"),
             "cards": cards,
             "held": self.held.len(),
         });
@@ -1316,6 +1317,19 @@ mod tests {
         let d = UserConfig::parse("{}");
         assert_eq!((d.language, d.quiet_hours), (lang::Lang::En, None));
         assert_eq!(UserConfig::parse(r#"{"first_mate_quiet_hours": "late"}"#).quiet_hours, None, "unreadable: none");
+    }
+
+    #[test]
+    fn state_reports_first_mates_configured_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Core::for_test(dir.path());
+        let (tx, _rx) = mpsc::channel();
+        let mut mate = FirstMate::new(core, tx, dir.path().join("mate"), dir.path().join("habits"));
+
+        mate.config = UserConfig::parse(r#"{"first_mate_language":"zh"}"#);
+        assert_eq!(mate.state_json()["language"], "zh");
+        mate.config = UserConfig::parse("{}");
+        assert_eq!(mate.state_json()["language"], "en");
     }
 
     #[test]
