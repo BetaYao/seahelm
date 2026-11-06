@@ -57,6 +57,9 @@ final class IslandPanelController {
         }
 
         self.panel = panel
+        model.onMaximumOpenedHeightChanged = { [weak self] in
+            self?.resizePanelForCurrentScreen()
+        }
         panel.orderFrontRegardless()
 
         eventMonitors.start { [weak self] location in
@@ -118,10 +121,13 @@ final class IslandPanelController {
         presentCommandBar { model.pendingCommandFocus = true }
     }
 
-    /// ⌘J again shuts what ⌘J opened.
+    /// ⌘J opens First Mate. When already open, it focuses the composer and
+    /// returns the timeline to its newest messages.
     func toggleFirstMate() {
         if model.isOpened {
-            closeCommandBar()
+            model.focusFirstMateComposer()
+            NSApp.activate(ignoringOtherApps: true)
+            panel?.makeKey()
         } else {
             openFirstMate()
         }
@@ -263,6 +269,12 @@ final class IslandPanelController {
         }
     }
 
+    private func resizePanelForCurrentScreen() {
+        guard let panel, let screen = targetScreen() else { return }
+        let frame = panelFrame(on: screen)
+        if panel.frame != frame { panel.setFrame(frame, display: true) }
+    }
+
     // MARK: - Geometry
 
     private func targetScreen() -> NSScreen? {
@@ -290,7 +302,7 @@ final class IslandPanelController {
                 : 30
         }
         model.openedWidth = max(360, min(540, screen.visibleFrame.width - 32))
-        model.maxOpenedContentHeight = IslandModel.openedContentHeight(forVisibleHeight: screen.visibleFrame.height)
+        model.visibleScreenHeight = screen.visibleFrame.height
     }
 
     private func panelFrame(on screen: NSScreen) -> NSRect {
@@ -310,9 +322,10 @@ final class IslandPanelController {
         guard let panel else { return nil }
         let frame = panel.frame
         if model.isOpened {
+            let maximumVisibleHeight = model.notchHeight + maxOpenedContentHeight
             let height = model.measuredOpenedHeight > 0
-                ? min(model.measuredOpenedHeight, maxOpenedContentHeight)
-                : maxOpenedContentHeight
+                ? min(model.measuredOpenedHeight, maximumVisibleHeight)
+                : maximumVisibleHeight
             return NSRect(
                 x: frame.midX - model.openedWidth / 2,
                 y: frame.maxY - height,

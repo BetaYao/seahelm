@@ -13,8 +13,9 @@ struct OpenedSurfaceView: View {
     /// Assistant rows opened past their first lines.
     @State private var expanded: Set<String> = []
     @State private var expandedTimelineRuns: Set<String> = []
-    @State private var cardVerticalCenters: [String: CGFloat] = [:]
-    @State private var timelineViewportHeight: CGFloat = 0
+    @State private var cachedItems: [ConversationItem] = []
+    @State private var cachedDisplayRows: [TimelineDisplayRow] = []
+    @State private var layoutTracker = TimelineLayoutTracker()
     @State private var highlightedCardID: String?
 
     var body: some View {
@@ -25,11 +26,23 @@ struct OpenedSurfaceView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     titleRow(using: proxy)
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: TimelineChromeKey.self,
+                                                   value: TimelineChromeValue(titleHeight: geo.size.height))
+                        })
                     if let warning = model.warning {
                         warningBanner(warning.message)
+                            .background(GeometryReader { geo in
+                                Color.clear.preference(key: TimelineChromeKey.self,
+                                                       value: TimelineChromeValue(warningHeight: geo.size.height))
+                            })
                     }
                     timeline
                     composer
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: TimelineChromeKey.self,
+                                                   value: TimelineChromeValue(composerHeight: geo.size.height))
+                        })
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 14)
@@ -38,13 +51,21 @@ struct OpenedSurfaceView: View {
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.warning)
             .onAppear {
+                rebuildTimeline()
                 consumePrefill()
                 consumeFocusRequest()
                 performRequestedScroll(using: proxy)
             }
+            .onChange(of: model.timelineRevision) { rebuildTimeline() }
+            .onChange(of: model.isFilteringTimeline) { rebuildDisplayRows() }
             .onChange(of: model.pendingCommandPrefill) { consumePrefill() }
             .onChange(of: model.pendingCommandFocus) { consumeFocusRequest() }
             .onChange(of: model.timelineScrollRequest) { performRequestedScroll(using: proxy) }
+            .onPreferenceChange(TimelineChromeKey.self) { value in
+                let warningHeight = model.warning == nil ? 0 : value.warningHeight + 10
+                model.measuredTimelineChromeHeight = 6 + value.titleHeight + warningHeight
+                    + (model.warning == nil ? 20 : 30) + value.composerHeight + 14
+            }
         }
     }
 
@@ -78,7 +99,8 @@ struct OpenedSurfaceView: View {
     // MARK: - Timeline
 
     private var maxTimelineHeight: CGFloat {
-        max(180, model.maxOpenedContentHeight - 205)
+        max(IslandModel.minimumTimelineHeight,
+            model.maxOpenedContentHeight - model.measuredTimelineChromeHeight)
     }
 
     private func titleRow(using proxy: ScrollViewProxy) -> some View {
@@ -93,15 +115,16 @@ struct OpenedSurfaceView: View {
                 .foregroundStyle(toneColor)
             Spacer(minLength: 0)
             if model.mateBusy {
-                pill("Stop", systemImage: "stop.fill", tint: .white.opacity(0.75)) { model.onInterruptFirstMate?() }
+                pill(model.language.stop, systemImage: "stop.fill", tint: .white.opacity(0.75)) { model.onInterruptFirstMate?() }
             }
-            if model.pendingCardCount > 0 || model.isFilteringTimeline {
+            if model.shouldShowTimelineFilter {
                 filterPill {
                     let turningOn = !model.isFilteringTimeline
-                    let items = ConversationItem.items(from: model.mateMessages, liveCards: model.orders)
-                    let anchor = nearestCardID(in: items, filtering: turningOn)
-                    let oldCenter = anchor.flatMap { cardVerticalCenters[$0] } ?? timelineViewportHeight / 2
-                    let anchorY = min(max(oldCenter / max(timelineViewportHeight, 1), 0.08), 0.92)
+                    let anchor = nearestCardID(in: cachedItems, filtering: turningOn)
+                        ?? nearestCardID(in: cachedItems, filtering: model.isFilteringTimeline)
+                    let viewportHeight = layoutTracker.viewportHeight
+                    let oldCenter = anchor.flatMap { layoutTracker.cardCenters[$0] } ?? viewportHeight / 2
+                    let anchorY = min(max(oldCenter / max(viewportHeight, 1), 0.08), 0.92)
                     model.toggleTimelineFilter()
                     if let anchor {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -118,7 +141,7 @@ struct OpenedSurfaceView: View {
         return HStack(spacing: 4) {
             Image(systemName: model.isFilteringTimeline ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 .font(.system(size: 9, weight: .bold))
-            Text(IslandLanguage.todoCount(model.pendingCardCount))
+            Text(model.language.todoCount(model.pendingCardCount))
                 .font(.system(size: 10.5, weight: .semibold))
         }
         .foregroundStyle(model.isFilteringTimeline ? Color.black.opacity(0.88) : tint)
@@ -135,11 +158,11 @@ struct OpenedSurfaceView: View {
         let cards = items.compactMap { item -> (String, CGFloat)? in
             guard case let .card(entry) = item.kind else { return nil }
             if filtering, entry.effectiveState(liveCard: liveCards[entry.id]) != .pending { return nil }
-            guard let center = cardVerticalCenters[entry.id] else { return nil }
+            guard let center = layoutTracker.cardCenters[entry.id] else { return nil }
             return (entry.id, center)
         }
         return cards.min { lhs, rhs in
-            abs(lhs.1 - timelineViewportHeight / 2) < abs(rhs.1 - timelineViewportHeight / 2)
+            abs(lhs.1 - layoutTracker.viewportHeight / 2) < abs(rhs.1 - layoutTracker.viewportHeight / 2)
         }?.0
     }
 
@@ -171,13 +194,12 @@ struct OpenedSurfaceView: View {
     private static let gutter: CGFloat = 26
 
     private var timeline: some View {
-        let items = ConversationItem.items(from: model.mateMessages, liveCards: model.orders)
-        let displayRows = Self.timelineRows(from: items, filtering: model.isFilteringTimeline, liveCards: model.orders)
+        let items = cachedItems
+        let displayRows = cachedDisplayRows
         return ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 7) {
                 if items.isEmpty {
-                    Text(model.mateRunning ? "Nothing said yet. Ask First Mate anything — a `/command` runs as one."
-                                           : "First Mate is off. Turn it on in Settings ▸ First Mate.")
+                    Text(model.mateRunning ? model.language.nothingSaidYet : model.language.firstMateOff)
                         .font(.system(size: 11.5))
                         .foregroundStyle(.white.opacity(0.45))
                         .padding(.vertical, 8)
@@ -203,10 +225,22 @@ struct OpenedSurfaceView: View {
                ? min(model.cachedListHeight, maxTimelineHeight)
                : min(180, maxTimelineHeight))
         .onPreferenceChange(TimelineLayoutKey.self) { value in
-            if value.contentHeight > 0 { model.cachedListHeight = value.contentHeight }
-            if value.viewportHeight > 0 { timelineViewportHeight = value.viewportHeight }
-            cardVerticalCenters = value.cardCenters
+            if value.contentHeight > 0, model.cachedListHeight != value.contentHeight {
+                model.cachedListHeight = value.contentHeight
+            }
+            layoutTracker.record(value)
         }
+    }
+
+    private func rebuildTimeline() {
+        cachedItems = ConversationItem.items(from: model.mateMessages, liveCards: model.orders,
+                                             sourceLabels: model.liveCardSourceLabels)
+        rebuildDisplayRows()
+    }
+
+    private func rebuildDisplayRows() {
+        cachedDisplayRows = Self.timelineRows(from: cachedItems, filtering: model.isFilteringTimeline,
+                                              liveCards: model.orders)
     }
 
     @ViewBuilder
@@ -217,7 +251,7 @@ struct OpenedSurfaceView: View {
         case .collapsedMessages(let items):
             VStack(alignment: .leading, spacing: 6) {
                 collapsedToggle(displayRow.id,
-                                title: IslandLanguage.hiddenMessages(items.reduce(0) { $0 + $1.messageCount }),
+                                title: model.language.hiddenMessages(items.reduce(0) { $0 + $1.messageCount }),
                                 expanded: expandedTimelineRuns.contains(displayRow.id))
                 if expandedTimelineRuns.contains(displayRow.id) {
                     ForEach(items, id: \.scrollID) { timelineItem($0) }
@@ -226,7 +260,7 @@ struct OpenedSurfaceView: View {
         case .moreSuggestions(let items):
             VStack(alignment: .leading, spacing: 6) {
                 collapsedToggle(displayRow.id,
-                                title: IslandLanguage.moreSuggestions(items.count),
+                                title: model.language.moreSuggestions(items.count),
                                 expanded: expandedTimelineRuns.contains(displayRow.id))
                 if expandedTimelineRuns.contains(displayRow.id) {
                     ForEach(items, id: \.scrollID) { timelineItem($0) }
@@ -242,7 +276,7 @@ struct OpenedSurfaceView: View {
                 .foregroundStyle(.white.opacity(0.38))
                 .lineLimit(1)
             if isExpanded {
-                Text(IslandLanguage.collapse)
+                Text(model.language.collapse)
                     .font(.system(size: 9.5, weight: .medium))
                     .foregroundStyle(.white.opacity(0.38))
             }
@@ -293,11 +327,12 @@ struct OpenedSurfaceView: View {
 
     private func performRequestedScroll(using proxy: ScrollViewProxy) {
         let target = model.timelineScrollTarget ?? "timeline-bottom"
-        highlightedCardID = model.timelineHighlightCardID
+        let cardID = model.consumeTimelineHighlightCardID()
+        highlightedCardID = cardID
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             proxy.scrollTo(target, anchor: target == "timeline-bottom" ? .bottom : .center)
         }
-        guard let cardID = model.timelineHighlightCardID else { return }
+        guard let cardID else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             if highlightedCardID == cardID { highlightedCardID = nil }
         }
@@ -330,7 +365,7 @@ struct OpenedSurfaceView: View {
         func flushHidden() {
             guard !hidden.isEmpty else { return }
             let rows = hidden
-            let id = "messages:\(rows.first!.scrollID):\(rows.last!.scrollID)"
+            let id = "messages:\(rows.first!.scrollID)"
             result.append(TimelineDisplayRow(id: id, kind: .collapsedMessages(rows)))
             hidden.removeAll()
         }
@@ -403,7 +438,7 @@ struct OpenedSurfaceView: View {
                     HStack(spacing: 8) {
                         if long {
                             HStack(spacing: 3) {
-                                Text(open ? "Less" : "More")
+                                Text(open ? model.language.less : model.language.more)
                                 Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 7, weight: .bold))
                             }
                             .font(.system(size: 10.5, weight: .medium))
@@ -442,7 +477,7 @@ struct OpenedSurfaceView: View {
             }
             .padding(.leading, Self.gutter)
         case .note(let text):
-            Text(text)
+            Text(text == "Stopped with an error" ? model.language.stoppedWithError : text)
                 .font(.system(size: 10.5))
                 .foregroundStyle(.white.opacity(0.4))
                 .lineLimit(2)
@@ -468,7 +503,11 @@ struct OpenedSurfaceView: View {
         if state == .pending, let liveCard {
             WaitingCardView(
                 order: liveCard,
-                sourceLabel: entry.sourceLabel,
+                language: model.language,
+                sourceLabel: entry.sourceLabel.isEmpty
+                    ? (model.liveCardSourceLabels[entry.id]
+                        ?? (liveCard.paneSessionKey == FirstMatePane.sessionName ? "First Mate" : liveCard.project))
+                    : entry.sourceLabel,
                 isSuggestion: entry.cardKind == Card.Kind.suggestion.rawValue,
                 onOption: { optionText in model.onOptionTapped?(liveCard, optionText) },
                 onDismiss: { model.onDismissOrder?(liveCard) },
@@ -479,7 +518,7 @@ struct OpenedSurfaceView: View {
                 }
             )
         } else {
-            Text(Self.cardSummary(entry, state: state))
+            Text(Self.cardSummary(entry, state: state, isChinese: model.language.isChinese))
                 .font(.system(size: 10.5, weight: state == .answered ? .medium : .regular))
                 .foregroundStyle(state == .answered ? .white.opacity(0.68) : .white.opacity(0.36))
                 .lineLimit(1)
@@ -491,17 +530,24 @@ struct OpenedSurfaceView: View {
     }
 
     static func cardSummary(_ entry: CardTimelineEntry, state: CardTimelineState? = nil,
-                            now: Date = Date(), isChinese: Bool = IslandLanguage.isChinese) -> String {
+                            now: Date = Date(), isChinese: Bool = false) -> String {
         let finalState = state ?? entry.state
         let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let stamp = time(entry.updatedAt, now: now)
         switch finalState {
         case .answered:
             let option = entry.option ?? (isChinese ? "已选择" : "answered")
-            let result = isChinese ? "✓ 你选择了「\(option)」：\(text)" : "✓ You chose \(option): \(text)"
+            let result: String
+            if let via = entry.via, !via.isEmpty {
+                let channel = via.lowercased() == "telegram" ? "Telegram" : via
+                result = isChinese ? "✓ 在 \(channel) 选择了「\(option)」：\(text)"
+                    : "✓ Chose \(option) on \(channel): \(text)"
+            } else {
+                result = isChinese ? "✓ 你选择了「\(option)」：\(text)" : "✓ You chose \(option): \(text)"
+            }
             return stamp.isEmpty ? result : "\(result) · \(stamp)"
         case .pending, .dismissed, .expired, .gone:
-            let source = entry.sourceLabel.isEmpty ? (isChinese ? "First Mate" : "First Mate") : entry.sourceLabel
+            let source = entry.sourceLabel.isEmpty ? "First Mate" : entry.sourceLabel
             let status: String
             switch finalState {
             case .dismissed: status = isChinese ? "已忽略" : "dismissed"
@@ -692,7 +738,7 @@ struct OpenedSurfaceView: View {
                     Image(systemName: "exclamationmark.circle.fill").font(.system(size: 10)).foregroundStyle(.orange)
                     Text(error).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.7))
                     Spacer(minLength: 0)
-                    Text("Retry")
+                    Text(model.language.retry)
                         .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(IslandStyle.accent)
                         .onTapGesture { send() }
@@ -702,7 +748,7 @@ struct OpenedSurfaceView: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white.opacity(0.4))
-                TextField("Ask First Mate — / for a command", text: $model.draft)
+                TextField(model.language.composerPlaceholder, text: $model.draft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.95))
@@ -746,7 +792,7 @@ struct OpenedSurfaceView: View {
             model.sendError = nil
             model.didSendMessage()
         } else {
-            model.sendError = text.hasPrefix("/") ? "That command did not run." : "First Mate did not get it — is it running?"
+            model.sendError = text.hasPrefix("/") ? model.language.commandFailed : model.language.sendFailed
         }
     }
 
@@ -912,18 +958,72 @@ private struct TimelineLayoutKey: PreferenceKey {
     }
 }
 
-enum IslandLanguage {
-    static var isChinese: Bool {
-        let language = Locale.preferredLanguages.first ?? Locale.current.language.languageCode?.identifier ?? "en"
-        return language.lowercased().hasPrefix("zh")
+/// Updated by scrolling preferences without invalidating OpenedSurfaceView.
+/// Positions are only read by the filter-toggle action.
+private final class TimelineLayoutTracker {
+    var cardCenters: [String: CGFloat] = [:]
+    var viewportHeight: CGFloat = 0
+    private var lastRecordedAt: TimeInterval = 0
+
+    func record(_ value: TimelineLayoutValue) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastRecordedAt >= 0.1 else { return }
+        lastRecordedAt = now
+        if value.viewportHeight > 0 { viewportHeight = value.viewportHeight }
+        if !value.cardCenters.isEmpty { cardCenters = value.cardCenters }
+    }
+}
+
+private struct TimelineChromeValue: Equatable {
+    var titleHeight: CGFloat = 0
+    var warningHeight: CGFloat = 0
+    var composerHeight: CGFloat = 0
+}
+
+private struct TimelineChromeKey: PreferenceKey {
+    static var defaultValue = TimelineChromeValue()
+    static func reduce(value: inout TimelineChromeValue, nextValue: () -> TimelineChromeValue) {
+        let next = nextValue()
+        value.titleHeight = max(value.titleHeight, next.titleHeight)
+        value.warningHeight = max(value.warningHeight, next.warningHeight)
+        value.composerHeight = max(value.composerHeight, next.composerHeight)
+    }
+}
+
+enum IslandLanguage: String, Equatable {
+    case english = "en"
+    case chinese = "zh"
+
+    var isChinese: Bool { self == .chinese }
+
+    /// `first_mate_language` is owned by seahelm-core and intentionally stays
+    /// a foreign key in the Swift Config model. Read the preserved raw value.
+    static func configured(at url: URL = Config.configPath) -> IslandLanguage {
+        fromConfigData(try? Data(contentsOf: url))
     }
 
-    static var collapse: String { isChinese ? "收起" : "Collapse" }
-    static func todoCount(_ count: Int) -> String { isChinese ? "待办 \(count)" : "To-do \(count)" }
-    static func hiddenMessages(_ count: Int) -> String { isChinese ? "··· \(count) 条消息" : "··· \(count) messages" }
-    static func moreSuggestions(_ count: Int) -> String {
-        isChinese ? "更多建议（\(count)）" : "More suggestions (\(count))"
+    static func fromConfigData(_ data: Data?) -> IslandLanguage {
+        guard let data,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let value = object["first_mate_language"] as? String else { return .english }
+        return value == "zh" ? .chinese : .english
     }
+
+    var stop: String { isChinese ? "停止" : "Stop" }
+    var retry: String { isChinese ? "重试" : "Retry" }
+    var more: String { isChinese ? "更多" : "More" }
+    var less: String { isChinese ? "收起" : "Less" }
+    var collapse: String { isChinese ? "收起" : "Collapse" }
+    var composerPlaceholder: String { isChinese ? "问问 First Mate — 输入 / 查看命令" : "Ask First Mate — / for a command" }
+    var nothingSaidYet: String { isChinese ? "还没有消息。可以问 First Mate 任何问题，`/命令` 会直接运行。" : "Nothing said yet. Ask First Mate anything — a `/command` runs as one." }
+    var firstMateOff: String { isChinese ? "First Mate 尚未启用。可在“设置 ▸ First Mate”中开启。" : "First Mate is off. Turn it on in Settings ▸ First Mate." }
+    var commandFailed: String { isChinese ? "命令未能运行。" : "That command did not run." }
+    var sendFailed: String { isChinese ? "First Mate 未收到消息——确认它正在运行。" : "First Mate did not get it — is it running?" }
+    var stoppedWithError: String { isChinese ? "因错误而停止" : "Stopped with an error" }
+    var integration: String { isChinese ? "集成" : "integration" }
+    func todoCount(_ count: Int) -> String { isChinese ? "待办 \(count)" : "To-do \(count)" }
+    func hiddenMessages(_ count: Int) -> String { isChinese ? "··· \(count) 条消息" : "··· \(count) messages" }
+    func moreSuggestions(_ count: Int) -> String { isChinese ? "更多建议（\(count)）" : "More suggestions (\(count))" }
 }
 
 /// One display item in First Mate's timeline: conversation content or a merged
@@ -964,18 +1064,24 @@ struct ConversationItem: Identifiable, Equatable {
         self.messageCount = messageCount
     }
 
-    static func items(from messages: [MessageEvent], liveCards: [Card] = []) -> [ConversationItem] {
+    static func items(from messages: [MessageEvent], liveCards: [Card] = [],
+                      sourceLabels: [String: String] = [:]) -> [ConversationItem] {
         let orderedMessages = messages.sorted { $0.seq < $1.seq }
         var cardEntries = CardTimelineEntry.merged(from: orderedMessages)
+        let firstMateDecisionOptions = cardEntries
+            .filter { $0.sourcePane == FirstMatePane.sessionName || $0.sourceLabel == "First Mate" }
+            .map(\.options)
+            + liveCards.filter { $0.paneSessionKey == FirstMatePane.sessionName }.map(\.options)
         let rowCardIDs = Set(cardEntries.map(\.id))
         var nextSequence = orderedMessages.map(\.seq).max() ?? 0
         let fallbackCards = liveCards.filter { !rowCardIDs.contains($0.id) }.sorted { $0.createdAt < $1.createdAt }
         for card in fallbackCards {
             nextSequence &+= 1
+            let isFirstMate = card.paneSessionKey == FirstMatePane.sessionName || card.isFirstMates
             cardEntries.append(CardTimelineEntry(
                 id: card.id, sequence: nextSequence, createdAt: card.createdAt, updatedAt: card.createdAt,
                 cardKind: card.kind.rawValue, sourcePane: card.paneSessionKey,
-                sourceLabel: card.isFirstMates ? "First Mate" : card.project,
+                sourceLabel: isFirstMate ? "First Mate" : (sourceLabels[card.id] ?? card.project),
                 text: card.message, options: card.options, state: .pending, option: nil, via: nil
             ))
         }
@@ -1035,6 +1141,7 @@ struct ConversationItem: Identifiable, Equatable {
             case .decision where !text.isEmpty:
                 dropRun(); flush()
                 let options = text.components(separatedBy: " · ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                if firstMateDecisionOptions.contains(options) { continue }
                 if options.count > 1 { held = item(.decision(options)) } else { out.append(item(.note(text))) }
             case .status where m.status == AgentStatus.error.rawValue:
                 dropRun(); flush(); out.append(item(.note("Stopped with an error")))
@@ -1127,6 +1234,7 @@ enum FirstMateEventText {
 /// A pending card rendered whole with source, message and live option chips.
 private struct WaitingCardView: View {
     let order: Card
+    let language: IslandLanguage
     let sourceLabel: String
     let isSuggestion: Bool
     let onOption: (String) -> Void
@@ -1168,7 +1276,7 @@ private struct WaitingCardView: View {
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.5))
                     } else if isIntegration {
-                        Text("integration")
+                        Text(language.integration)
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.5))
                     }

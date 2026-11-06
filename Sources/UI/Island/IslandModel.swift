@@ -67,6 +67,7 @@ final class IslandModel {
     var openReason: IslandOpenReason?
     /// Filter the single timeline down to active cards and suggestions.
     var isFilteringTimeline = false
+    var language: IslandLanguage = .english
 
     var rows: [IslandAgentRow] = []
     /// Claude/Codex rate-limit readouts, refreshed by `UsageSummaryStore`.
@@ -79,19 +80,35 @@ final class IslandModel {
     /// count and the authority for buttons on pending timeline cards.
     var orders: [Card] = [] {
         didSet {
+            if oldValue != orders { timelineRevision &+= 1 }
             if isFilteringTimeline, pendingCardCount == 0 { isFilteringTimeline = false }
+        }
+    }
+    /// Labels for live cards that have not reached First Mate's durable
+    /// timeline yet, keyed by the core's card id.
+    var liveCardSourceLabels: [String: String] = [:] {
+        didSet {
+            if oldValue != liveCardSourceLabels { timelineRevision &+= 1 }
         }
     }
 
     /// Waiting cards that need a decision. Suggestions appear in the filtered
     /// timeline, but are not part of its `待办 N` count.
     var pendingCardCount: Int { orders.filter { $0.kind != .suggestion }.count }
+    var shouldShowTimelineFilter: Bool { pendingCardCount > 0 || isFilteringTimeline }
 
     // MARK: First Mate's conversation
 
     /// First Mate's timeline (the core's, or the app's own while it runs
     /// First Mate), oldest first. Refreshed while the island is opened.
-    var mateMessages: [MessageEvent] = []
+    var mateMessages: [MessageEvent] = [] {
+        didSet {
+            if oldValue != mateMessages { timelineRevision &+= 1 }
+        }
+    }
+    /// Revision for the immutable timeline build inputs. Scroll geometry and
+    /// presentation-only changes do not advance it.
+    private(set) var timelineRevision = 0
     /// "watching", "working"… and its tone, from the coordinator.
     var mateActivity: String = "off"
     var mateTone: FirstMateStateText.Tone = .quiet
@@ -133,22 +150,47 @@ final class IslandModel {
 
     /// SwiftUI-measured height of the opened surface (for hit testing).
     var measuredOpenedHeight: CGFloat = 0
+    /// Measured title, warning, composer, spacing, and panel padding.
+    var measuredTimelineChromeHeight: CGFloat = 0 {
+        didSet { updateOpenedHeightLimit() }
+    }
+    /// The screen's usable height, set by the panel controller.
+    var visibleScreenHeight: CGFloat = 0 {
+        didSet { updateOpenedHeightLimit() }
+    }
     /// Last measured natural height of the opened list area — persisted
     /// across open cycles so reopening renders at the right size immediately
     /// instead of resizing mid-animation when the measurement lands.
     var cachedListHeight: CGFloat = 0
 
     /// Maximum measured surface height for the current screen.
-    var maxOpenedContentHeight: CGFloat = IslandModel.minimumOpenedContentHeight
+    var maxOpenedContentHeight: CGFloat = IslandModel.minimumOpenedContentHeight {
+        didSet {
+            if oldValue != maxOpenedContentHeight { onMaximumOpenedHeightChanged?() }
+        }
+    }
     static let minimumOpenedContentHeight: CGFloat = 520
+    static let minimumTimelineHeight: CGFloat = 380
 
     /// One-shot scroll request consumed by the opened timeline view.
     private(set) var timelineScrollRequest = 0
     private(set) var timelineScrollTarget: String?
     private(set) var timelineHighlightCardID: String?
 
-    static func openedContentHeight(forVisibleHeight visibleHeight: CGFloat) -> CGFloat {
-        max(minimumOpenedContentHeight, visibleHeight * 0.6)
+    /// Resize the fixed panel when measured chrome means the timeline needs
+    /// more room than the screen-based cap provides.
+    var onMaximumOpenedHeightChanged: (() -> Void)?
+
+    static func openedContentHeight(forVisibleHeight visibleHeight: CGFloat,
+                                    chromeHeight: CGFloat = 0) -> CGFloat {
+        max(minimumOpenedContentHeight, visibleHeight * 0.6,
+            chromeHeight + minimumTimelineHeight)
+    }
+
+    private func updateOpenedHeightLimit() {
+        let next = Self.openedContentHeight(forVisibleHeight: visibleScreenHeight,
+                                            chromeHeight: measuredTimelineChromeHeight)
+        if maxOpenedContentHeight != next { maxOpenedContentHeight = next }
     }
 
     // Wired by MainWindowController.
@@ -223,6 +265,21 @@ final class IslandModel {
     func requestTimelineScroll(toCardID cardID: String?) {
         timelineScrollTarget = cardID.map { "card:\($0)" }
         timelineScrollRequest += 1
+    }
+
+    /// The arrival highlight belongs to one scroll request only.
+    func consumeTimelineHighlightCardID() -> String? {
+        defer { timelineHighlightCardID = nil }
+        return timelineHighlightCardID
+    }
+
+    /// ⌘J focuses the composer on an already-open island and brings the newest
+    /// conversation into view. It does not close the surface.
+    func focusFirstMateComposer() {
+        guard isOpened else { return }
+        isFilteringTimeline = false
+        pendingCommandFocus = true
+        requestTimelineScroll(toCardID: nil)
     }
 
     /// Brief scale "pop" of the closed pill to draw attention to a new event.

@@ -2219,7 +2219,8 @@ extension MainWindowController {
         guard config.islandEnabled else { return }
         let model = islandController.model
         let firstMate = tabCoordinator.firstMate
-        let (word, _) = FirstMateStateText.describe(firstMate.state.activity)
+        model.language = IslandLanguage.configured()
+        let (word, _) = FirstMateStateText.describe(firstMate.state.activity, isChinese: model.language.isChinese)
         let tone = FirstMateStateText.tone(firstMate.state)
         if model.mateActivity != word { model.mateActivity = word }
         if model.mateTone != tone { model.mateTone = tone }
@@ -2231,6 +2232,9 @@ extension MainWindowController {
     /// While the opened island is on screen: First Mate's timeline, read off main.
     fileprivate func refreshIslandConversation() {
         let model = islandController.model
+        if model.isOpened, model.language != IslandLanguage.configured() {
+            refreshIsland()
+        }
         guard config.islandEnabled, model.isOpened, !islandMateFetching else { return }
         islandMateFetching = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -2298,13 +2302,31 @@ extension MainWindowController {
         // even when nothing changed.
         let orders = IslandModel.newestSuggestions(from: tabCoordinator.cards.cards)
         if model.orders != orders { model.orders = orders }
+        let index = fleetIndex()
+        var sourceLabels: [String: String] = [:]
+        for card in orders where card.paneSessionKey != FirstMatePane.sessionName && !card.isFirstMates {
+            guard let pane = index.panes.first(where: {
+                (!card.paneSessionKey.isEmpty && $0.sessionKey == card.paneSessionKey)
+                    || (!card.terminalID.isEmpty && $0.id == card.terminalID)
+            }) else {
+                if !card.project.isEmpty { sourceLabels[card.id] = card.project }
+                continue
+            }
+            if let handle = pane.handle {
+                sourceLabels[card.id] = "#\(handle) · \(pane.project)"
+            } else if !pane.project.isEmpty {
+                sourceLabels[card.id] = pane.project
+            }
+        }
+        if model.liveCardSourceLabels != sourceLabels { model.liveCardSourceLabels = sourceLabels }
 
         // A core that does not answer is invisible everywhere else: every pane
         // just stops changing, indistinguishable from a fleet with nothing to
         // say.
         let warning = IslandWarning.current(
             coreUnreachableSince: CoreLink.shared.unreachableSince,
-            controlChannel: tabCoordinator.terminalCoordinator?.controlSocketServer?.state)
+            controlChannel: tabCoordinator.terminalCoordinator?.controlSocketServer?.state,
+            isChinese: model.language.isChinese)
         if model.warning != warning { model.warning = warning }
 
         // A new suggestion is actionable — expand so the card is visible
@@ -2452,6 +2474,8 @@ extension MainWindowController: SettingsDelegate {
         tabCoordinator.applyAutopilotConfig()
         updateCoordinator.config = merged
         dashboardVC?.integrationEnabled = merged.integrationEnabled
+        islandController.model.language = IslandLanguage.configured()
+        refreshIsland()
         normalizeBackendAvailabilityIfNeeded()
 
         let newPaths = Set(config.workspacePaths)

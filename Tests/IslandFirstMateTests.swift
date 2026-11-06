@@ -57,6 +57,8 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertFalse(model.isFilteringTimeline)
         XCTAssertEqual(model.timelineScrollTarget, "card:new-card")
         XCTAssertEqual(model.timelineHighlightCardID, "new-card")
+        XCTAssertEqual(model.consumeTimelineHighlightCardID(), "new-card")
+        XCTAssertNil(model.consumeTimelineHighlightCardID())
         model.close()
         model.open(reason: .click)
         XCTAssertNil(model.timelineScrollTarget)
@@ -66,6 +68,55 @@ final class IslandFirstMateTests: XCTestCase {
     func testOpenedHeightUsesSixtyPercentWithFiveHundredTwentyMinimum() {
         XCTAssertEqual(IslandModel.openedContentHeight(forVisibleHeight: 700), 520)
         XCTAssertEqual(IslandModel.openedContentHeight(forVisibleHeight: 1_000), 600)
+        let measured = IslandModel.openedContentHeight(forVisibleHeight: 700, chromeHeight: 245)
+        XCTAssertEqual(measured, 625)
+        XCTAssertGreaterThanOrEqual(measured - 245, IslandModel.minimumTimelineHeight)
+    }
+
+    func testIslandLanguageComesFromFirstMateConfigAndDefaultsToEnglish() {
+        XCTAssertEqual(IslandLanguage.fromConfigData(Data(#"{"first_mate_language":"zh"}"#.utf8)), .chinese)
+        XCTAssertEqual(IslandLanguage.fromConfigData(Data(#"{"first_mate_language":"en"}"#.utf8)), .english)
+        XCTAssertEqual(IslandLanguage.fromConfigData(Data(#"{"first_mate_language":"fr"}"#.utf8)), .english)
+        XCTAssertEqual(IslandLanguage.fromConfigData(nil), .english)
+        XCTAssertEqual(IslandLanguage.chinese.todoCount(2), "待办 2")
+        XCTAssertEqual(IslandLanguage.english.composerPlaceholder, "Ask First Mate — / for a command")
+    }
+
+    func testFilterVisibilityFollowsWaitingCountAndSuggestionsDoNotCount() {
+        let model = IslandModel()
+        XCTAssertFalse(model.shouldShowTimelineFilter)
+        model.orders = [order("suggestion")]
+        XCTAssertEqual(model.pendingCardCount, 0)
+        XCTAssertFalse(model.shouldShowTimelineFilter)
+        model.orders = [order("suggestion"), order("question", kind: .question)]
+        XCTAssertEqual(model.pendingCardCount, 1)
+        XCTAssertTrue(model.shouldShowTimelineFilter)
+    }
+
+    func testCmdJFocusKeepsTheOpenIslandAndReturnsToTheBottom() {
+        let model = IslandModel()
+        model.orders = [order("question", kind: .question)]
+        model.open(reason: .click)
+        model.toggleTimelineFilter()
+        model.focusFirstMateComposer()
+        XCTAssertTrue(model.isOpened)
+        XCTAssertFalse(model.isFilteringTimeline)
+        XCTAssertTrue(model.pendingCommandFocus)
+        XCTAssertNil(model.timelineScrollTarget)
+    }
+
+    func testTimelineRevisionTracksMessageAndCardInputs() {
+        let model = IslandModel()
+        let messages = [MessageEvent(seq: 1, paneId: "fm", paneSessionKey: "k", kind: .user,
+                                    ts: Date(timeIntervalSince1970: 1), text: "hello")]
+        model.mateMessages = messages
+        XCTAssertEqual(model.timelineRevision, 1)
+        model.mateMessages = messages
+        XCTAssertEqual(model.timelineRevision, 1)
+        model.orders = [order("card", kind: .question)]
+        XCTAssertEqual(model.timelineRevision, 2)
+        model.liveCardSourceLabels = ["card": "#7 · saas-mono"]
+        XCTAssertEqual(model.timelineRevision, 3)
     }
 
     func testCardFixtureRowsDecodeAndMergeAtTheirFirstPosition() throws {
@@ -104,6 +155,49 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(items.map(\.id), [9, 10])
     }
 
+    func testDecisionReplyIsNotDuplicatedBesideItsLiveFirstMateCard() throws {
+        let card = try XCTUnwrap(Card(json: [
+            "id": "fm-choice", "kind": "suggestion", "pane_session_key": FirstMatePane.sessionName,
+            "project": "seahelm", "message": "Choose the next step", "options": ["Approve", "Keep"],
+        ], terminalID: { _, _ in "fm" }))
+        let reply = MessageEvent(seq: 12, paneId: "fm", paneSessionKey: FirstMatePane.sessionName,
+                                 kind: .decision, ts: Date(), text: "Approve · Keep")
+        let items = ConversationItem.items(from: [reply], liveCards: [card])
+        XCTAssertEqual(items.count, 1)
+        guard case let .card(entry) = items[0].kind else {
+            return XCTFail("The live First Mate card should replace the decision chips")
+        }
+        XCTAssertEqual(entry.id, "fm-choice")
+        XCTAssertEqual(entry.sourceLabel, "First Mate")
+
+        var row = MessageEvent(seq: 11, paneId: "fm", paneSessionKey: FirstMatePane.sessionName,
+                               kind: .card, ts: Date(), text: card.message)
+        row.cardId = card.id
+        row.cardKind = card.kind.rawValue
+        row.cardSourceLabel = "First Mate"
+        row.cardOptions = card.options
+        row.cardState = .pending
+        let itemsWithRow = ConversationItem.items(from: [row, reply], liveCards: [card])
+        XCTAssertEqual(itemsWithRow.count, 1)
+        guard case let .card(rowEntry) = itemsWithRow[0].kind else {
+            return XCTFail("The durable card row should replace the matching decision chips")
+        }
+        XCTAssertEqual(rowEntry.id, card.id)
+    }
+
+    func testLiveCardUsesFleetSourceLabelBeforeItsTimelineRowArrives() throws {
+        let card = try XCTUnwrap(Card(json: [
+            "id": "pane-question", "kind": "question", "pane_session_key": "pane-session",
+            "project": "saas-mono", "message": "Pick one", "options": ["A", "B"],
+        ], terminalID: { _, _ in "pane-id" }))
+        let items = ConversationItem.items(from: [], liveCards: [card],
+                                           sourceLabels: [card.id: "#7 · saas-mono"])
+        guard case let .card(entry) = try XCTUnwrap(items.first).kind else {
+            return XCTFail("Expected a live card row")
+        }
+        XCTAssertEqual(entry.sourceLabel, "#7 · saas-mono")
+    }
+
     func testCardStatesRenderAsAnsweredOrQuietHistory() throws {
         func fixture(_ id: String, _ state: String, option: String? = nil) -> MessageEvent {
             var row: [String: Any] = [
@@ -122,6 +216,11 @@ final class IslandFirstMateTests: XCTestCase {
         answered.updatedAt = .distantPast
         XCTAssertEqual(OpenedSurfaceView.cardSummary(answered, now: Date(timeIntervalSince1970: 10), isChinese: false),
                        "✓ You chose Approve: Delete worktree")
+        answered.via = "telegram"
+        XCTAssertEqual(OpenedSurfaceView.cardSummary(answered, now: Date(timeIntervalSince1970: 10), isChinese: false),
+                       "✓ Chose Approve on Telegram: Delete worktree")
+        XCTAssertEqual(OpenedSurfaceView.cardSummary(answered, now: Date(timeIntervalSince1970: 10), isChinese: true),
+                       "✓ 在 Telegram 选择了「Approve」：Delete worktree")
         XCTAssertTrue(OpenedSurfaceView.cardSummary(entries[1], now: Date(timeIntervalSince1970: 10), isChinese: false).contains("expired"))
         XCTAssertTrue(OpenedSurfaceView.cardSummary(entries[2], now: Date(timeIntervalSince1970: 10), isChinese: true).contains("已结束"))
         XCTAssertTrue(OpenedSurfaceView.cardSummary(entries[3], now: Date(timeIntervalSince1970: 10), isChinese: false).contains("dismissed"))
@@ -169,6 +268,28 @@ final class IslandFirstMateTests: XCTestCase {
             guard case let .item(item) = row.kind, case let .card(card) = item.kind else { return false }
             return card.id == "suggestion"
         })
+    }
+
+    func testCollapsedMessageRunKeepsItsIdentityWhenMoreMessagesArrive() throws {
+        func user(_ seq: UInt64, _ text: String) -> MessageEvent {
+            MessageEvent(seq: seq, paneId: "fm", paneSessionKey: "k", kind: .user,
+                         ts: Date(timeIntervalSince1970: Double(seq)), text: text)
+        }
+        func waitingCard(_ seq: UInt64) -> MessageEvent {
+            var event = MessageEvent(seq: seq, paneId: "fm", paneSessionKey: "k", kind: .card,
+                                     ts: Date(timeIntervalSince1970: Double(seq)), text: "Wait")
+            event.cardId = "wait"
+            event.cardKind = "question"
+            event.cardState = .pending
+            return event
+        }
+        let live = [order("wait", kind: .question)]
+        let before = ConversationItem.items(from: [user(1, "one"), user(2, "two"), waitingCard(3)], liveCards: live)
+        let after = ConversationItem.items(from: [user(1, "one"), user(2, "two"), user(3, "three"), waitingCard(4)], liveCards: live)
+        let beforeRun = try XCTUnwrap(OpenedSurfaceView.timelineRows(from: before, filtering: true, liveCards: live).first)
+        let afterRun = try XCTUnwrap(OpenedSurfaceView.timelineRows(from: after, filtering: true, liveCards: live).first)
+        XCTAssertEqual(beforeRun.id, "messages:event:1")
+        XCTAssertEqual(afterRun.id, beforeRun.id)
     }
 
     func testTodoCountExcludesSuggestionsAndFourSuggestionsFoldBehindMore() {
