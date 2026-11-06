@@ -17,6 +17,7 @@ struct OpenedSurfaceView: View {
     @State private var cachedDisplayRows: [TimelineDisplayRow] = []
     @State private var layoutTracker = TimelineLayoutTracker()
     @State private var highlightedCardID: String?
+    @State private var didBuildTimeline = false
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -48,7 +49,6 @@ struct OpenedSurfaceView: View {
                 .padding(.bottom, 14)
             }
             .frame(width: model.openedWidth)
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.warning)
             .onAppear {
                 rebuildTimeline()
@@ -115,7 +115,10 @@ struct OpenedSurfaceView: View {
                 .foregroundStyle(toneColor)
             Spacer(minLength: 0)
             if model.mateBusy {
-                pill(model.language.stop, systemImage: "stop.fill", tint: .white.opacity(0.75)) { model.onInterruptFirstMate?() }
+                pill(model.language.stop, systemImage: "stop.fill", tint: .white.opacity(0.75)) {
+                    model.onInterruptFirstMate?()
+                    model.close()
+                }
             }
             if model.shouldShowTimelineFilter {
                 filterPill {
@@ -213,7 +216,10 @@ struct OpenedSurfaceView: View {
             .padding(.vertical, 4)
             .background(GeometryReader { geo in
                 Color.clear.preference(key: TimelineLayoutKey.self,
-                                       value: TimelineLayoutValue(contentHeight: geo.size.height))
+                                       value: TimelineLayoutValue(
+                                        contentHeight: geo.size.height,
+                                        contentBottom: geo.frame(in: .named("island.timeline")).maxY
+                                       ))
             })
         }
         .coordinateSpace(name: "island.timeline")
@@ -233,8 +239,16 @@ struct OpenedSurfaceView: View {
     }
 
     private func rebuildTimeline() {
-        cachedItems = ConversationItem.items(from: model.mateMessages, liveCards: model.orders,
-                                             sourceLabels: model.liveCardSourceLabels)
+        let previousScrollIDs = Set(cachedItems.map(\.scrollID))
+        let items = ConversationItem.items(from: model.mateMessages, liveCards: model.orders,
+                                           sourceLabels: model.liveCardSourceLabels)
+        if didBuildTimeline {
+            model.timelineDidRefresh(previousScrollIDs: previousScrollIDs,
+                                     currentScrollIDs: Set(items.map(\.scrollID)),
+                                     isAtBottom: layoutTracker.isAtBottom)
+        }
+        didBuildTimeline = true
+        cachedItems = items
         rebuildDisplayRows()
     }
 
@@ -329,8 +343,10 @@ struct OpenedSurfaceView: View {
         let target = model.timelineScrollTarget ?? "timeline-bottom"
         let cardID = model.consumeTimelineHighlightCardID()
         highlightedCardID = cardID
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            proxy.scrollTo(target, anchor: target == "timeline-bottom" ? .bottom : .center)
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(target, anchor: target == "timeline-bottom" ? .bottom : .center)
+            }
         }
         guard let cardID else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -511,8 +527,14 @@ struct OpenedSurfaceView: View {
                             || liveCard.isFirstMates ? "First Mate"
                             : (worktreeName.isEmpty ? liveCard.project : worktreeName)))
                     : entry.sourceLabel,
-                onOption: { optionText in model.onOptionTapped?(liveCard, optionText) },
-                onDismiss: { model.onDismissOrder?(liveCard) },
+                onOption: { optionText in
+                    model.onOptionTapped?(liveCard, optionText)
+                    model.close()
+                },
+                onDismiss: {
+                    model.onDismissOrder?(liveCard)
+                    model.close()
+                },
                 onReveal: { model.revealCard(liveCard) }
             )
         } else {
@@ -675,6 +697,7 @@ struct OpenedSurfaceView: View {
                     .onTapGesture {
                         guard let card else { return }
                         model.onOptionTapped?(card, card.labels.indices.contains(index) ? card.labels[index] : option)
+                        model.close()
                     }
             }
             Spacer(minLength: 0)
@@ -950,6 +973,7 @@ private struct TimelineLayoutValue: Equatable {
     var cardCenters: [String: CGFloat] = [:]
     var viewportHeight: CGFloat = 0
     var contentHeight: CGFloat = 0
+    var contentBottom: CGFloat?
 }
 
 private struct TimelineLayoutKey: PreferenceKey {
@@ -959,6 +983,7 @@ private struct TimelineLayoutKey: PreferenceKey {
         value.cardCenters.merge(next.cardCenters, uniquingKeysWith: { _, new in new })
         if next.viewportHeight > 0 { value.viewportHeight = next.viewportHeight }
         if next.contentHeight > 0 { value.contentHeight = next.contentHeight }
+        if let contentBottom = next.contentBottom { value.contentBottom = contentBottom }
     }
 }
 
@@ -967,9 +992,14 @@ private struct TimelineLayoutKey: PreferenceKey {
 private final class TimelineLayoutTracker {
     var cardCenters: [String: CGFloat] = [:]
     var viewportHeight: CGFloat = 0
+    var isAtBottom = true
     private var lastRecordedAt: TimeInterval = 0
 
     func record(_ value: TimelineLayoutValue) {
+        if value.viewportHeight > 0, let contentBottom = value.contentBottom {
+            viewportHeight = value.viewportHeight
+            isAtBottom = contentBottom <= viewportHeight + 18
+        }
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastRecordedAt >= 0.1 else { return }
         lastRecordedAt = now
@@ -1314,7 +1344,6 @@ private struct WaitingCardView: View {
                         .lineLimit(messageExpanded ? nil : OpenedSurfaceView.cardPreviewLines)
                         .fixedSize(horizontal: false, vertical: true)
                         .contentShape(Rectangle())
-                        .onTapGesture { onReveal() }
                     if needsExpansion {
                         HStack(spacing: 3) {
                             Text(messageExpanded ? language.less : language.more)

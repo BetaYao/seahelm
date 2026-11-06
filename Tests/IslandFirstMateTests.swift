@@ -51,6 +51,34 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertNil(model.timelineScrollTarget)
     }
 
+    func testTimelineRefreshDoesNotRequestScrollWhenUserIsNotAtBottom() {
+        let model = IslandModel()
+        model.open(reason: .click)
+        let requestBeforeRefresh = model.timelineScrollRequest
+
+        model.timelineDidRefresh(previousScrollIDs: ["user:1"],
+                                 currentScrollIDs: ["user:1", "assistant:2"],
+                                 isAtBottom: false)
+
+        XCTAssertEqual(model.timelineScrollRequest, requestBeforeRefresh)
+    }
+
+    func testTimelineRefreshFollowsNewRowsOnlyWhenAlreadyAtBottom() {
+        let model = IslandModel()
+        model.open(reason: .click)
+        let requestBeforeRefresh = model.timelineScrollRequest
+
+        model.timelineDidRefresh(previousScrollIDs: ["user:1"],
+                                 currentScrollIDs: ["user:1", "assistant:2"],
+                                 isAtBottom: true)
+        XCTAssertEqual(model.timelineScrollRequest, requestBeforeRefresh + 1)
+
+        model.timelineDidRefresh(previousScrollIDs: ["user:1", "assistant:2"],
+                                 currentScrollIDs: ["user:1", "assistant:2"],
+                                 isAtBottom: true)
+        XCTAssertEqual(model.timelineScrollRequest, requestBeforeRefresh + 1)
+    }
+
     func testAutoOpenTargetsAndHighlightsTheNewCard() {
         let model = IslandModel()
         model.open(reason: .event, targetCardID: "new-card")

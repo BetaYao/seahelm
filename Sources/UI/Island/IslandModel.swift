@@ -276,6 +276,13 @@ final class IslandModel {
         timelineScrollRequest += 1
     }
 
+    /// New timeline rows follow only when the user was already at the bottom.
+    /// Content refreshes that merely update existing rows never move the view.
+    func timelineDidRefresh(previousScrollIDs: Set<String>, currentScrollIDs: Set<String>, isAtBottom: Bool) {
+        guard isAtBottom, !currentScrollIDs.subtracting(previousScrollIDs).isEmpty else { return }
+        requestTimelineScroll(toCardID: nil)
+    }
+
     /// The arrival highlight belongs to one scroll request only.
     func consumeTimelineHighlightCardID() -> String? {
         defer { timelineHighlightCardID = nil }

@@ -470,8 +470,14 @@ private final class IslandEventMonitors {
             lastMove = now
             mouseMoveHandler(NSEvent.mouseLocation)
         }
-        let onDown: (NSEvent) -> Void = { _ in
-            mouseDownHandler(NSEvent.mouseLocation)
+        let onDown: (NSEvent) -> Void = { event in
+            // Local events carry the authoritative location in their target
+            // window. NSEvent.mouseLocation can lag behind a mouse-down during
+            // panel hit-testing and misclassify text clicks as outside.
+            let location = event.window.map {
+                $0.convertPoint(toScreen: event.locationInWindow)
+            } ?? NSEvent.mouseLocation
+            mouseDownHandler(location)
         }
 
         if let m = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved, handler: { onMove($0); return $0 }) {
