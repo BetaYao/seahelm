@@ -295,7 +295,7 @@ impl Store {
         let n = self.lines.entry((key.clone(), is_card)).or_insert(0);
         *n += 1;
         let keep = if is_card { CARD_ROWS_PER_PANE } else { self.keep };
-        let threshold = if is_card { keep } else { keep + keep / 2 };
+        let threshold = keep + keep / 2;
         if *n > threshold {
             let matching: Vec<String> = Self::read_lines(&path).into_iter().filter(|line| {
                 Self::decode(line).is_some_and(|row| (row.kind == Kind::Card) == is_card)
@@ -458,7 +458,7 @@ mod tests {
     fn card_rows_have_separate_retention_from_conversation_rows() {
         let dir = tempfile::tempdir().unwrap();
         let mut hub = Hub::new(Some(Store::open(dir.path(), 2000)), 80);
-        for i in 0..205 {
+        for i in 0..305 {
             hub.append(vec![ev(&format!("conversation-{i}"), "a", "k", i as f64)]);
             let mut card = Message::new("seahelm-first-mate", "k", Kind::Card, i as f64 + 0.5).with_text(format!("card-{i}"));
             card.card_id = Some(format!("c-{i}"));
@@ -469,17 +469,19 @@ mod tests {
         assert_eq!(snapshot.iter().filter(|m| m.kind != Kind::Card).count(), 80);
         assert_eq!(snapshot.iter().filter(|m| m.kind == Kind::Card).count(), 200);
         assert!(snapshot.windows(2).all(|rows| rows[0].seq < rows[1].seq));
-        assert_eq!(snapshot.iter().find(|m| m.kind != Kind::Card).unwrap().text.as_deref(), Some("conversation-125"));
-        assert_eq!(snapshot.iter().find(|m| m.kind == Kind::Card).unwrap().text.as_deref(), Some("card-5"));
-        assert_eq!(std::fs::read_to_string(dir.path().join("k.cards.jsonl")).unwrap().lines().count(), 200);
+        assert_eq!(snapshot.iter().find(|m| m.kind != Kind::Card).unwrap().text.as_deref(), Some("conversation-225"));
+        assert_eq!(snapshot.iter().find(|m| m.kind == Kind::Card).unwrap().text.as_deref(), Some("card-105"));
+        let card_file_rows = std::fs::read_to_string(dir.path().join("k.cards.jsonl")).unwrap().lines().count();
+        assert!((201..=300).contains(&card_file_rows), "{card_file_rows}");
 
         let mut after_restart = Hub::new(Some(Store::open(dir.path(), 2000)), 80);
         let snapshot = after_restart.snapshot(Some("k"));
         assert_eq!(snapshot.iter().filter(|m| m.kind != Kind::Card).count(), 80);
         assert_eq!(snapshot.iter().filter(|m| m.kind == Kind::Card).count(), 200);
         assert!(snapshot.windows(2).all(|rows| rows[0].seq < rows[1].seq));
-        let (history, more) = after_restart.history("k", u64::MAX, 500);
-        assert_eq!(history.len(), 405);
+        assert_eq!(snapshot.iter().find(|m| m.kind == Kind::Card).unwrap().text.as_deref(), Some("card-105"));
+        let (history, more) = after_restart.history("k", u64::MAX, 600);
+        assert_eq!(history.len(), 505);
         assert!(!more);
     }
 

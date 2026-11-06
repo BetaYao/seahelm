@@ -122,9 +122,12 @@ struct State {
     observer: Option<first_mate::observations::Handle>,
     /// Every pane's message timeline (`message.*`).
     messages: seahelm_core_messages::Hub,
-    /// Source captured when each pending card row was written. A resolution
-    /// reuses this even after its source pane has been unregistered.
-    card_sources: HashMap<String, seahelm_core_messages::event::CardSource>,
+    /// The pending row itself is the source of truth for a card's resolution,
+    /// including after its originating pane has been unregistered.
+    pending_card_rows: HashMap<String, seahelm_core_messages::Message>,
+    /// Startup reconciliation waits for scans/replays before closing cards
+    /// left pending by the previous core process.
+    card_history_reconcile_at: Option<Timestamp>,
     /// The same stable handles used by pane.list and the command language.
     handles: Arc<Mutex<seahelm_core_command::Handles>>,
 }
@@ -191,18 +194,22 @@ impl Core {
         audit_path: PathBuf,
     ) -> Arc<Self> {
         let handles = Arc::new(Mutex::new(handles));
-        let mut card_sources = HashMap::new();
+        let mut pending_card_rows = HashMap::new();
+        let mut max_card_id = 0;
         for row in messages.snapshot(Some(fm_policy::SESSION)) {
             if row.kind != seahelm_core_messages::Kind::Card { continue; }
-            let Some(id) = row.card_id else { continue };
+            let Some(id) = row.card_id.clone() else { continue };
+            if let Some(number) = id.strip_prefix("c-").and_then(|value| value.parse::<u64>().ok()) {
+                max_card_id = max_card_id.max(number);
+            }
             if row.state.as_deref() == Some("pending") {
-                if let Some(source) = row.source {
-                    card_sources.insert(id, source);
-                }
+                pending_card_rows.insert(id, row);
             } else {
-                card_sources.remove(&id);
+                pending_card_rows.remove(&id);
             }
         }
+        let mut cards = Cards::new();
+        cards.reserve_ids_through(max_card_id);
         let session_refs_path = dir.join("core-agent-sessions.json");
         let session_refs = std::fs::read_to_string(&session_refs_path)
             .ok()
@@ -227,11 +234,12 @@ impl Core {
                 policy: NotificationPolicy::new(),
                 signals: CompletionSignals::new(),
                 retries: Vec::new(),
-                cards: Cards::new(),
+                cards,
                 first_mate: None,
                 observer: None,
                 messages,
-                card_sources,
+                pending_card_rows,
+                card_history_reconcile_at: Some(now() + 30.0),
                 handles: handles.clone(),
             }),
             changed: Condvar::new(),
@@ -299,6 +307,7 @@ impl Core {
         let now = now();
         let mut st = self.lock();
         let before = st.registry.seq();
+        let before_messages = st.messages.seq();
         for ((id, needs_probe, _), (_, snap, root)) in work.iter().zip(snaps) {
             if let Some(pid) = root {
                 if let Some(scan) = st.panes.get_mut(id) {
@@ -309,7 +318,7 @@ impl Core {
             st.scan_one(id, snap, if *needs_probe { table.as_ref() } else { None }, now);
         }
         st.timers(now);
-        let moved = st.registry.seq() != before;
+        let moved = st.registry.seq() != before || st.messages.seq() != before_messages;
         drop(st);
         if moved {
             self.changed.notify_all();
@@ -1715,7 +1724,7 @@ impl State {
         // Gone for good: its timeline goes too.
         self.messages.clear(pane);
         if pane == fm_policy::SESSION {
-            self.card_sources.clear();
+            self.pending_card_rows.clear();
         }
         self.panes.remove(pane);
         self.synced.remove(pane);
@@ -1912,6 +1921,12 @@ impl State {
         if self.cards.sweep_absent(now) {
             self.publish_cards();
         }
+        if self.card_history_reconcile_at.is_some_and(|at| at <= now)
+            && self.registry.pane(fm_policy::SESSION).is_some()
+        {
+            self.card_history_reconcile_at = None;
+            self.reconcile_orphan_card_rows(now);
+        }
         let (due, later): (Vec<Retry>, Vec<Retry>) = std::mem::take(&mut self.retries).into_iter().partition(|r| r.at <= now);
         self.retries = later;
         for r in due {
@@ -1941,22 +1956,38 @@ impl State {
     fn publish_cards(&mut self) {
         let changes = self.cards.take_changes();
         let mut rows = Vec::with_capacity(changes.len());
+        let mut pending_rows = self.pending_card_rows.clone();
         for change in changes {
             if self.registry.pane(fm_policy::SESSION).is_none() {
                 if change.state != CardState::Pending {
-                    self.card_sources.remove(&change.card.id);
+                    pending_rows.remove(&change.card.id);
                 }
                 continue;
             }
             let source = if change.state == CardState::Pending {
                 let source = self.card_source(&change.card);
-                self.card_sources.insert(change.card.id.clone(), source.clone());
-                source
-            } else if let Some(source) = self.card_sources.remove(&change.card.id) {
+                let mut pending = seahelm_core_messages::Message::new(
+                    fm_policy::SESSION,
+                    fm_policy::SESSION,
+                    seahelm_core_messages::Kind::Card,
+                    change.at,
+                )
+                .with_text(change.card.message.lines().next().unwrap_or_default().to_string());
+                pending.card_id = Some(change.card.id.clone());
+                pending.card_kind = Some(change.card.kind.as_str().to_string());
+                pending.source = Some(source.clone());
+                pending.options = Some(change.card.labels());
+                pending.state = Some(CardState::Pending.as_str().to_string());
+                pending_rows.insert(change.card.id.clone(), pending);
                 source
             } else {
-                // Do not write a resolution with no corresponding pending row.
-                continue;
+                // Copy the source from the pending row: pane resolution may
+                // now point at a different pane in the same worktree.
+                let Some(source) = pending_rows.remove(&change.card.id).and_then(|pending| pending.source) else {
+                    // Do not write a resolution with no corresponding pending row.
+                    continue;
+                };
+                source
             };
             let text = change.card.message.lines().next().unwrap_or_default().to_string();
             let mut row = seahelm_core_messages::Message::new(
@@ -1975,9 +2006,34 @@ impl State {
             row.via = change.via;
             rows.push(row);
         }
-        self.messages.append(rows);
+        for row in self.messages.append(rows) {
+            let Some(id) = row.card_id.clone() else { continue };
+            if row.state.as_deref() == Some(CardState::Pending.as_str()) {
+                pending_rows.insert(id, row);
+            } else {
+                pending_rows.remove(&id);
+            }
+        }
+        self.pending_card_rows = pending_rows;
         let cards = self.cards.to_json();
         self.registry.publish(json!({"type": "cards.changed", "cards": cards}));
+    }
+
+    fn reconcile_orphan_card_rows(&mut self, now: Timestamp) {
+        let orphaned: Vec<String> = self.pending_card_rows.keys()
+            .filter(|id| self.cards.get(id).is_none())
+            .cloned()
+            .collect();
+        let rows = orphaned.into_iter().filter_map(|id| {
+            let mut row = self.pending_card_rows.remove(&id)?;
+            row.seq = 0;
+            row.ts = now;
+            row.state = Some(CardState::Gone.as_str().to_string());
+            row.option = None;
+            row.via = None;
+            Some(row)
+        }).collect();
+        self.messages.append(rows);
     }
 
     fn card_source(&self, card: &seahelm_core_registry::cards::Card) -> seahelm_core_messages::event::CardSource {
@@ -3004,6 +3060,72 @@ mod card_timeline_tests {
         assert!(core.lock().cards.get(&id).is_some());
     }
 
+    #[test]
+    fn startup_marks_stale_pending_rows_gone_after_the_reconcile_delay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let message_dir = tmp.path().join("messages");
+        let mut persisted = seahelm_core_messages::Hub::new(
+            Some(seahelm_core_messages::hub::Store::open(&message_dir, 2000)),
+            80,
+        );
+        let mut old = seahelm_core_messages::Message::new(
+            fm_policy::SESSION,
+            fm_policy::SESSION,
+            seahelm_core_messages::Kind::Card,
+            1.0,
+        ).with_text("Old approval");
+        old.card_id = Some("c-1".into());
+        old.card_kind = Some("approval".into());
+        old.source = Some(seahelm_core_messages::event::CardSource {
+            pane: "seahelm-pane-1".into(),
+            label: "#1 · saas-mono".into(),
+        });
+        old.options = Some(vec!["Allow".into(), "Deny".into()]);
+        old.state = Some("pending".into());
+        persisted.append(vec![old]);
+        drop(persisted);
+
+        let messages = seahelm_core_messages::Hub::new(
+            Some(seahelm_core_messages::hub::Store::open(&message_dir, 2000)),
+            80,
+        );
+        let handles = seahelm_core_command::Handles::open(&tmp.path().join("handles.json"), None);
+        let core = Core::assemble(
+            ManifestStore::bundled(),
+            tmp.path(),
+            messages,
+            handles,
+            tmp.path().join("audit.jsonl"),
+        );
+        let mut st = core.lock();
+        st.card_history_reconcile_at = Some(30.0);
+
+        st.timers(30.0);
+        assert_eq!(card_rows(&st).len(), 1, "wait until First Mate's pane is registered");
+
+        st.register(first_mate_registration());
+        let live = st.cards.raise(Raise {
+            kind: Some(CardKind::Proposal),
+            worktree_path: "/workspace/first-mate".into(),
+            project: "First Mate".into(),
+            message: "Live after restart".into(),
+            options: vec!["Go".into()],
+            first_mate: true,
+            ..Raise::default()
+        }, 20.0).unwrap();
+        assert_eq!(live, "c-2", "card IDs continue past persisted timeline rows");
+        st.publish_cards();
+        assert!(card_rows(&st).iter().all(|row| row["card_id"] != "c-1" || row["state"] == "pending"));
+
+        st.timers(30.0);
+        let rows = card_rows(&st);
+        let old_rows: Vec<_> = rows.iter().filter(|row| row["card_id"] == "c-1").collect();
+        assert_eq!(old_rows.iter().map(|row| row["state"].as_str().unwrap()).collect::<Vec<_>>(), ["pending", "gone"]);
+        assert_eq!(old_rows[1]["source"], json!({"pane": "seahelm-pane-1", "label": "#1 · saas-mono"}));
+        assert_eq!(rows.iter().filter(|row| row["card_id"] == live && row["state"] == "pending").count(), 1);
+        assert!(!rows.iter().any(|row| row["card_id"] == live && row["state"] == "gone"));
+    }
+
     fn outcome(info: seahelm_core_registry::PaneInfo, kind: EventKind, status: AgentStatus) -> Outcome {
         let pane = info.id.clone();
         Outcome {
@@ -3036,5 +3158,52 @@ mod card_timeline_tests {
         let rows = card_rows(&st);
         assert_eq!(rows.iter().filter(|r| r["card_id"] == id).map(|r| r["state"].as_str().unwrap()).collect::<Vec<_>>(), ["pending", "gone"]);
         assert!(!st.cards.list().iter().any(|c| c.id == id));
+    }
+
+    #[test]
+    fn scanned_choice_text_update_keeps_id_and_appends_pending_update_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let mut st = core.lock();
+        st.register(registration());
+        st.register(first_mate_registration());
+        let info = st.registry.pane("seahelm-pane-1").unwrap().clone();
+        let question = |prompt: &str| {
+            let mut o = outcome(info.clone(), EventKind::Question {
+                prompt: prompt.into(),
+                options: vec!["Yes".into(), "No".into()],
+                followups: vec![],
+                flags: seahelm_core_types::QuestionFlags::default(),
+            }, AgentStatus::Waiting);
+            o.event.source = EventSource::Scan;
+            o
+        };
+        st.settle(&question("Continue with the current operation?"), 1.0);
+        let first = card_rows(&st);
+        let id = first[0]["card_id"].as_str().unwrap().to_string();
+        st.settle(&question("Continue with the updated operation?"), 2.0);
+
+        let rows: Vec<_> = card_rows(&st).into_iter().filter(|row| row["card_id"] == id).collect();
+        assert_eq!(rows.iter().map(|row| row["state"].as_str().unwrap()).collect::<Vec<_>>(), ["pending", "pending"]);
+        assert_eq!(rows[0]["text"], "Continue with the current operation?");
+        assert_eq!(rows[1]["text"], "Continue with the updated operation?");
+    }
+
+    #[test]
+    fn suggestion_refresh_appends_updated_pending_text_under_the_same_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let mut st = core.lock();
+        st.register(registration());
+        st.register(first_mate_registration());
+        let info = st.registry.pane("seahelm-pane-1").unwrap().clone();
+        st.settle(&outcome(info, EventKind::Suggest { options: vec!["Run tests".into()] }, AgentStatus::Idle), 1.0);
+        let id = card_rows(&st)[0]["card_id"].as_str().unwrap().to_string();
+        assert!(st.cards.refresh_suggestion("seahelm-pane-1", "The tests are ready.", 2.0));
+        st.publish_cards();
+
+        let rows: Vec<_> = card_rows(&st).into_iter().filter(|row| row["card_id"] == id).collect();
+        assert_eq!(rows.iter().map(|row| row["state"].as_str().unwrap()).collect::<Vec<_>>(), ["pending", "pending"]);
+        assert_eq!(rows[1]["text"], "The tests are ready.");
     }
 }
