@@ -267,7 +267,42 @@ fn ensure_repo(path: &Path) -> Result<(), String> {
     let mut repos = crate::discovery::RepoSet::open(config_dir.join(crate::discovery::FILE_NAME));
     repos.add(&path.to_string_lossy());
     repos.save().map_err(|e| e.to_string())?;
+    // The research agent starts in a worktree Claude Code has never seen and
+    // would wait at "Do you trust this folder?" until the run timed out.
+    // Claude Code trusts a worktree whose main repository is trusted, so
+    // trusting the repository the core made (and only that) once is enough.
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        if let Err(e) = trust_in_claude(&home.join(".claude.json"), path) {
+            eprintln!("seahelm-core: could not mark {} trusted for Claude Code: {e}", path.display());
+        }
+    }
     Ok(())
+}
+
+/// Mark `dir` trusted in Claude Code's own `~/.claude.json`
+/// (`projects.<dir>.hasTrustDialogAccepted`), keeping every other key as it
+/// is. Read-modify-rename; nothing is written when it is already trusted or
+/// the file does not exist (no Claude Code here).
+fn trust_in_claude(file: &Path, dir: &Path) -> Result<(), String> {
+    let Ok(text) = std::fs::read_to_string(file) else { return Ok(()) };
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).to_string_lossy().into_owned();
+    let Some(root) = v.as_object_mut() else { return Err("not a JSON object".into()) };
+    let projects = root.entry("projects").or_insert_with(|| json!({}));
+    let Some(projects) = projects.as_object_mut() else { return Err("projects is not an object".into()) };
+    let entry = projects.entry(key).or_insert_with(|| json!({}));
+    if entry.get("hasTrustDialogAccepted").and_then(Value::as_bool) == Some(true) {
+        return Ok(());
+    }
+    if let Some(o) = entry.as_object_mut() {
+        o.insert("hasTrustDialogAccepted".into(), json!(true));
+    }
+    let tmp = file.with_extension(format!("json.seahelm-{}", std::process::id()));
+    std::fs::write(&tmp, serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    if let Ok(meta) = std::fs::metadata(file) {
+        let _ = std::fs::set_permissions(&tmp, meta.permissions());
+    }
+    std::fs::rename(&tmp, file).map_err(|e| e.to_string())
 }
 fn committed_report(dir: &Path, path: &str, baseline: &str) -> Option<String> {
     let range = if baseline.is_empty() { "HEAD".to_string() } else { format!("{baseline}..HEAD") };
@@ -742,6 +777,26 @@ impl FirstMate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_research_repo_is_trusted_in_claude_code_once_keeping_the_rest() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join(".claude.json");
+        let repo = d.path().join("seahelm-research");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(&file, r#"{"numStartups":3,"projects":{"/other":{"hasTrustDialogAccepted":true,"x":1}}}"#).unwrap();
+        trust_in_claude(&file, &repo).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let key = repo.canonicalize().unwrap().to_string_lossy().into_owned();
+        assert_eq!(v["projects"][key.as_str()]["hasTrustDialogAccepted"], true);
+        assert_eq!(v["projects"]["/other"]["x"], 1);
+        assert_eq!(v["numStartups"], 3);
+        // No Claude Code: nothing is created.
+        let none = d.path().join("absent.json");
+        trust_in_claude(&none, &repo).unwrap();
+        assert!(!none.exists());
+    }
+
     #[test]
     fn rejects_paths_and_invalid_budgets() {
         let mut j = Job {

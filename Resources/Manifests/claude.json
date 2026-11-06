@@ -29,7 +29,8 @@
       "any": [
         { "contains": ["(y/n)"] },
         { "contains": ["(yes/no)"] },
-        { "contains": ["do you want to proceed?"] }
+        { "contains": ["do you want to proceed?"] },
+        { "contains": ["yes, i trust this folder"] }
       ],
       "visible_blocker": true
     },
