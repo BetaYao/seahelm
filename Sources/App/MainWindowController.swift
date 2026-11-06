@@ -89,6 +89,7 @@ class MainWindowController: NSWindowController {
 
     // Vibe-island notch overlay
     private let islandController = IslandPanelController()
+    private var configuredIslandLanguage = IslandLanguage.english
     private var islandMateTimer: Timer?
     private var islandMateFetching = false
     private var islandRefreshTimer: Timer?
@@ -2092,8 +2093,7 @@ extension MainWindowController {
         guard NSClassFromString("XCTestCase") == nil else { return }
 
         let model = islandController.model
-        let language = IslandLanguage.readConfig()
-        if model.language != language { model.language = language }
+        configuredIslandLanguage = IslandLanguage.readConfig()
         model.onNavigate = { [weak self] worktreePath, paneIndex in
             self?.tabCoordinator.handleNavigateToWorktree(worktreePath: worktreePath, paneIndex: paneIndex)
             self?.window?.makeKeyAndOrderFront(nil)
@@ -2102,8 +2102,8 @@ extension MainWindowController {
         model.onOptionTapped = { [weak self] order, optionText in
             self?.handleSuggestionTapped(order: order, optionText: optionText)
         }
-        model.onRevealSuggestion = { [weak self] order in
-            self?.revealSuggestionPane(order)
+        model.onRevealCardSource = { [weak self] order in
+            self?.revealCardPane(order)
         }
         model.onDismissOrder = { [weak self] order in
             self?.dismissOrder(order)
@@ -2161,9 +2161,8 @@ extension MainWindowController {
         refreshIsland()
     }
 
-    /// Jump to the pane that raised `order` without resolving the suggestion.
-    /// Used when the user taps blank area on an Island suggestion card.
-    private func revealSuggestionPane(_ card: Card) {
+    /// Jump to the pane that raised `card` without resolving it.
+    private func revealCardPane(_ card: Card) {
         let path = card.worktreePath
         tabCoordinator.handleNavigateToWorktree(worktreePath: path, paneIndex: nil)
         let terminalID = card.terminalID
@@ -2220,6 +2219,7 @@ extension MainWindowController {
     func refreshIslandFirstMate() {
         guard config.islandEnabled else { return }
         let model = islandController.model
+        if model.language != configuredIslandLanguage { model.language = configuredIslandLanguage }
         let firstMate = tabCoordinator.firstMate
         let (word, _) = FirstMateStateText.describe(firstMate.state.activity, isChinese: model.language.isChinese)
         let tone = FirstMateStateText.tone(firstMate.state)
@@ -2469,8 +2469,7 @@ extension MainWindowController: SettingsDelegate {
         tabCoordinator.applyAutopilotConfig()
         updateCoordinator.config = merged
         dashboardVC?.integrationEnabled = merged.integrationEnabled
-        let language = IslandLanguage.readConfig()
-        if islandController.model.language != language { islandController.model.language = language }
+        configuredIslandLanguage = IslandLanguage.readConfig()
         refreshIsland()
         normalizeBackendAvailabilityIfNeeded()
 

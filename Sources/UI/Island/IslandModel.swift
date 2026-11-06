@@ -10,6 +10,15 @@ enum IslandStyle {
     static let background = Color(red: 0.016, green: 0.055, blue: 0.066)
 }
 
+enum IslandCardOptionStyle: Equatable {
+    case compactChips
+    case fullWidthRows
+
+    static func forKind(_ kind: Card.Kind) -> IslandCardOptionStyle {
+        kind == .suggestion ? .compactChips : .fullWidthRows
+    }
+}
+
 /// One row in the island — a worktree's aggregated agent state.
 struct IslandAgentRow: Identifiable, Equatable {
     let id: String // worktreePath
@@ -196,8 +205,8 @@ final class IslandModel {
     // Wired by MainWindowController.
     var onNavigate: ((_ worktreePath: String, _ paneIndex: Int?) -> Void)?
     var onOptionTapped: ((_ card: Card, _ optionText: String) -> Void)?
-    /// Jump to the pane that raised a suggestion without resolving the card.
-    var onRevealSuggestion: ((_ card: Card) -> Void)?
+    /// Jump to the pane that raised a card without resolving it.
+    var onRevealCardSource: ((_ card: Card) -> Void)?
     /// Dismiss a suggestion card without acting on it.
     var onDismissOrder: ((_ card: Card) -> Void)?
     /// Bridge command submit (same handler as the First Mate composer).
@@ -267,6 +276,13 @@ final class IslandModel {
         timelineScrollRequest += 1
     }
 
+    /// New timeline rows follow only when the user was already at the bottom.
+    /// Content refreshes that merely update existing rows never move the view.
+    func timelineDidRefresh(previousScrollIDs: Set<String>, currentScrollIDs: Set<String>, isAtBottom: Bool) {
+        guard isAtBottom, !currentScrollIDs.subtracting(previousScrollIDs).isEmpty else { return }
+        requestTimelineScroll(toCardID: nil)
+    }
+
     /// The arrival highlight belongs to one scroll request only.
     func consumeTimelineHighlightCardID() -> String? {
         defer { timelineHighlightCardID = nil }
@@ -280,6 +296,33 @@ final class IslandModel {
         isFilteringTimeline = false
         pendingCommandFocus = true
         requestTimelineScroll(toCardID: nil)
+    }
+
+    func answerCard(_ card: Card, optionText: String) {
+        onOptionTapped?(card, optionText)
+    }
+
+    func dismissCard(_ card: Card) {
+        onDismissOrder?(card)
+    }
+
+    func stopFirstMate() {
+        onInterruptFirstMate?()
+        focusFirstMateComposer()
+    }
+
+    /// Card content is a navigation target; its answer controls remain owned
+    /// by the live CardDeck card. First Mate cards stay in the island and keep
+    /// the current conversation position.
+    func revealCard(_ card: Card) {
+        if card.paneSessionKey == FirstMatePane.sessionName || card.isFirstMates {
+            if !isOpened {
+                open(reason: .click)
+            }
+            return
+        }
+        onRevealCardSource?(card)
+        close()
     }
 
     /// Brief scale "pop" of the closed pill to draw attention to a new event.

@@ -51,6 +51,76 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertNil(model.timelineScrollTarget)
     }
 
+    func testTimelineRefreshDoesNotRequestScrollWhenUserIsNotAtBottom() {
+        let model = IslandModel()
+        model.open(reason: .click)
+        let requestBeforeRefresh = model.timelineScrollRequest
+
+        model.timelineDidRefresh(previousScrollIDs: ["user:1"],
+                                 currentScrollIDs: ["user:1", "assistant:2"],
+                                 isAtBottom: false)
+
+        XCTAssertEqual(model.timelineScrollRequest, requestBeforeRefresh)
+    }
+
+    func testTimelineRefreshFollowsNewRowsOnlyWhenAlreadyAtBottom() {
+        let model = IslandModel()
+        model.open(reason: .click)
+        let requestBeforeRefresh = model.timelineScrollRequest
+
+        model.timelineDidRefresh(previousScrollIDs: ["user:1"],
+                                 currentScrollIDs: ["user:1", "assistant:2"],
+                                 isAtBottom: true)
+        XCTAssertEqual(model.timelineScrollRequest, requestBeforeRefresh + 1)
+
+        model.timelineDidRefresh(previousScrollIDs: ["user:1", "assistant:2"],
+                                 currentScrollIDs: ["user:1", "assistant:2"],
+                                 isAtBottom: true)
+        XCTAssertEqual(model.timelineScrollRequest, requestBeforeRefresh + 1)
+    }
+
+    func testAnsweringCardLeavesIslandOpenAndShowsOtherWaitingCards() {
+        let answered = order("answered", kind: .question)
+        let next = order("next", kind: .approval)
+        let model = IslandModel()
+        model.orders = [answered, next]
+        model.open(reason: .click)
+        model.toggleTimelineFilter()
+        var answer: (String, String)?
+        model.onOptionTapped = { card, option in
+            answer = (card.id, option)
+            model.orders = model.orders.filter { $0.id != card.id }
+        }
+
+        model.answerCard(answered, optionText: "Approve")
+
+        XCTAssertEqual(answer?.0, answered.id)
+        XCTAssertEqual(answer?.1, "Approve")
+        XCTAssertTrue(model.isOpened)
+        XCTAssertTrue(model.isFilteringTimeline)
+        XCTAssertEqual(model.pendingCardCount, 1)
+        XCTAssertEqual(model.orders.map(\.id), [next.id])
+    }
+
+    func testStoppingFirstMateKeepsIslandOpenAndFocusesComposer() {
+        let model = IslandModel()
+        model.orders = [order("pending", kind: .question)]
+        model.open(reason: .click)
+        model.toggleTimelineFilter()
+        var interrupted = false
+        model.onInterruptFirstMate = { interrupted = true }
+        let priorScrollRequest = model.timelineScrollRequest
+
+        model.stopFirstMate()
+
+        XCTAssertTrue(interrupted)
+        XCTAssertTrue(model.isOpened)
+        XCTAssertFalse(model.isFilteringTimeline)
+        XCTAssertTrue(model.pendingCommandFocus)
+        XCTAssertEqual(model.timelineScrollRequest, priorScrollRequest + 1)
+        XCTAssertNil(model.timelineScrollTarget)
+    }
+
     func testAutoOpenTargetsAndHighlightsTheNewCard() {
         let model = IslandModel()
         model.open(reason: .event, targetCardID: "new-card")
@@ -202,6 +272,49 @@ final class IslandFirstMateTests: XCTestCase {
             return XCTFail("Expected a fallback live card row")
         }
         XCTAssertEqual(fallbackEntry.sourceLabel, "feature/island")
+    }
+
+    func testLiveCardBodyRevealNavigatesToItsPaneButFirstMateCardsStayInTheTimeline() throws {
+        let worktreeCard = try XCTUnwrap(Card(json: [
+            "id": "worktree-question", "kind": "question", "pane_session_key": "worktree-pane",
+            "project": "seahelm", "worktree_path": "/repo/worktrees/feature", "message": "Pick one",
+            "options": ["A", "B"],
+        ], terminalID: { _, _ in "terminal-7" }))
+        let firstMateCard = try XCTUnwrap(Card(json: [
+            "id": "first-mate-proposal", "kind": "proposal", "pane_session_key": FirstMatePane.sessionName,
+            "project": "seahelm", "message": "Choose a next step", "options": ["Continue", "Stop"],
+        ], terminalID: { _, _ in "first-mate" }))
+
+        let model = IslandModel()
+        var revealed: [Card] = []
+        model.onRevealCardSource = { revealed.append($0) }
+        model.open(reason: .click)
+        model.revealCard(worktreeCard)
+        XCTAssertEqual(revealed.map(\.id), [worktreeCard.id])
+        XCTAssertFalse(model.isOpened, "A worktree card returns to its pane in the dashboard")
+
+        model.orders = [order("pending", kind: .question)]
+        model.open(reason: .click)
+        model.toggleTimelineFilter()
+        let requestBeforeReveal = model.timelineScrollRequest
+        let targetBeforeReveal = model.timelineScrollTarget
+        model.revealCard(firstMateCard)
+        XCTAssertEqual(revealed.map(\.id), [worktreeCard.id], "First Mate cards do not navigate to a worktree")
+        XCTAssertTrue(model.isOpened)
+        XCTAssertTrue(model.isFilteringTimeline)
+        XCTAssertEqual(model.timelineScrollTarget, targetBeforeReveal)
+        XCTAssertEqual(model.timelineScrollRequest, requestBeforeReveal, "Tapping a First Mate card leaves the viewport in place")
+    }
+
+    func testWaitingCardMessageFoldsToThreeLinesAndSuggestionsUseCompactOptions() {
+        let longMessage = (1...20).map { "Final message line \($0)" }.joined(separator: "\n")
+        XCTAssertEqual(OpenedSurfaceView.cardPreviewLines, 3)
+        XCTAssertTrue(OpenedSurfaceView.cardMessageNeedsExpansion(longMessage))
+        XCTAssertFalse(OpenedSurfaceView.cardMessageNeedsExpansion("Choose the next step"))
+        XCTAssertEqual(IslandCardOptionStyle.forKind(.suggestion), .compactChips)
+        XCTAssertEqual(IslandCardOptionStyle.forKind(.question), .fullWidthRows)
+        XCTAssertEqual(IslandCardOptionStyle.forKind(.choice), .fullWidthRows)
+        XCTAssertEqual(IslandCardOptionStyle.forKind(.approval), .fullWidthRows)
     }
 
     func testFleetCardSourceLabelUsesWorktreeNameInsteadOfProject() {
