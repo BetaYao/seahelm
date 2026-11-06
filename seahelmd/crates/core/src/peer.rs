@@ -67,7 +67,11 @@ pub enum Verdict {
     Client { client: Client, in_pane: Option<String> },
     /// Not in a pane: the user's own terminal, a launchd job.
     Outside,
-    /// Inside a seahelm pane, and why.
+    /// The user's own shell in a seahelm pane: inside a pane, and no AI
+    /// agent among its ancestors. Allowed unless something typed into that
+    /// pane a moment ago (checked by the core, which knows; `pane`).
+    OwnShell { pane: String },
+    /// Inside a seahelm pane under an agent (or unknown which pane), and why.
     InPane(String),
     /// Could not tell. Refused: a guard that opens when it cannot look is no
     /// guard.
@@ -77,7 +81,7 @@ pub enum Verdict {
 impl Verdict {
     #[cfg(test)]
     pub fn allowed(&self) -> bool {
-        matches!(self, Verdict::Client { .. } | Verdict::Outside)
+        matches!(self, Verdict::Client { .. } | Verdict::Outside | Verdict::OwnShell { .. })
     }
 }
 
@@ -97,12 +101,38 @@ pub fn classify(f: &Facts) -> Verdict {
         return Verdict::Client { client, in_pane };
     }
     match in_pane {
-        Some(why) => Verdict::InPane(why),
+        Some(why) => match agent_in(&f.chain) {
+            Some(agent) => Verdict::InPane(format!("{why}, under an AI agent ({agent})")),
+            None => match pane_of(f) {
+                Some(pane) => Verdict::OwnShell { pane },
+                None => Verdict::InPane(why),
+            },
+        },
         None if f.env.is_none() && peer.exe.is_empty() => {
             Verdict::Unknown(format!("pid {} could not be read", peer.pid))
         }
         None => Verdict::Outside,
     }
+}
+
+/// The AI agent among the peer's ancestors, as the status manifests know
+/// agents (claude, codex, cursor-agent, opencode, aider, …): `name (pid)`.
+fn agent_in(chain: &[Proc]) -> Option<String> {
+    static STORE: std::sync::OnceLock<seahelm_core_scan::manifest::ManifestStore> = std::sync::OnceLock::new();
+    let store = STORE.get_or_init(seahelm_core_scan::manifest::ManifestStore::bundled);
+    chain.iter().find_map(|p| {
+        let argv: Vec<&str> = if p.argv.is_empty() { vec![p.exe.as_str()] } else { p.argv.iter().map(String::as_str).collect() };
+        let scan = seahelm_core_scan::process::Proc::new(p.pid, p.ppid, &argv);
+        seahelm_core_scan::process::identify(std::slice::from_ref(&scan), store.all().map(|c| &c.manifest)).map(|id| format!("{id}, pid {}", p.pid))
+    })
+}
+
+/// The pane a peer's shell runs in: the nearest seahelmd session among its
+/// real ancestors. Never from the environment alone: a process that detached
+/// (reparented to launchd) has shed the agent that started it from its chain
+/// but still carries the pane's variables, and must not pass as the user.
+fn pane_of(f: &Facts) -> Option<String> {
+    f.chain.iter().find_map(session_of)
 }
 
 /// Why a peer counts as inside a pane, if it does: a pane variable in its
@@ -276,7 +306,21 @@ mod tests {
             chain: vec![proc_(300, 200, "/usr/local/bin/node", &["claude"]), proc_(200, 100, "/bin/zsh", &["-zsh"]), session(100, "seahelm-task-x"), launchd()],
             env: env(&[("PATH", "/usr/bin")]),
         };
-        assert_eq!(classify(&f), Verdict::InPane("it runs under seahelmd session seahelm-task-x (pid 100)".into()));
+        assert_eq!(classify(&f), Verdict::InPane("it runs under seahelmd session seahelm-task-x (pid 100), under an AI agent (claude, pid 300)".into()));
+        // Codex the same.
+        let f = Facts { chain: vec![proc_(310, 300, "/bin/zsh", &["zsh", "-c", "seahelm"]), proc_(300, 100, "/opt/homebrew/bin/codex", &["codex"]), session(100, "s"), launchd()], env: env(&[]) };
+        assert!(matches!(classify(&f), Verdict::InPane(w) if w.contains("codex")));
+    }
+
+    #[test]
+    fn the_users_own_shell_in_a_pane_is_their_own() {
+        // seahelm → zsh → seahelmd __serve: the user typing in a pane.
+        let f = Facts {
+            chain: vec![proc_(300, 200, &format!("{BIN}/seahelm"), &["seahelm", "schedule", "add"]), proc_(200, 100, "/bin/zsh", &["-zsh"]), session(100, "seahelm-task-x"), launchd()],
+            env: env(&[("SEAHELMD_SESSION", "seahelm-task-x"), ("SEAHELM_PANE_ID", "seahelm-task-x")]),
+        };
+        assert_eq!(classify(&f), Verdict::OwnShell { pane: "seahelm-task-x".into() });
+        assert!(classify(&f).allowed());
     }
 
     #[test]
@@ -285,6 +329,8 @@ mod tests {
         // still carries the pane's id.
         let f = Facts { chain: vec![proc_(300, 1, "/usr/bin/python3", &["python3", "answer.py"]), launchd()], env: env(&[("SEAHELM_PANE_ID", "seahelm-first-mate")]) };
         assert_eq!(classify(&f), Verdict::InPane("its environment carries SEAHELM_PANE_ID=seahelm-first-mate".into()));
+        // Detached with the session in its environment but not its ancestry:
+        // not the user's shell.
         let f = Facts { chain: vec![proc_(300, 1, "/bin/sh", &["sh"]), launchd()], env: env(&[("SEAHELMD_SESSION", "s1")]) };
         assert!(matches!(classify(&f), Verdict::InPane(w) if w.contains("SEAHELMD_SESSION=s1")));
         // An empty value names no pane.
@@ -341,9 +387,10 @@ mod tests {
             let f = Facts { chain: vec![proc_(9, 1, &exe, &["seahelm", "cards"]), launchd()], env: env(&[("SEAHELM_PANE_ID", "p")]) };
             assert!(matches!(classify(&f), Verdict::InPane(_)), "{exe}");
         }
-        // Nor a binary merely named Seahelm outside a bundle.
+        // Nor a binary merely named Seahelm outside a bundle (in a pane with
+        // no agent above it, it is just the user's shell's child).
         let f = Facts { chain: vec![proc_(9, 1, "/tmp/MacOS/Seahelm", &[]), session(2, "s")], env: env(&[]) };
-        assert!(matches!(classify(&f), Verdict::InPane(_)));
+        assert!(!matches!(classify(&f), Verdict::Client { .. }));
     }
 
     #[test]

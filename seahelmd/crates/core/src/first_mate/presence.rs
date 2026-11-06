@@ -288,6 +288,13 @@ impl Tracker {
         self.typed_into.entry(pane.to_string()).or_default().push((echo_key(text), now));
     }
 
+    /// Whether anything other than the user's keyboard typed into this pane
+    /// within `secs`: a user-only call from that pane's shell may be an
+    /// agent driving it (`pane.run` into the user's shell).
+    pub fn typed_within(&self, pane: &str, secs: f64, now: f64) -> bool {
+        self.typed_into.get(pane).is_some_and(|v| v.iter().any(|(_, at)| now - *at <= secs))
+    }
+
     /// Whether a prompt that showed up in this pane now is the echo of
     /// something typed into it: anything typed a moment ago, or the same
     /// text within `PROGRAMMATIC_ECHO_TEXT`.
