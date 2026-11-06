@@ -7,10 +7,10 @@ import SwiftUI
 /// inside this fixed transparent window. Clicks outside the current visual
 /// content pass through via `IslandHostingView.hitTest`.
 final class IslandPanelController {
-    static let maxOpenedContentHeight: CGFloat = 520
     private static let shadowInset: CGFloat = 24
 
     let model = IslandModel()
+    var maxOpenedContentHeight: CGFloat { model.maxOpenedContentHeight }
 
     private var panel: IslandPanel?
     private var eventMonitors = IslandEventMonitors()
@@ -120,7 +120,7 @@ final class IslandPanelController {
 
     /// ⌘J again shuts what ⌘J opened.
     func toggleFirstMate() {
-        if model.isOpened, model.page == .conversation {
+        if model.isOpened {
             closeCommandBar()
         } else {
             openFirstMate()
@@ -145,12 +145,12 @@ final class IslandPanelController {
         guard let panel else { return }
         if !panel.isVisible { panel.orderFrontRegardless() }
         prepare()
-        model.open(reason: .click, page: .conversation)
+        model.open(reason: .click)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKey()
     }
 
-    /// Auto-expand for an arriving suggestion so the card is visible without
+    /// Auto-expand for an arriving card so it is visible without
     /// hovering. Collapses again after a timeout if the pointer never comes,
     /// or as soon as it leaves after having engaged.
     ///
@@ -159,13 +159,13 @@ final class IslandPanelController {
     /// sidebar carries it. Frontmost on a *different* worktree still pops —
     /// that sidebar shows its own worktree's cards, so nothing else would
     /// surface this one and it used to arrive silently.
-    func openForEvent(targetVisible: Bool) {
+    func openForEvent(targetVisible: Bool, targetCardID: String) {
         guard !(NSApp.isActive && targetVisible) else { return }
         guard let panel, !model.isOpened else { return }
         if !panel.isVisible { updateVisibility() }
         guard panel.isVisible else { return }
         eventOpenEngaged = false
-        model.open(reason: .event)
+        model.open(reason: .event, targetCardID: targetCardID)
         scheduleEventAutoClose()
     }
 
@@ -290,11 +290,12 @@ final class IslandPanelController {
                 : 30
         }
         model.openedWidth = max(360, min(540, screen.visibleFrame.width - 32))
+        model.maxOpenedContentHeight = IslandModel.openedContentHeight(forVisibleHeight: screen.visibleFrame.height)
     }
 
     private func panelFrame(on screen: NSScreen) -> NSRect {
         let width = model.openedWidth + Self.shadowInset * 2
-        let height = model.notchHeight + Self.maxOpenedContentHeight
+        let height = model.notchHeight + maxOpenedContentHeight
         return NSRect(
             x: screen.frame.midX - width / 2,
             y: screen.frame.maxY - height,
@@ -310,8 +311,8 @@ final class IslandPanelController {
         let frame = panel.frame
         if model.isOpened {
             let height = model.measuredOpenedHeight > 0
-                ? min(model.measuredOpenedHeight, Self.maxOpenedContentHeight)
-                : Self.maxOpenedContentHeight
+                ? min(model.measuredOpenedHeight, maxOpenedContentHeight)
+                : maxOpenedContentHeight
             return NSRect(
                 x: frame.midX - model.openedWidth / 2,
                 y: frame.maxY - height,

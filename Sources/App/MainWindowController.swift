@@ -2138,7 +2138,7 @@ extension MainWindowController {
             self?.tabCoordinator.firstMate.interrupt()
         }
         islandController.install()
-        // The conversation reads First Mate's timeline while it shows.
+        // The opened island reads First Mate's timeline while it shows.
         islandMateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refreshIslandConversation()
         }
@@ -2228,10 +2228,10 @@ extension MainWindowController {
         if model.mateBusy != busy { model.mateBusy = busy }
     }
 
-    /// While the conversation is on screen: First Mate's timeline, read off main.
+    /// While the opened island is on screen: First Mate's timeline, read off main.
     fileprivate func refreshIslandConversation() {
         let model = islandController.model
-        guard config.islandEnabled, model.isOpened, model.page == .conversation, !islandMateFetching else { return }
+        guard config.islandEnabled, model.isOpened, !islandMateFetching else { return }
         islandMateFetching = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let messages = FirstMateLink.timeline()
@@ -2317,7 +2317,9 @@ extension MainWindowController {
             let targetVisible = fresh.allSatisfy {
                 tabCoordinator.isWorktreeVisible($0.worktreePath)
             }
-            islandController.openForEvent(targetVisible: targetVisible)
+            if let target = fresh.first(where: { !$0.options.isEmpty }) {
+                islandController.openForEvent(targetVisible: targetVisible, targetCardID: target.id)
+            }
         }
         islandController.updateVisibility()
     }

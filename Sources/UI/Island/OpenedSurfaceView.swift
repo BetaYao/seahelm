@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// Expanded island (docs/superpowers/specs/2026-11-04-first-mate-surfaces-design.md):
-/// the usage bar on top, then one of two pages — the cards waiting on the user
-/// with an entry to First Mate pinned under them, or First Mate's conversation
-/// with its composer. Status notifications are not mirrored here.
+/// Expanded island: First Mate's conversation and durable card rows share one
+/// timeline, with the same composer underneath. Status notifications are not
+/// mirrored here.
 struct OpenedSurfaceView: View {
     @Bindable var model: IslandModel
     @FocusState private var commandFocused: Bool
@@ -12,40 +11,41 @@ struct OpenedSurfaceView: View {
     @State private var menuTrigger: Character = "/"
     @State private var menuToken = ""
     /// Assistant rows opened past their first lines.
-    @State private var expanded: Set<UInt64> = []
+    @State private var expanded: Set<String> = []
+    @State private var expandedTimelineRuns: Set<String> = []
+    @State private var cardVerticalCenters: [String: CGFloat] = [:]
+    @State private var timelineViewportHeight: CGFloat = 0
+    @State private var highlightedCardID: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // The root's header band already spans the hardware notch; just
-            // leave breathing room below it.
-            Color.clear.frame(height: 6)
+        ScrollViewReader { proxy in
+            VStack(alignment: .leading, spacing: 0) {
+                // The root's header band already spans the hardware notch.
+                Color.clear.frame(height: 6)
 
-            VStack(alignment: .leading, spacing: 10) {
-                header
-                if let warning = model.warning {
-                    warningBanner(warning.message)
-                }
-                switch model.page {
-                case .suggestions:
-                    suggestionsTitle
-                    cardList
-                    conversationEntry
-                case .conversation:
-                    conversationTitle
-                    conversation
+                VStack(alignment: .leading, spacing: 10) {
+                    titleRow(using: proxy)
+                    if let warning = model.warning {
+                        warningBanner(warning.message)
+                    }
+                    timeline
                     composer
                 }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 14)
+            .frame(width: model.openedWidth)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.warning)
+            .onAppear {
+                consumePrefill()
+                consumeFocusRequest()
+                performRequestedScroll(using: proxy)
+            }
+            .onChange(of: model.pendingCommandPrefill) { consumePrefill() }
+            .onChange(of: model.pendingCommandFocus) { consumeFocusRequest() }
+            .onChange(of: model.timelineScrollRequest) { performRequestedScroll(using: proxy) }
         }
-        .frame(width: model.openedWidth)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.orders)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.page)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.warning)
-        .onAppear { consumePrefill(); consumeFocusRequest() }
-        .onChange(of: model.pendingCommandPrefill) { consumePrefill() }
-        .onChange(of: model.pendingCommandFocus) { consumeFocusRequest() }
     }
 
     /// The control channel is the island's supply line. With it down, the rows
@@ -75,74 +75,13 @@ struct OpenedSurfaceView: View {
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
-    // MARK: - Suggestions
+    // MARK: - Timeline
 
-    private static let maxListHeight: CGFloat = 380
-
-    private var suggestionsTitle: some View {
-        HStack(spacing: 8) {
-            Text("⎈").font(.system(size: 13)).foregroundStyle(IslandStyle.accent)
-            Text("First Mate")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-            Spacer(minLength: 0)
-            Text("\(model.orders.count) waiting for you")
-                .font(.system(size: 11))
-                .foregroundStyle(.yellow.opacity(0.85))
-        }
+    private var maxTimelineHeight: CGFloat {
+        max(180, model.maxOpenedContentHeight - 205)
     }
 
-    /// Scrolls inside itself past the cap; the entry under it stays put.
-    private var cardList: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(model.orders) { order in
-                    SuggestionCard(order: order,
-                                   onOption: { optionText in model.onOptionTapped?(order, optionText) },
-                                   onDismiss: { model.onDismissOrder?(order) },
-                                   onReveal: {
-                                       model.onRevealSuggestion?(order)
-                                       model.close()
-                                   })
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-            .background(GeometryReader { geo in
-                Color.clear.preference(key: ListHeightKey.self, value: geo.size.height)
-            })
-        }
-        .frame(height: model.cachedListHeight > 0 ? min(model.cachedListHeight, Self.maxListHeight) : nil)
-        .onPreferenceChange(ListHeightKey.self) { height in
-            // Ignore the 0 that fires as this view goes; it would wipe the cache.
-            if height > 0 { model.cachedListHeight = height }
-        }
-    }
-
-    /// Not a field: a way into the conversation. The cards stay where they are.
-    private var conversationEntry: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(IslandStyle.accent.opacity(0.8))
-            Text(model.draft.isEmpty ? "Hand it to First Mate…" : model.draft)
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(model.draft.isEmpty ? 0.45 : 0.85))
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(fieldBackground(focused: false))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            model.page = .conversation
-            DispatchQueue.main.async { commandFocused = true }
-        }
-    }
-
-    // MARK: - Conversation
-
-    private var conversationTitle: some View {
+    private func titleRow(using proxy: ScrollViewProxy) -> some View {
         HStack(spacing: 8) {
             Text("⎈").font(.system(size: 13)).foregroundStyle(IslandStyle.accent)
             Text("First Mate")
@@ -156,10 +95,52 @@ struct OpenedSurfaceView: View {
             if model.mateBusy {
                 pill("Stop", systemImage: "stop.fill", tint: .white.opacity(0.75)) { model.onInterruptFirstMate?() }
             }
-            if !model.orders.isEmpty {
-                pill("Suggestions \(model.orders.count)", systemImage: nil, tint: .yellow) { model.page = .suggestions }
+            if model.pendingCardCount > 0 || model.isFilteringTimeline {
+                filterPill {
+                    let turningOn = !model.isFilteringTimeline
+                    let items = ConversationItem.items(from: model.mateMessages, liveCards: model.orders)
+                    let anchor = nearestCardID(in: items, filtering: turningOn)
+                    let oldCenter = anchor.flatMap { cardVerticalCenters[$0] } ?? timelineViewportHeight / 2
+                    let anchorY = min(max(oldCenter / max(timelineViewportHeight, 1), 0.08), 0.92)
+                    model.toggleTimelineFilter()
+                    if let anchor {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            proxy.scrollTo("card:\(anchor)", anchor: UnitPoint(x: 0.5, y: anchorY))
+                        }
+                    }
+                }
             }
         }
+    }
+
+    private func filterPill(action: @escaping () -> Void) -> some View {
+        let tint: Color = model.isFilteringTimeline ? IslandStyle.accent : .yellow
+        return HStack(spacing: 4) {
+            Image(systemName: model.isFilteringTimeline ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                .font(.system(size: 9, weight: .bold))
+            Text(IslandLanguage.todoCount(model.pendingCardCount))
+                .font(.system(size: 10.5, weight: .semibold))
+        }
+        .foregroundStyle(model.isFilteringTimeline ? Color.black.opacity(0.88) : tint)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(tint.opacity(model.isFilteringTimeline ? 0.95 : 0.14)))
+        .contentShape(Capsule())
+        .onTapGesture(perform: action)
+        .accessibilityIdentifier("island.timeline.filter")
+    }
+
+    private func nearestCardID(in items: [ConversationItem], filtering: Bool) -> String? {
+        let liveCards = Dictionary(model.orders.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let cards = items.compactMap { item -> (String, CGFloat)? in
+            guard case let .card(entry) = item.kind else { return nil }
+            if filtering, entry.effectiveState(liveCard: liveCards[entry.id]) != .pending { return nil }
+            guard let center = cardVerticalCenters[entry.id] else { return nil }
+            return (entry.id, center)
+        }
+        return cards.min { lhs, rhs in
+            abs(lhs.1 - timelineViewportHeight / 2) < abs(rhs.1 - timelineViewportHeight / 2)
+        }?.0
     }
 
     private var toneColor: Color {
@@ -189,36 +170,205 @@ struct OpenedSurfaceView: View {
     /// First Mate's column: everything it says sits right of the event icons.
     private static let gutter: CGFloat = 26
 
-    private var conversation: some View {
-        let items = ConversationItem.items(from: model.mateMessages)
-        return ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 7) {
-                    if items.isEmpty {
-                        Text(model.mateRunning ? "Nothing said yet. Ask First Mate anything — a `/command` runs as one."
-                                               : "First Mate is off. Turn it on in Settings ▸ First Mate.")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.white.opacity(0.45))
-                            .padding(.vertical, 8)
-                    }
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        row(item)
-                            .id(item.id)
-                            // A new section (an event, the user speaking) gets air above it.
-                            .padding(.top, index > 0 && Self.startsSection(item) ? 12 : 0)
+    private var timeline: some View {
+        let items = ConversationItem.items(from: model.mateMessages, liveCards: model.orders)
+        let displayRows = Self.timelineRows(from: items, filtering: model.isFilteringTimeline, liveCards: model.orders)
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 7) {
+                if items.isEmpty {
+                    Text(model.mateRunning ? "Nothing said yet. Ask First Mate anything — a `/command` runs as one."
+                                           : "First Mate is off. Turn it on in Settings ▸ First Mate.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .padding(.vertical, 8)
+                }
+                ForEach(Array(displayRows.enumerated()), id: \.element.id) { index, displayRow in
+                    timelineRow(displayRow)
+                        .padding(.top, index > 0 && displayRow.startsSection ? 12 : 0)
+                }
+                Color.clear.frame(height: 1).id("timeline-bottom")
+            }
+            .padding(.vertical, 4)
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: TimelineLayoutKey.self,
+                                       value: TimelineLayoutValue(contentHeight: geo.size.height))
+            })
+        }
+        .coordinateSpace(name: "island.timeline")
+        .overlay(GeometryReader { geo in
+            Color.clear.preference(key: TimelineLayoutKey.self,
+                                   value: TimelineLayoutValue(viewportHeight: geo.size.height))
+        })
+        .frame(height: model.cachedListHeight > 0
+               ? min(model.cachedListHeight, maxTimelineHeight)
+               : min(180, maxTimelineHeight))
+        .onPreferenceChange(TimelineLayoutKey.self) { value in
+            if value.contentHeight > 0 { model.cachedListHeight = value.contentHeight }
+            if value.viewportHeight > 0 { timelineViewportHeight = value.viewportHeight }
+            cardVerticalCenters = value.cardCenters
+        }
+    }
+
+    @ViewBuilder
+    private func timelineRow(_ displayRow: TimelineDisplayRow) -> some View {
+        switch displayRow.kind {
+        case .item(let item):
+            timelineItem(item)
+        case .collapsedMessages(let items):
+            VStack(alignment: .leading, spacing: 6) {
+                collapsedToggle(displayRow.id,
+                                title: IslandLanguage.hiddenMessages(items.reduce(0) { $0 + $1.messageCount }),
+                                expanded: expandedTimelineRuns.contains(displayRow.id))
+                if expandedTimelineRuns.contains(displayRow.id) {
+                    ForEach(items, id: \.scrollID) { timelineItem($0) }
+                }
+            }
+        case .moreSuggestions(let items):
+            VStack(alignment: .leading, spacing: 6) {
+                collapsedToggle(displayRow.id,
+                                title: IslandLanguage.moreSuggestions(items.count),
+                                expanded: expandedTimelineRuns.contains(displayRow.id))
+                if expandedTimelineRuns.contains(displayRow.id) {
+                    ForEach(items, id: \.scrollID) { timelineItem($0) }
+                }
+            }
+        }
+    }
+
+    private func collapsedToggle(_ id: String, title: String, expanded isExpanded: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(isExpanded ? "···" : title)
+                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.38))
+                .lineLimit(1)
+            if isExpanded {
+                Text(IslandLanguage.collapse)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.38))
+            }
+            Spacer(minLength: 0)
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if isExpanded { expandedTimelineRuns.remove(id) }
+                else { expandedTimelineRuns.insert(id) }
+            }
+        }
+        .accessibilityIdentifier("island.timeline.expand.\(id)")
+    }
+
+    @ViewBuilder
+    private func timelineItem(_ item: ConversationItem) -> some View {
+        row(item)
+            .id(item.scrollID)
+            .background {
+                if case let .card(entry) = item.kind {
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: TimelineLayoutKey.self,
+                            value: TimelineLayoutValue(cardCenters: [entry.id: geo.frame(in: .named("island.timeline")).midY])
+                        )
                     }
                 }
-                .padding(.vertical, 4)
             }
-            .frame(height: Self.maxListHeight * 0.85)
-            .onAppear { proxy.scrollTo(items.last?.id, anchor: .bottom) }
-            .onChange(of: items.last?.id) { proxy.scrollTo(items.last?.id, anchor: .bottom) }
+            .background {
+                if case let .card(entry) = item.kind, highlightedCardID == entry.id {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(IslandStyle.accent.opacity(0.08))
+                }
+            }
+            .overlay {
+                if case let .card(entry) = item.kind, highlightedCardID == entry.id {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(IslandStyle.accent.opacity(0.8), lineWidth: 1.5)
+                }
+            }
+    }
+
+    private func performRequestedScroll(using proxy: ScrollViewProxy) {
+        let target = model.timelineScrollTarget ?? "timeline-bottom"
+        highlightedCardID = model.timelineHighlightCardID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            proxy.scrollTo(target, anchor: target == "timeline-bottom" ? .bottom : .center)
         }
+        guard let cardID = model.timelineHighlightCardID else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            if highlightedCardID == cardID { highlightedCardID = nil }
+        }
+    }
+
+    static func timelineRows(from items: [ConversationItem], filtering: Bool,
+                             liveCards: [Card]) -> [TimelineDisplayRow] {
+        let liveByID = Dictionary(liveCards.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let active = items.filter { item in
+            guard case let .card(entry) = item.kind, entry.cardKind == Card.Kind.suggestion.rawValue else { return true }
+            return entry.effectiveState(liveCard: liveByID[entry.id]) == .pending
+        }
+        let suggestions = active.filter {
+            if case let .card(entry) = $0.kind { return entry.cardKind == Card.Kind.suggestion.rawValue }
+            return false
+        }
+        let recentSuggestionIDs = Set(suggestions.suffix(3).compactMap { item -> String? in
+            guard case let .card(entry) = item.kind else { return nil }
+            return entry.id
+        })
+        let olderSuggestions = suggestions.filter {
+            guard case let .card(entry) = $0.kind else { return false }
+            return !recentSuggestionIDs.contains(entry.id)
+        }
+        let olderIDs = Set(olderSuggestions.map(\.scrollID))
+
+        var result: [TimelineDisplayRow] = []
+        var hidden: [ConversationItem] = []
+        var didInsertMoreSuggestions = false
+        func flushHidden() {
+            guard !hidden.isEmpty else { return }
+            let rows = hidden
+            let id = "messages:\(rows.first!.scrollID):\(rows.last!.scrollID)"
+            result.append(TimelineDisplayRow(id: id, kind: .collapsedMessages(rows)))
+            hidden.removeAll()
+        }
+
+        for item in active {
+            if olderIDs.contains(item.scrollID) {
+                flushHidden()
+                if !didInsertMoreSuggestions {
+                    let id = "suggestions:\(olderSuggestions.first?.scrollID ?? item.scrollID)"
+                    result.append(TimelineDisplayRow(id: id, kind: .moreSuggestions(olderSuggestions)))
+                    didInsertMoreSuggestions = true
+                }
+                continue
+            }
+
+            let visible: Bool
+            if !filtering {
+                visible = true
+            } else if case let .card(entry) = item.kind {
+                visible = entry.effectiveState(liveCard: liveByID[entry.id]) == .pending
+            } else {
+                visible = false
+            }
+
+            if visible {
+                flushHidden()
+                result.append(TimelineDisplayRow(id: item.scrollID, kind: .item(item)))
+            } else {
+                hidden.append(item)
+            }
+        }
+        flushHidden()
+        return result
     }
 
     static func startsSection(_ item: ConversationItem) -> Bool {
         switch item.kind {
-        case .event, .user, .brief: return true
+        case .event, .user, .brief, .card: return true
         default: return false
         }
     }
@@ -239,7 +389,7 @@ struct OpenedSurfaceView: View {
                     .textSelection(.enabled)
             }
         case .assistant(let text, let tools):
-            let open = expanded.contains(item.id)
+            let open = expanded.contains(item.scrollID)
             let long = Self.isLongReply(text)
             VStack(alignment: .leading, spacing: 5) {
                 Text(Self.markdown(open ? text : Self.preview(text)))
@@ -261,7 +411,7 @@ struct OpenedSurfaceView: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 withAnimation(.easeInOut(duration: 0.15)) {
-                                    if open { expanded.remove(item.id) } else { expanded.insert(item.id) }
+                                    if open { expanded.remove(item.scrollID) } else { expanded.insert(item.scrollID) }
                                 }
                             }
                         }
@@ -305,14 +455,69 @@ struct OpenedSurfaceView: View {
                 .padding(.leading, Self.gutter)
                 .padding(.top, 2)
         case .event(let headline, let full, let style):
-            eventHeader(id: item.id, ts: item.ts, headline: headline, full: full, style: style)
+            eventHeader(id: item.scrollID, ts: item.ts, headline: headline, full: full, style: style)
+        case .card(let entry):
+            cardTimelineRow(entry)
+        }
+    }
+
+    @ViewBuilder
+    private func cardTimelineRow(_ entry: CardTimelineEntry) -> some View {
+        let liveCard = model.orders.first { $0.id == entry.id }
+        let state = entry.effectiveState(liveCard: liveCard)
+        if state == .pending, let liveCard {
+            WaitingCardView(
+                order: liveCard,
+                sourceLabel: entry.sourceLabel,
+                isSuggestion: entry.cardKind == Card.Kind.suggestion.rawValue,
+                onOption: { optionText in model.onOptionTapped?(liveCard, optionText) },
+                onDismiss: { model.onDismissOrder?(liveCard) },
+                onReveal: {
+                    guard !liveCard.isFirstMates else { return }
+                    model.onRevealSuggestion?(liveCard)
+                    model.close()
+                }
+            )
+        } else {
+            Text(Self.cardSummary(entry, state: state))
+                .font(.system(size: 10.5, weight: state == .answered ? .medium : .regular))
+                .foregroundStyle(state == .answered ? .white.opacity(0.68) : .white.opacity(0.36))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.leading, Self.gutter)
+                .padding(.vertical, 2)
+                .accessibilityIdentifier("island.timeline.card.\(entry.id).\(state.rawValue)")
+        }
+    }
+
+    static func cardSummary(_ entry: CardTimelineEntry, state: CardTimelineState? = nil,
+                            now: Date = Date(), isChinese: Bool = IslandLanguage.isChinese) -> String {
+        let finalState = state ?? entry.state
+        let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stamp = time(entry.updatedAt, now: now)
+        switch finalState {
+        case .answered:
+            let option = entry.option ?? (isChinese ? "已选择" : "answered")
+            let result = isChinese ? "✓ 你选择了「\(option)」：\(text)" : "✓ You chose \(option): \(text)"
+            return stamp.isEmpty ? result : "\(result) · \(stamp)"
+        case .pending, .dismissed, .expired, .gone:
+            let source = entry.sourceLabel.isEmpty ? (isChinese ? "First Mate" : "First Mate") : entry.sourceLabel
+            let status: String
+            switch finalState {
+            case .dismissed: status = isChinese ? "已忽略" : "dismissed"
+            case .expired: status = isChinese ? "已过期" : "expired"
+            case .gone, .pending: status = isChinese ? "已结束" : "no longer waiting"
+            case .answered: status = ""
+            }
+            let result = isChinese ? "· \(source)：\(text)（\(status)）" : "· \(source): \(text) (\(status))"
+            return stamp.isEmpty ? result : "\(result) · \(stamp)"
         }
     }
 
     /// An event as the header of what First Mate did about it: an icon in its
     /// colour, what happened, when. The text seahelm sent sits behind a tap.
     @ViewBuilder
-    private func eventHeader(id: UInt64, ts: Date, headline: String, full: String,
+    private func eventHeader(id: String, ts: Date, headline: String, full: String,
                              style: FirstMateEventText.Style) -> some View {
         let open = expanded.contains(id)
         let look = Self.look(style)
@@ -539,6 +744,7 @@ struct OpenedSurfaceView: View {
         if model.onSendToFirstMate?(text) == true {
             model.draft = ""
             model.sendError = nil
+            model.didSendMessage()
         } else {
             model.sendError = text.hasPrefix("/") ? "That command did not run." : "First Mate did not get it — is it running?"
         }
@@ -555,7 +761,6 @@ struct OpenedSurfaceView: View {
 
     private func consumePrefill() {
         guard let prefill = model.pendingCommandPrefill else { return }
-        model.page = .conversation
         model.draft = prefill
         model.pendingCommandPrefill = nil
         DispatchQueue.main.async { commandFocused = true }
@@ -658,13 +863,6 @@ struct OpenedSurfaceView: View {
         return .handled
     }
 
-    private struct ListHeightKey: PreferenceKey {
-        static var defaultValue: CGFloat = 0
-        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-            value = max(value, nextValue())
-        }
-    }
-
     private var header: some View {
         HStack(spacing: 10) {
             Text("Seahelm")
@@ -682,9 +880,55 @@ struct OpenedSurfaceView: View {
 
 }
 
-/// One line of First Mate's conversation as the island draws it: what was
-/// said, folded tool runs, quiet notes. Turn edges are left out — the title
-/// row's status says whether it is working.
+struct TimelineDisplayRow: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case item(ConversationItem)
+        case collapsedMessages([ConversationItem])
+        case moreSuggestions([ConversationItem])
+    }
+
+    let id: String
+    let kind: Kind
+
+    var startsSection: Bool {
+        guard case let .item(item) = kind else { return false }
+        return OpenedSurfaceView.startsSection(item)
+    }
+}
+
+private struct TimelineLayoutValue: Equatable {
+    var cardCenters: [String: CGFloat] = [:]
+    var viewportHeight: CGFloat = 0
+    var contentHeight: CGFloat = 0
+}
+
+private struct TimelineLayoutKey: PreferenceKey {
+    static var defaultValue = TimelineLayoutValue()
+    static func reduce(value: inout TimelineLayoutValue, nextValue: () -> TimelineLayoutValue) {
+        let next = nextValue()
+        value.cardCenters.merge(next.cardCenters, uniquingKeysWith: { _, new in new })
+        if next.viewportHeight > 0 { value.viewportHeight = next.viewportHeight }
+        if next.contentHeight > 0 { value.contentHeight = next.contentHeight }
+    }
+}
+
+enum IslandLanguage {
+    static var isChinese: Bool {
+        let language = Locale.preferredLanguages.first ?? Locale.current.language.languageCode?.identifier ?? "en"
+        return language.lowercased().hasPrefix("zh")
+    }
+
+    static var collapse: String { isChinese ? "收起" : "Collapse" }
+    static func todoCount(_ count: Int) -> String { isChinese ? "待办 \(count)" : "To-do \(count)" }
+    static func hiddenMessages(_ count: Int) -> String { isChinese ? "··· \(count) 条消息" : "··· \(count) messages" }
+    static func moreSuggestions(_ count: Int) -> String {
+        isChinese ? "更多建议（\(count)）" : "More suggestions (\(count))"
+    }
+}
+
+/// One display item in First Mate's timeline: conversation content or a merged
+/// card row. Turn edges are left out — the title row's status says whether it
+/// is working.
 struct ConversationItem: Identifiable, Equatable {
     enum Kind: Equatable {
         case user(String)
@@ -705,17 +949,38 @@ struct ConversationItem: Identifiable, Equatable {
         /// approval's outcome): a section header that reads as what happened,
         /// the whole text behind a tap.
         case event(headline: String, full: String, style: FirstMateEventText.Style)
+        case card(CardTimelineEntry)
     }
 
     let id: UInt64
     let kind: Kind
     let ts: Date
+    let scrollID: String
+    let messageCount: Int
 
-    init(id: UInt64, kind: Kind, ts: Date = .distantPast) {
+    init(id: UInt64, kind: Kind, ts: Date = .distantPast, scrollID: String? = nil, messageCount: Int = 1) {
         self.id = id; self.kind = kind; self.ts = ts
+        self.scrollID = scrollID ?? "event:\(id)"
+        self.messageCount = messageCount
     }
 
-    static func items(from messages: [MessageEvent]) -> [ConversationItem] {
+    static func items(from messages: [MessageEvent], liveCards: [Card] = []) -> [ConversationItem] {
+        let orderedMessages = messages.sorted { $0.seq < $1.seq }
+        var cardEntries = CardTimelineEntry.merged(from: orderedMessages)
+        let rowCardIDs = Set(cardEntries.map(\.id))
+        var nextSequence = orderedMessages.map(\.seq).max() ?? 0
+        let fallbackCards = liveCards.filter { !rowCardIDs.contains($0.id) }.sorted { $0.createdAt < $1.createdAt }
+        for card in fallbackCards {
+            nextSequence &+= 1
+            cardEntries.append(CardTimelineEntry(
+                id: card.id, sequence: nextSequence, createdAt: card.createdAt, updatedAt: card.createdAt,
+                cardKind: card.kind.rawValue, sourcePane: card.paneSessionKey,
+                sourceLabel: card.isFirstMates ? "First Mate" : card.project,
+                text: card.message, options: card.options, state: .pending, option: nil, via: nil
+            ))
+        }
+        let entriesByFirstSequence = Dictionary(cardEntries.map { ($0.sequence, $0) }, uniquingKeysWith: { first, _ in first })
+        var insertedCardIDs: Set<String> = []
         var out: [ConversationItem] = []
         var run: [(tool: String, count: Int)] = []
         var runId: UInt64 = 0
@@ -733,10 +998,16 @@ struct ConversationItem: Identifiable, Equatable {
         /// Something other than a reply ends the run: its calls led to no
         /// reply of their own, so they are dropped.
         func dropRun() { run = [] }
-        for m in messages {
+        for m in orderedMessages {
             let text = (m.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let item = { (kind: Kind) in ConversationItem(id: m.seq, kind: kind, ts: m.ts) }
             switch m.kind {
+            case .card:
+                if let entry = entriesByFirstSequence[m.seq], insertedCardIDs.insert(entry.id).inserted {
+                    out.append(ConversationItem(id: entry.sequence, kind: .card(entry), ts: entry.createdAt,
+                                                scrollID: "card:\(entry.id)"))
+                }
+                continue
             case .tool:
                 guard let tool = m.tool, !tool.isEmpty else { continue }
                 if run.isEmpty { runId = m.seq; runTs = m.ts }
@@ -749,7 +1020,8 @@ struct ConversationItem: Identifiable, Equatable {
             case .user where !text.isEmpty:
                 dropRun(); flush(); out.append(item(.user(text)))
             case .assistant where !text.isEmpty:
-                out.append(item(.assistant(text, tools: summary)))
+                out.append(ConversationItem(id: m.seq, kind: .assistant(text, tools: summary), ts: m.ts,
+                                            messageCount: 1 + run.reduce(0) { $0 + $1.count }))
                 run = []
                 flush()
             case .thinking where !text.isEmpty:
@@ -771,8 +1043,15 @@ struct ConversationItem: Identifiable, Equatable {
             }
         }
         // Calls with nothing after them: the turn is still under way.
-        if let summary { out.append(ConversationItem(id: runId, kind: .tools(summary), ts: runTs)) }
+        if let summary {
+            out.append(ConversationItem(id: runId, kind: .tools(summary), ts: runTs,
+                                        messageCount: run.reduce(0) { $0 + $1.count }))
+        }
         flush()
+        for entry in cardEntries where !insertedCardIDs.contains(entry.id) {
+            out.append(ConversationItem(id: entry.sequence, kind: .card(entry), ts: entry.createdAt,
+                                        scrollID: "card:\(entry.id)"))
+        }
         return out
     }
 }
@@ -845,9 +1124,11 @@ enum FirstMateEventText {
     }
 }
 
-/// A pending suggest/question order rendered as a card with option chips.
-private struct SuggestionCard: View {
+/// A pending card rendered whole with source, message and live option chips.
+private struct WaitingCardView: View {
     let order: Card
+    let sourceLabel: String
+    let isSuggestion: Bool
     let onOption: (String) -> Void
     let onDismiss: () -> Void
     /// Blank-area tap: jump to the raising pane without resolving the card.
@@ -873,19 +1154,24 @@ private struct SuggestionCard: View {
                 Image(systemName: icon)
                     .font(.system(size: 11))
                     .foregroundStyle(isIntegration ? .orange : .yellow)
-                Text(order.project)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
-                if !order.branch.isEmpty {
-                    Text(order.branch)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.5))
-                } else if isIntegration {
-                    // The card names what it is about: without this it reads as
-                    // the repo saying something, and a repo never speaks.
-                    Text("integration")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.5))
+                if !sourceLabel.isEmpty {
+                    Text(sourceLabel)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                } else {
+                    Text(order.project)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.85))
+                    if !order.branch.isEmpty {
+                        Text(order.branch)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.5))
+                    } else if isIntegration {
+                        Text("integration")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
                 }
                 Spacer()
                 // onTapGesture, not Button: SwiftUI Buttons in a non-activating
@@ -908,7 +1194,6 @@ private struct SuggestionCard: View {
                 Text(order.message)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(8)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Options keep their own taps so they don't bubble to onReveal.
@@ -927,6 +1212,7 @@ private struct SuggestionCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture { onReveal() }
+        .opacity(isSuggestion ? 0.68 : 1)
     }
 }
 
