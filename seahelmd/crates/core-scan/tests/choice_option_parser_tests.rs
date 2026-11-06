@@ -165,3 +165,34 @@ fn permission_prompt_is_not_the_question_dialog() {
     ]);
     assert!(!choices::is_agent_question_dialog(&prompt, DEFAULT_BOTTOM_LINES));
 }
+
+#[test]
+fn parses_claudes_unnumbered_folder_trust_menu() {
+    let screen = [
+        " Quick safety check: Is this a project you created or one you trust? (Like your",
+        " own code, a well-known open source project, or work from your team).",
+        " Claude Code'll be able to read, edit, and execute files here.",
+        " Security guide",
+        " ❯ No, exit",
+        "   Yes, I trust this folder",
+        " Enter to confirm · Esc to cancel",
+    ]
+    .join("\n");
+    let o = parse(&screen);
+    assert_eq!(o.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(), vec!["No, exit", "Yes, I trust this folder"]);
+    assert_eq!(o.iter().map(|o| o.selected).collect::<Vec<_>>(), vec![true, false]);
+    assert_eq!(o[1].index, 2);
+}
+
+#[test]
+fn unnumbered_menus_need_the_footer_and_one_cursor() {
+    // No "Enter to confirm": ordinary output, not a menu.
+    assert!(parse(" ❯ No, exit\n   Yes, I trust this folder\n").is_empty());
+    // Two cursors.
+    assert!(parse(" ❯ a\n ❯ b\n Enter to confirm\n").is_empty());
+    // One row.
+    assert!(parse(" ❯ only\n Enter to confirm\n").is_empty());
+    // A row at another indent ends the menu above it.
+    let o = parse("some text\n ❯ a\n   b\n Enter to confirm · Esc to cancel");
+    assert_eq!(o.len(), 2);
+}

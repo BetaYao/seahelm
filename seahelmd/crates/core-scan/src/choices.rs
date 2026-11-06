@@ -102,7 +102,41 @@ pub fn parse(screen: &str, bottom_lines: usize) -> Vec<ChoiceOption> {
         }
     }
     finish(&mut current, &mut last_valid, &mut continuation_column);
+    if last_valid.is_empty() {
+        return unnumbered(screen, bottom_lines);
+    }
     last_valid
+}
+
+/// A selection menu without numbers, as Claude Code draws its folder-trust
+/// dialog: rows at one indent, the cursor `❯` on exactly one, and "Enter to
+/// confirm" right under them. Strict on purpose (the footer, one cursor, at
+/// least two rows, nothing between them): ordinary output must not read as a
+/// menu. `index` is the row's place (1-based); it is answered with arrows.
+fn unnumbered(screen: &str, bottom_lines: usize) -> Vec<ChoiceOption> {
+    let lines: Vec<&str> = bottom(screen, bottom_lines).collect();
+    let Some(footer) = lines.iter().rposition(|l| trim_ws(l).to_lowercase().starts_with("enter to confirm")) else { return Vec::new() };
+    let mut rows: Vec<(String, bool, usize)> = Vec::new();
+    for l in lines[..footer].iter().rev() {
+        let indent = l.chars().take_while(|c| c.is_whitespace()).count();
+        let rest: String = l.chars().skip(indent).collect();
+        let (selected, label, column) = match rest.chars().next() {
+            Some(c @ ('❯' | '›')) => {
+                let label = rest[c.len_utf8()..].trim_start();
+                (true, label.to_string(), indent + 1 + (rest[c.len_utf8()..].len() - label.len()))
+            }
+            _ => (false, rest.trim_end().to_string(), indent),
+        };
+        let label = label.trim_end().to_string();
+        if label.is_empty() || rows.first().is_some_and(|r| r.2 != column) {
+            break;
+        }
+        rows.insert(0, (label, selected, column));
+    }
+    if rows.len() < 2 || rows.iter().filter(|r| r.1).count() != 1 {
+        return Vec::new();
+    }
+    rows.into_iter().enumerate().map(|(i, (label, selected, _))| ChoiceOption { index: i + 1, label, selected }).collect()
 }
 
 /// Whether the screen is Claude's AskUserQuestion dialog (a question, or its

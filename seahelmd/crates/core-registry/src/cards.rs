@@ -374,7 +374,7 @@ impl Cards {
             }
             CardKind::Choice => {
                 self.remove(id, now);
-                Ok(Answer::Keys { pane: card.pane.clone(), inputs: arrows(tapped, selected().unwrap_or(0)), confirm_review: false })
+                Ok(Answer::Keys { pane: card.pane.clone(), inputs: arrows(tapped, selected().unwrap_or(card.flags.cursor)), confirm_review: false })
             }
             CardKind::Question => {
                 let count = card.options.len();
