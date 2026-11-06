@@ -93,6 +93,24 @@ fn background_rule_does_not_shadow_the_status_rule() {
     assert!(d.background_busy, "and the background work is still reported");
 }
 
+#[test]
+fn claude_folder_trust_dialog_waits() {
+    // A new directory: Claude Code asks before it starts, and read as idle
+    // that left a research run hanging until it timed out, with no card.
+    let store = ManifestStore::bundled();
+    let cm = store.get("claude").expect("claude");
+    let s = lines(&[
+        " Quick safety check: Is this a project you created or one you trust? (Like your",
+        " own code, a well-known open source project, or work from your team).",
+        " Claude Code'll be able to read, edit, and execute files here.",
+        " ❯ No, exit",
+        "   Yes, I trust this folder",
+        " Enter to confirm · Esc to cancel",
+    ]);
+    // The detector lowercases the screen before matching (detect.rs).
+    assert_eq!(cm.evaluate(&screen(&s.to_lowercase())).state, AgentStatus::Waiting);
+}
+
 fn claude_footer(model: &str, extra: &[&str]) -> String {
     let mut l = vec!["", "───────────────────────────────", "❯", "───────────────────────────────"];
     let model_line = format!("  [{model}]");
