@@ -122,6 +122,9 @@ struct State {
     observer: Option<first_mate::observations::Handle>,
     /// Every pane's message timeline (`message.*`).
     messages: seahelm_core_messages::Hub,
+    /// Source captured when each pending card row was written. A resolution
+    /// reuses this even after its source pane has been unregistered.
+    card_sources: HashMap<String, seahelm_core_messages::event::CardSource>,
     /// The same stable handles used by pane.list and the command language.
     handles: Arc<Mutex<seahelm_core_command::Handles>>,
 }
@@ -188,6 +191,18 @@ impl Core {
         audit_path: PathBuf,
     ) -> Arc<Self> {
         let handles = Arc::new(Mutex::new(handles));
+        let mut card_sources = HashMap::new();
+        for row in messages.snapshot(Some(fm_policy::SESSION)) {
+            if row.kind != seahelm_core_messages::Kind::Card { continue; }
+            let Some(id) = row.card_id else { continue };
+            if row.state.as_deref() == Some("pending") {
+                if let Some(source) = row.source {
+                    card_sources.insert(id, source);
+                }
+            } else {
+                card_sources.remove(&id);
+            }
+        }
         let session_refs_path = dir.join("core-agent-sessions.json");
         let session_refs = std::fs::read_to_string(&session_refs_path)
             .ok()
@@ -216,6 +231,7 @@ impl Core {
                 first_mate: None,
                 observer: None,
                 messages,
+                card_sources,
                 handles: handles.clone(),
             }),
             changed: Condvar::new(),
@@ -625,7 +641,7 @@ impl Core {
                 };
                 self.with_change(|st| {
                     let card = st.cards.get(&id).cloned();
-                    if !st.cards.dismiss(&id, Some(card_via(&p)), now) {
+                    if !st.cards.dismiss(&id, card_via(&p), now) {
                         return Ok(json!({"ok": false}));
                     }
                     st.publish_cards();
@@ -649,6 +665,7 @@ impl Core {
                     message: str_param(&p, "message").unwrap_or_default(),
                     options: strings(&p, "options"),
                     payload: str_param(&p, "payload"),
+                    first_mate: false,
                 };
                 if raise.kind.is_none() || raise.options.is_empty() {
                     return Reply::Value(Err(RpcError::invalid_params("kind (report/approval/proposal) and options required")));
@@ -664,7 +681,7 @@ impl Core {
                     return Reply::Value(Err(RpcError::invalid_params("worktree_path required")));
                 };
                 self.with_change(|st| {
-                    let cleared = st.cards.dismiss_worktree(&path, Some(card_via(&p)), now);
+                    let cleared = st.cards.drop_worktree(&path, now);
                     if cleared {
                         st.publish_cards();
                     }
@@ -757,7 +774,7 @@ impl Core {
                 _ => return Err(RpcError::invalid_params("option or index required")),
             };
             let screen = st.panes.get(&card.pane).and_then(|s| s.snapshot.as_ref()).map(|s| s.viewport.clone());
-            let answer = st.cards.answer_via(&id, &label, screen.as_deref(), Some(card_via(p)), now).map_err(RpcError::invalid_params)?;
+            let answer = st.cards.answer_via(&id, &label, screen.as_deref(), card_via(p), now).map_err(RpcError::invalid_params)?;
             st.publish_cards();
             if let Answer::Raised { card, option } = &answer {
                 st.registry.publish(json!({"type": "card.answered", "card": card.to_json(), "option": option, "via": via(p)}));
@@ -1332,7 +1349,8 @@ impl Core {
 
     pub fn raise_card(&self, r: Raise) -> Option<String> {
         let mut r = r;
-        r.pane = fm_policy::SESSION.into();
+        r.pane.clear();
+        r.first_mate = true;
         let mut st = self.lock();
         let id = st.cards.raise(r, now());
         st.publish_cards();
@@ -1689,11 +1707,15 @@ impl State {
             let wt = info.worktree_path.clone();
             self.aggregator.unregister_pane(pane, &wt);
         }
+        // Resolve cards while the pane and its handle are still registered.
+        if self.cards.drop_pane(pane, now()) {
+            self.publish_cards();
+        }
         self.registry.unregister(pane);
         // Gone for good: its timeline goes too.
         self.messages.clear(pane);
-        if self.cards.drop_pane(pane, now()) {
-            self.publish_cards();
+        if pane == fm_policy::SESSION {
+            self.card_sources.clear();
         }
         self.panes.remove(pane);
         self.synced.remove(pane);
@@ -1887,6 +1909,9 @@ impl State {
     }
 
     fn timers(&mut self, now: Timestamp) {
+        if self.cards.sweep_absent(now) {
+            self.publish_cards();
+        }
         let (due, later): (Vec<Retry>, Vec<Retry>) = std::mem::take(&mut self.retries).into_iter().partition(|r| r.at <= now);
         self.retries = later;
         for r in due {
@@ -1917,7 +1942,22 @@ impl State {
         let changes = self.cards.take_changes();
         let mut rows = Vec::with_capacity(changes.len());
         for change in changes {
-            let (pane, label) = self.card_source(&change.card);
+            if self.registry.pane(fm_policy::SESSION).is_none() {
+                if change.state != CardState::Pending {
+                    self.card_sources.remove(&change.card.id);
+                }
+                continue;
+            }
+            let source = if change.state == CardState::Pending {
+                let source = self.card_source(&change.card);
+                self.card_sources.insert(change.card.id.clone(), source.clone());
+                source
+            } else if let Some(source) = self.card_sources.remove(&change.card.id) {
+                source
+            } else {
+                // Do not write a resolution with no corresponding pending row.
+                continue;
+            };
             let text = change.card.message.lines().next().unwrap_or_default().to_string();
             let mut row = seahelm_core_messages::Message::new(
                 fm_policy::SESSION,
@@ -1928,7 +1968,7 @@ impl State {
             .with_text(text);
             row.card_id = Some(change.card.id.clone());
             row.card_kind = Some(change.card.kind.as_str().to_string());
-            row.source = Some(seahelm_core_messages::event::CardSource { pane, label });
+            row.source = Some(source);
             row.options = Some(change.card.labels());
             row.state = Some(change.state.as_str().to_string());
             row.option = change.option;
@@ -1940,9 +1980,9 @@ impl State {
         self.registry.publish(json!({"type": "cards.changed", "cards": cards}));
     }
 
-    fn card_source(&self, card: &seahelm_core_registry::cards::Card) -> (String, String) {
-        if card.pane == fm_policy::SESSION {
-            return (fm_policy::SESSION.into(), "First Mate".into());
+    fn card_source(&self, card: &seahelm_core_registry::cards::Card) -> seahelm_core_messages::event::CardSource {
+        if card.first_mate || card.project == first_mate::pane::PROJECT {
+            return seahelm_core_messages::event::CardSource { pane: fm_policy::SESSION.into(), label: "First Mate".into() };
         }
 
         let pane = self
@@ -1953,16 +1993,16 @@ impl State {
             let worktree = self.registry.pane(&id).map(|p| p.worktree_path.as_str()).unwrap_or(&card.worktree_path);
             let name = std::path::Path::new(worktree).file_name().and_then(|n| n.to_str()).unwrap_or(worktree);
             let handle = self.handles.lock().unwrap_or_else(|e| e.into_inner()).handle(&id);
-            return (id, format!("#{handle} · {name}"));
+            return seahelm_core_messages::event::CardSource { pane: id, label: format!("#{handle} · {name}") };
         }
 
         // Worktree-level client cards can outlive their pane.
         let name = std::path::Path::new(&card.worktree_path).file_name().and_then(|n| n.to_str()).unwrap_or(&card.worktree_path);
         if card.pane.is_empty() {
-            return (String::new(), name.into());
+            return seahelm_core_messages::event::CardSource { pane: String::new(), label: name.into() };
         }
         let handle = self.handles.lock().unwrap_or_else(|e| e.into_inner()).handle(&card.pane);
-        (card.pane.clone(), format!("#{handle} · {name}"))
+        seahelm_core_messages::event::CardSource { pane: card.pane.clone(), label: format!("#{handle} · {name}") }
     }
 
     fn publish_notice(&mut self, notice: Notice) {
@@ -2284,17 +2324,19 @@ pub fn via(p: &Value) -> Value {
     p.get("_meta").and_then(|m| m.get("via")).filter(|v| v.is_string()).cloned().unwrap_or(Value::Null)
 }
 
-/// The channel for a card decision. App decisions come from the island;
-/// other clients may identify themselves more narrowly in `_meta.via`.
-fn card_via(p: &Value) -> String {
+/// The channel explicitly identified for a card decision in `_meta.via`.
+fn card_via(p: &Value) -> Option<String> {
     let raw = p.get("_meta").and_then(|m| m.get("via")).and_then(Value::as_str);
-    match raw {
-        Some(v) if v.starts_with("telegram") => "telegram".into(),
-        Some(v) if v.starts_with("web") || v.starts_with("share") => "web".into(),
-        Some(v) if v.starts_with("island") => "island".into(),
-        Some(v) if !v.is_empty() => v.split(':').next().unwrap_or(v).to_string(),
-        _ => "island".into(),
-    }
+    let v = raw.filter(|v| !v.is_empty())?;
+    Some(if v.starts_with("telegram") {
+        "telegram".into()
+    } else if v.starts_with("web") || v.starts_with("share") {
+        "web".into()
+    } else if v.starts_with("island") {
+        "island".into()
+    } else {
+        v.split(':').next().unwrap_or(v).to_string()
+    })
 }
 
 /// The first line of `text`, at most `max` characters.
@@ -2795,6 +2837,26 @@ mod card_timeline_tests {
         }
     }
 
+    fn second_registration() -> Registration {
+        Registration {
+            pane: "seahelm-pane-2".into(),
+            alias: Some("client-pane-2".into()),
+            ..registration()
+        }
+    }
+
+    fn first_mate_registration() -> Registration {
+        Registration {
+            pane: fm_policy::SESSION.into(),
+            alias: Some("first-mate".into()),
+            worktree_path: "/workspace/first-mate".into(),
+            project: "First Mate".into(),
+            branch: "main".into(),
+            agent_type: AgentType::ClaudeCode,
+            started_at: None,
+        }
+    }
+
     fn card(kind: CardKind, message: &str) -> Raise {
         Raise {
             kind: Some(kind),
@@ -2821,6 +2883,7 @@ mod card_timeline_tests {
         let core = Core::for_test(tmp.path());
         let mut st = core.lock();
         st.register(registration());
+        st.register(first_mate_registration());
 
         let id = st.cards.raise(card(CardKind::Report, "Check these files\nMore detail"), 1.0).unwrap();
         st.publish_cards();
@@ -2842,12 +2905,14 @@ mod card_timeline_tests {
         assert_eq!(rows[1]["option"], "Review");
         assert_eq!(rows[1]["via"], "web");
 
-        let dismissed = st.cards.raise(card(CardKind::Approval, "Approve this"), 3.0).unwrap();
+        let mut dismissal = card(CardKind::Approval, "Approve this");
+        dismissal.pane.clear();
+        let dismissed = st.cards.raise(dismissal, 3.0).unwrap();
         st.publish_cards();
-        assert!(st.cards.dismiss(&dismissed, Some("telegram".into()), 4.0));
+        assert!(st.cards.dismiss(&dismissed, card_via(&json!({})), 4.0));
         st.publish_cards();
         assert_eq!(card_rows(&st).last().unwrap()["state"], "dismissed");
-        assert_eq!(card_rows(&st).last().unwrap()["via"], "telegram");
+        assert!(card_rows(&st).last().unwrap().get("via").is_none());
 
         let expired = st.cards.raise(card(CardKind::Proposal, "Try this"), 5.0).unwrap();
         st.publish_cards();
@@ -2869,10 +2934,74 @@ mod card_timeline_tests {
             payload: Some("expire-in-test".into()),
             ..Raise::default()
         }).unwrap();
+        {
+            let mut st = core.lock();
+            let card = st.cards.get(&fm_id).unwrap();
+            assert!(card.pane.is_empty());
+            assert!(card.first_mate);
+            assert!(!st.cards.drop_pane(fm_policy::SESSION, 8.5));
+            assert!(st.cards.get(&fm_id).is_some());
+        }
         core.expire_card_payload("expire-in-test");
         let fm_rows: Vec<_> = core.messages_of(fm_policy::SESSION).into_iter().filter(|m| m.card_id.as_deref() == Some(&fm_id)).collect();
         assert_eq!(fm_rows.iter().map(|m| m.state.as_deref().unwrap()).collect::<Vec<_>>(), ["pending", "expired"]);
         assert_eq!(fm_rows[0].source.as_ref().unwrap().label, "First Mate");
+    }
+
+    #[test]
+    fn a_resolution_keeps_the_pending_source_after_its_pane_is_unregistered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let mut st = core.lock();
+        st.register(registration());
+        st.register(second_registration());
+        st.register(first_mate_registration());
+        let id = st.cards.raise(card(CardKind::Question, "Allow this command"), 1.0).unwrap();
+        st.publish_cards();
+        let pending_source = card_rows(&st)[0]["source"].clone();
+        assert_eq!(pending_source["label"], "#1 · saas-mono");
+        st.unregister("seahelm-pane-1");
+        let rows = card_rows(&st);
+        assert_eq!(rows.iter().map(|row| row["state"].as_str().unwrap()).collect::<Vec<_>>(), ["pending", "gone"]);
+        assert_eq!(rows[1]["card_id"], id);
+        assert_eq!(rows[1]["source"], pending_source);
+    }
+
+    #[test]
+    fn cards_clear_records_gone_and_card_rows_require_first_mate_registration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        core.register_pane(first_mate_registration());
+        let id = core.raise_card(Raise {
+            kind: Some(CardKind::Proposal),
+            worktree_path: "/workspace/first-mate".into(),
+            message: "A First Mate proposal".into(),
+            options: vec!["Go".into()],
+            payload: Some("clear-test".into()),
+            ..Raise::default()
+        }).unwrap();
+        let pending = core.messages_of(fm_policy::SESSION);
+        let pending = pending.iter().find(|row| row.card_id.as_deref() == Some(&id)).unwrap();
+        assert_eq!(pending.state.as_deref(), Some("pending"));
+        assert!(matches!(core.clone().call("cards.clear", json!({"worktree_path": "/workspace/first-mate"})), Reply::Value(Ok(_))));
+        let rows: Vec<_> = core.messages_of(fm_policy::SESSION).into_iter().filter(|row| row.card_id.as_deref() == Some(&id)).collect();
+        assert_eq!(rows.iter().map(|row| row.state.as_deref().unwrap()).collect::<Vec<_>>(), ["pending", "gone"]);
+        assert!(rows[1].via.is_none());
+    }
+
+    #[test]
+    fn cards_without_first_mate_registration_are_available_live_but_not_recorded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let id = core.raise_card(Raise {
+            kind: Some(CardKind::Proposal),
+            message: "A First Mate proposal".into(),
+            options: vec!["Go".into()],
+            payload: Some("not-recorded".into()),
+            ..Raise::default()
+        }).unwrap();
+        assert!(core.messages_of(fm_policy::SESSION).is_empty());
+        assert!(core.lock().cards.get(&id).is_some());
     }
 
     fn outcome(info: seahelm_core_registry::PaneInfo, kind: EventKind, status: AgentStatus) -> Outcome {
@@ -2895,6 +3024,7 @@ mod card_timeline_tests {
         let core = Core::for_test(tmp.path());
         let mut st = core.lock();
         st.register(registration());
+        st.register(first_mate_registration());
         let info = st.registry.pane("seahelm-pane-1").unwrap().clone();
         st.settle(&outcome(info.clone(), EventKind::Suggest { options: vec!["Run tests".into()] }, AgentStatus::Idle), 1.0);
         let pending = card_rows(&st);

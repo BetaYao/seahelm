@@ -7,10 +7,9 @@
 //! decides, and an answer comes back as the keys to press, which the caller
 //! sends to the pane's seahelmd session.
 //!
-//! A card's key is the app's (`worktree#kind#pane[#payload]`), so a newer
-//! suggestion from a pane replaces its older one in place. Its id is minted
-//! here and stays while the key is on offer; a card that leaves and comes
-//! back gets a new one, so a tap on a card already answered names nothing.
+//! A card's key is the app's (`worktree#kind#pane[#payload]`). Replacements
+//! with different text or options get new ids; screen cards that flicker out
+//! for one scan can return within the grace period with their original id.
 
 use std::collections::HashMap;
 
@@ -115,6 +114,9 @@ pub struct Card {
     pub flags: QuestionFlags,
     /// Whatever the raiser needs back (a report's repo, an approval's id).
     pub payload: Option<String>,
+    /// Raised internally by First Mate. It remains pane-less so closing the
+    /// First Mate pane cannot remove its cards.
+    pub first_mate: bool,
     pub created_at: Timestamp,
     /// When the card last became worth showing again: new, or what it asks
     /// changed. A renderer pops for a card whose `fresh_at` is past the one
@@ -204,6 +206,7 @@ pub struct Raise {
     pub message: String,
     pub options: Vec<String>,
     pub payload: Option<String>,
+    pub first_mate: bool,
 }
 
 /// One input to a pane, in order.
@@ -237,16 +240,19 @@ const KEY_UP: &str = "\x1b[A";
 const KEY_DOWN: &str = "\x1b[B";
 const KEY_RIGHT: &str = "\x1b[C";
 
-/// What a card that left showed, when it left, and when it was fresh.
-type Absent = ((String, Vec<String>), Timestamp, Timestamp);
+/// A screen card missing from one scan, retained until it returns or its
+/// disappearance grace expires.
+struct Absent {
+    card: Card,
+    at: Timestamp,
+}
 
 #[derive(Default)]
 pub struct Cards {
     cards: Vec<Card>,
     next: u64,
     changes: Vec<CardChange>,
-    /// Cards that left recently, by key: what they showed, when, and when
-    /// they were fresh.
+    /// Screen cards temporarily absent from a scan, by key.
     absent: HashMap<String, Absent>,
 }
 
@@ -280,18 +286,25 @@ impl Cards {
     /// Cards for one outcome: questions and suggestions raised, stale ones
     /// cleared (`FirstMateCoordinator.handle`). True when anything changed.
     pub fn observe(&mut self, o: &Outcome, now: Timestamp) -> bool {
+        let mut changed = self.sweep_absent(now);
         let pane = o.info.id.as_str();
-        let mut changed = match &o.event.kind {
-            EventKind::UserPrompt { .. } => self.remove_where(|c| c.kind == CardKind::Suggestion && c.pane == pane, CardState::Gone, None, None, now),
+        changed |= match &o.event.kind {
+            EventKind::UserPrompt { .. } => {
+                let stale = |c: &Card| (c.kind == CardKind::Suggestion || c.kind.is_question()) && c.pane == pane;
+                let active = self.remove_where(&stale, CardState::Gone, None, None, now);
+                self.finish_absent_where(&stale, now) || active
+            }
             // The agent moved past its question (answered in the TUI).
             // AskUserQuestion's own tool start is decoded as a Question, so it
             // cannot clear itself.
             EventKind::ToolUse { .. } | EventKind::AgentStopped { .. } => {
-                self.remove_where(|c| c.kind.is_question() && c.pane == pane, CardState::Gone, None, None, now)
+                let active = self.remove_where(|c| c.kind.is_question() && c.pane == pane, CardState::Gone, None, None, now);
+                self.finish_absent_where(|c| c.kind.is_question() && c.pane == pane, now) || active
             }
-            // A dialog found on screen went away.
+            // A screen scan can miss a dialog for one frame. Keep its id and
+            // pending row during the grace period in case a later scan sees it.
             EventKind::ScreenObserved { .. } if o.new_status != AgentStatus::Waiting => {
-                self.remove_where(|c| c.kind.is_question() && c.pane == pane, CardState::Gone, None, None, now)
+                self.defer_where(|c| c.kind.is_question() && c.pane == pane, now)
             }
             _ => false,
         };
@@ -309,6 +322,7 @@ impl Cards {
             followups: Vec::new(),
             flags: QuestionFlags::default(),
             payload: None,
+            first_mate: false,
             created_at: now,
             fresh_at: now,
         };
@@ -336,23 +350,32 @@ impl Cards {
 
     /// Late assistant prose for a pane's suggestion whose summary is tool
     /// chrome (Cursor's `afterAgentResponse` lands after the options). Never
-    /// replaces a real summary, and does not make the card fresh.
+    /// replaces a real summary; changed text gets a new card identity.
     pub fn refresh_suggestion(&mut self, pane: &str, prose: &str, now: Timestamp) -> bool {
+        let mut changed = self.sweep_absent(now);
         let summary = summary_text(prose);
         if summary.is_empty() {
-            return false;
+            return changed;
         }
-        let mut refreshed = Vec::new();
-        for c in &mut self.cards {
-            if c.kind == CardKind::Suggestion && c.pane == pane && is_junk_summary(&c.message) {
-                c.message = summary.clone();
-                refreshed.push(c.clone());
-            }
+        let keys: Vec<String> = self.cards.iter()
+            .filter(|c| c.kind == CardKind::Suggestion && c.pane == pane && is_junk_summary(&c.message))
+            .map(Card::key)
+            .collect();
+        for key in keys {
+            let Some(index) = self.cards.iter().position(|c| c.key() == key) else { continue };
+            let mut replacement = self.cards.remove(index);
+            self.record_change(&replacement, CardState::Gone, None, None, now);
+            replacement.id.clear();
+            replacement.message = summary.clone();
+            replacement.created_at = now;
+            replacement.fresh_at = now;
+            self.next += 1;
+            replacement.id = format!("c-{}", self.next);
+            self.record_change(&replacement, CardState::Pending, None, None, now);
+            self.cards.push(replacement);
+            changed = true;
         }
-        for card in &refreshed {
-            self.record_change(card, CardState::Pending, None, None, now);
-        }
-        !refreshed.is_empty()
+        changed
     }
 
     /// A client's card (an integration report, First Mate's asks). Returns
@@ -372,6 +395,7 @@ impl Cards {
             followups: Vec::new(),
             flags: QuestionFlags::default(),
             payload: r.payload,
+            first_mate: r.first_mate,
             created_at: now,
             fresh_at: now,
         };
@@ -395,12 +419,30 @@ impl Cards {
     /// A pane that is gone (closed, or its agent exited) takes its cards.
     /// Worktree and app cards carry no pane and are spared.
     pub fn drop_pane(&mut self, pane: &str, now: Timestamp) -> bool {
-        !pane.is_empty() && self.remove_where(|c| c.pane == pane, CardState::Gone, None, None, now)
+        if pane.is_empty() { return false; }
+        let active = self.remove_where(|c| c.pane == pane, CardState::Gone, None, None, now);
+        self.finish_absent_where(|c| c.pane == pane, now) || active
     }
 
     /// A deleted worktree takes every card in it.
     pub fn drop_worktree(&mut self, path: &str, now: Timestamp) -> bool {
-        !path.is_empty() && self.remove_where(|c| c.worktree_path == path, CardState::Gone, None, None, now)
+        if path.is_empty() { return false; }
+        let active = self.remove_where(|c| c.worktree_path == path, CardState::Gone, None, None, now);
+        self.finish_absent_where(|c| c.worktree_path == path, now) || active
+    }
+
+    /// End screen cards that stayed absent past the scan flicker grace.
+    pub fn sweep_absent(&mut self, now: Timestamp) -> bool {
+        let expired: Vec<String> = self.absent.iter()
+            .filter(|(_, absent)| now - absent.at >= REAPPEARANCE_GRACE)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in &expired {
+            if let Some(absent) = self.absent.remove(key) {
+                self.record_change(&absent.card, CardState::Gone, None, None, now);
+            }
+        }
+        !expired.is_empty()
     }
 
     /// Answer a card with one of its labels. `screen` is what the pane shows
@@ -473,36 +515,34 @@ impl Cards {
         false
     }
 
-    /// Replace on the same key, keeping arrival order (a replacement is a
-    /// new arrival). True when anything changed.
+    /// Keep an identical card in place. Changed content ends the old card and
+    /// starts a new one. True when the live queue changed.
     fn upsert(&mut self, mut card: Card, now: Timestamp) -> bool {
         let key = card.key();
-        self.absent.retain(|_, (_, at, _)| now - *at < REAPPEARANCE_GRACE);
+        self.sweep_absent(now);
         if let Some(idx) = self.cards.iter().position(|c| c.key() == key) {
             let old = self.cards.remove(idx);
-            card.id = old.id.clone();
-            card.created_at = old.created_at;
-            if !is_fresh(&card, &old.fingerprint()) {
+            if card.fingerprint() == old.fingerprint() {
+                card.id = old.id.clone();
+                card.created_at = old.created_at;
                 card.fresh_at = old.fresh_at;
+                let changed = card != old;
+                self.cards.insert(idx, card);
+                return changed;
             }
-            let same = card == old;
-            // Identical re-scans keep the card id and produce no new row.
-            if card.message != old.message || card.options != old.options {
-                self.record_change(&card, CardState::Pending, None, None, now);
-            }
-            self.cards.push(card);
-            return !same || idx + 1 != self.cards.len();
+            self.record_change(&old, CardState::Gone, None, None, now);
         }
-        // A hook question that comes back is a new AskUserQuestion call, not
-        // a frame of flicker, so only other cards check the grace.
-        if card.kind != CardKind::Question {
-            if let Some((fp, _, fresh_at)) = self.absent.get(&key) {
-                if !is_fresh(&card, fp) {
-                    card.fresh_at = *fresh_at;
-                }
+        if let Some(absent) = self.absent.remove(&key) {
+            if card.fingerprint() == absent.card.fingerprint() {
+                card.id = absent.card.id;
+                card.created_at = absent.card.created_at;
+                card.fresh_at = absent.card.fresh_at;
+                let index = self.cards.iter().position(|c| c.created_at > card.created_at).unwrap_or(self.cards.len());
+                self.cards.insert(index, card);
+                return true;
             }
+            self.record_change(&absent.card, CardState::Gone, None, None, now);
         }
-        self.absent.remove(&key);
         self.next += 1;
         card.id = format!("c-{}", self.next);
         self.record_change(&card, CardState::Pending, None, None, now);
@@ -523,7 +563,6 @@ impl Cards {
         let mut kept = Vec::with_capacity(before);
         for c in std::mem::take(&mut self.cards) {
             if pred(&c) {
-                self.absent.insert(c.key(), (c.fingerprint(), now, c.fresh_at));
                 self.record_change(&c, state, option.clone(), via.clone(), now);
             } else {
                 kept.push(c);
@@ -532,18 +571,30 @@ impl Cards {
         self.cards = kept;
         self.cards.len() != before
     }
-}
 
-/// A card is fresh against what was shown when its options changed, or its
-/// summary was rewritten into something other than a late prose upgrade.
-fn is_fresh(card: &Card, seen: &(String, Vec<String>)) -> bool {
-    if seen.1 != card.options {
-        return true;
+    fn defer_where(&mut self, pred: impl Fn(&Card) -> bool, now: Timestamp) -> bool {
+        let before = self.cards.len();
+        let mut kept = Vec::with_capacity(before);
+        for card in std::mem::take(&mut self.cards) {
+            if pred(&card) {
+                self.absent.insert(card.key(), Absent { card, at: now });
+            } else {
+                kept.push(card);
+            }
+        }
+        self.cards = kept;
+        self.cards.len() != before
     }
-    if seen.0 == card.message {
-        return false;
+
+    fn finish_absent_where(&mut self, pred: impl Fn(&Card) -> bool, now: Timestamp) -> bool {
+        let keys: Vec<String> = self.absent.iter().filter(|(_, absent)| pred(&absent.card)).map(|(key, _)| key.clone()).collect();
+        for key in &keys {
+            if let Some(absent) = self.absent.remove(key) {
+                self.record_change(&absent.card, CardState::Gone, None, None, now);
+            }
+        }
+        !keys.is_empty()
     }
-    !is_junk_summary(&seen.0)
 }
 
 /// Down or up from the dialog's cursor to the row, then Return.
@@ -676,7 +727,14 @@ mod tests {
         q.observe(&suggest("p1", &["b"]), 3.0);
         assert_eq!(q.list().len(), 2);
         let c = q.list().last().unwrap();
-        assert_eq!((c.id.as_str(), c.options[0].as_str(), c.fresh_at), ("c-1", "b", 3.0));
+        assert_eq!((c.id.as_str(), c.options[0].as_str(), c.fresh_at), ("c-3", "b", 3.0));
+        let changes = q.take_changes();
+        assert_eq!(changes.iter().map(|change| (change.state, change.card.id.as_str())).collect::<Vec<_>>(), [
+            (CardState::Pending, "c-1"),
+            (CardState::Pending, "c-2"),
+            (CardState::Gone, "c-1"),
+            (CardState::Pending, "c-3"),
+        ]);
     }
 
     #[test]
@@ -705,8 +763,8 @@ mod tests {
     #[test]
     fn an_identical_card_rescan_does_not_add_a_timeline_change() {
         let mut q = Cards::new();
-        q.observe(&suggest("p1", &["run tests"]), 1.0);
-        q.observe(&suggest("p1", &["run tests"]), 2.0);
+        q.observe(&question("p1", EventSource::Scan, &["Yes", "No"], QuestionFlags::default(), vec![]), 1.0);
+        q.observe(&question("p1", EventSource::Scan, &["Yes", "No"], QuestionFlags::default(), vec![]), 2.0);
         let changes = q.take_changes();
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].state, CardState::Pending);
@@ -748,13 +806,65 @@ mod tests {
     }
 
     #[test]
-    fn a_choice_that_flickers_back_is_not_fresh_but_gets_a_new_id() {
+    fn a_choice_that_flickers_back_keeps_its_id_and_writes_no_lifecycle_edges() {
         let mut q = Cards::new();
         q.observe(&question("p1", EventSource::Scan, &["Yes", "No"], QuestionFlags::default(), vec![]), 1.0);
+        q.take_changes();
         q.observe(&scan("p1", AgentStatus::Running), 2.0);
+        assert!(q.take_changes().is_empty());
         q.observe(&question("p1", EventSource::Scan, &["Yes", "No"], QuestionFlags::default(), vec![]), 3.0);
         let c = &q.list()[0];
-        assert_eq!((c.id.as_str(), c.fresh_at), ("c-2", 1.0));
+        assert_eq!((c.id.as_str(), c.fresh_at), ("c-1", 1.0));
+        assert!(q.take_changes().is_empty());
+    }
+
+    #[test]
+    fn an_absent_choice_becomes_gone_once_the_grace_expires() {
+        let mut q = Cards::new();
+        q.observe(&question("p1", EventSource::Scan, &["Yes", "No"], QuestionFlags::default(), vec![]), 1.0);
+        q.take_changes();
+        q.observe(&scan("p1", AgentStatus::Running), 2.0);
+        assert!(!q.sweep_absent(2.0 + REAPPEARANCE_GRACE - 0.1));
+        assert!(q.take_changes().is_empty());
+        assert!(q.sweep_absent(2.0 + REAPPEARANCE_GRACE));
+        let changes = q.take_changes();
+        assert_eq!(changes.len(), 1);
+        assert_eq!((changes[0].card.id.as_str(), changes[0].state), ("c-1", CardState::Gone));
+        assert!(!q.sweep_absent(2.0 + REAPPEARANCE_GRACE + 1.0));
+    }
+
+    #[test]
+    fn replacing_card_text_or_options_ends_the_old_id_and_starts_a_new_one() {
+        let mut q = Cards::new();
+        let first = q.raise(Raise { kind: Some(CardKind::Proposal), payload: Some("proposal-1".into()), message: "First prompt".into(), options: vec!["Go".into()], ..Raise::default() }, 1.0).unwrap();
+        q.take_changes();
+        let second = q.raise(Raise { kind: Some(CardKind::Proposal), payload: Some("proposal-1".into()), message: "Replacement prompt".into(), options: vec!["Go".into(), "Later".into()], ..Raise::default() }, 2.0).unwrap();
+        assert_ne!(first, second);
+        let changes = q.take_changes();
+        assert_eq!(changes.iter().map(|change| (change.state, change.card.id.as_str())).collect::<Vec<_>>(), [
+            (CardState::Gone, first.as_str()),
+            (CardState::Pending, second.as_str()),
+        ]);
+    }
+
+    #[test]
+    fn a_different_screen_prompt_replaces_the_dialog_identity() {
+        let mut q = Cards::new();
+        let first = question("p1", EventSource::Scan, &["Yes", "No"], QuestionFlags::default(), vec![]);
+        q.observe(&first, 1.0);
+        let old_id = q.list()[0].id.clone();
+        q.take_changes();
+
+        let mut second = question("p1", EventSource::Scan, &["Yes", "No"], QuestionFlags::default(), vec![]);
+        let EventKind::Question { prompt, .. } = &mut second.event.kind else { panic!() };
+        *prompt = "Allow this different command?".into();
+        q.observe(&second, 2.0);
+        let new_id = q.list()[0].id.clone();
+        assert_ne!(old_id, new_id);
+        assert_eq!(q.take_changes().iter().map(|change| (change.state, change.card.id.as_str())).collect::<Vec<_>>(), [
+            (CardState::Gone, old_id.as_str()),
+            (CardState::Pending, new_id.as_str()),
+        ]);
     }
 
     #[test]
@@ -779,17 +889,20 @@ mod tests {
     }
 
     #[test]
-    fn late_prose_upgrades_a_chrome_summary_without_making_it_fresh() {
+    fn late_prose_replaces_a_chrome_suggestion_with_a_new_id() {
         let mut q = Cards::new();
         let mut o = suggest("p1", &["a"]);
         o.info.last_assistant_message = "Shell".into();
         o.info.last_message = "seahelm-suggest a".into();
         q.observe(&o, 1.0);
+        q.take_changes();
         assert_eq!(q.list()[0].message, "");
         assert!(q.refresh_suggestion("p1", "Here is what I did.\n::seahelm-suggest:: a", 2.0));
         assert_eq!(q.list()[0].message, "Here is what I did.");
         assert!(!q.refresh_suggestion("p1", "Something else", 3.0));
-        assert_eq!(q.list()[0].fresh_at, 1.0);
+        assert_eq!(q.list()[0].id, "c-2");
+        assert_eq!(q.list()[0].fresh_at, 2.0);
+        assert_eq!(q.take_changes().iter().map(|change| change.state).collect::<Vec<_>>(), [CardState::Gone, CardState::Pending]);
     }
 
     #[test]
