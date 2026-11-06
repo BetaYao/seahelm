@@ -204,6 +204,48 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(fallbackEntry.sourceLabel, "feature/island")
     }
 
+    func testLiveCardBodyRevealNavigatesToItsPaneButFirstMateCardsStayInTheTimeline() throws {
+        let worktreeCard = try XCTUnwrap(Card(json: [
+            "id": "worktree-question", "kind": "question", "pane_session_key": "worktree-pane",
+            "project": "seahelm", "worktree_path": "/repo/worktrees/feature", "message": "Pick one",
+            "options": ["A", "B"],
+        ], terminalID: { _, _ in "terminal-7" }))
+        let firstMateCard = try XCTUnwrap(Card(json: [
+            "id": "first-mate-proposal", "kind": "proposal", "pane_session_key": FirstMatePane.sessionName,
+            "project": "seahelm", "message": "Choose a next step", "options": ["Continue", "Stop"],
+        ], terminalID: { _, _ in "first-mate" }))
+
+        let model = IslandModel()
+        var revealed: [Card] = []
+        model.onRevealCardSource = { revealed.append($0) }
+        model.open(reason: .click)
+        model.revealCard(worktreeCard)
+        XCTAssertEqual(revealed.map(\.id), [worktreeCard.id])
+        XCTAssertFalse(model.isOpened, "A worktree card returns to its pane in the dashboard")
+
+        model.orders = [order("pending", kind: .question)]
+        model.open(reason: .click)
+        model.toggleTimelineFilter()
+        let requestBeforeReveal = model.timelineScrollRequest
+        model.revealCard(firstMateCard)
+        XCTAssertEqual(revealed.map(\.id), [worktreeCard.id], "First Mate cards do not navigate to a worktree")
+        XCTAssertTrue(model.isOpened)
+        XCTAssertFalse(model.isFilteringTimeline)
+        XCTAssertNil(model.timelineScrollTarget, "The First Mate conversation is shown at its bottom")
+        XCTAssertEqual(model.timelineScrollRequest, requestBeforeReveal + 1)
+    }
+
+    func testWaitingCardMessageFoldsToThreeLinesAndSuggestionsUseCompactOptions() {
+        let longMessage = (1...20).map { "Final message line \($0)" }.joined(separator: "\n")
+        XCTAssertEqual(OpenedSurfaceView.cardPreviewLines, 3)
+        XCTAssertTrue(OpenedSurfaceView.cardMessageNeedsExpansion(longMessage))
+        XCTAssertFalse(OpenedSurfaceView.cardMessageNeedsExpansion("Choose the next step"))
+        XCTAssertEqual(IslandCardOptionStyle.forKind(.suggestion), .compactChips)
+        XCTAssertEqual(IslandCardOptionStyle.forKind(.question), .fullWidthRows)
+        XCTAssertEqual(IslandCardOptionStyle.forKind(.choice), .fullWidthRows)
+        XCTAssertEqual(IslandCardOptionStyle.forKind(.approval), .fullWidthRows)
+    }
+
     func testFleetCardSourceLabelUsesWorktreeNameInsteadOfProject() {
         let path = "/repo/worktrees/island-timeline"
         let pane = PaneRef(handle: 7, id: "pane-id", sessionKey: "pane-session",

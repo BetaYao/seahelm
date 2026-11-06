@@ -2102,8 +2102,8 @@ extension MainWindowController {
         model.onOptionTapped = { [weak self] order, optionText in
             self?.handleSuggestionTapped(order: order, optionText: optionText)
         }
-        model.onRevealSuggestion = { [weak self] order in
-            self?.revealSuggestionPane(order)
+        model.onRevealCardSource = { [weak self] order in
+            self?.revealCardPane(order)
         }
         model.onDismissOrder = { [weak self] order in
             self?.dismissOrder(order)
@@ -2161,9 +2161,8 @@ extension MainWindowController {
         refreshIsland()
     }
 
-    /// Jump to the pane that raised `order` without resolving the suggestion.
-    /// Used when the user taps blank area on an Island suggestion card.
-    private func revealSuggestionPane(_ card: Card) {
+    /// Jump to the pane that raised `card` without resolving it.
+    private func revealCardPane(_ card: Card) {
         let path = card.worktreePath
         tabCoordinator.handleNavigateToWorktree(worktreePath: path, paneIndex: nil)
         let terminalID = card.terminalID

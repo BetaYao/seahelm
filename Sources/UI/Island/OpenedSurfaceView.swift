@@ -501,21 +501,19 @@ struct OpenedSurfaceView: View {
         let liveCard = model.orders.first { $0.id == entry.id }
         let state = entry.effectiveState(liveCard: liveCard)
         if state == .pending, let liveCard {
+            let worktreeName = WorktreeRef.name(branch: liveCard.branch, path: liveCard.worktreePath)
             WaitingCardView(
                 order: liveCard,
                 language: model.language,
                 sourceLabel: entry.sourceLabel.isEmpty
                     ? (model.liveCardSourceLabels[entry.id]
-                        ?? (liveCard.paneSessionKey == FirstMatePane.sessionName ? "First Mate" : liveCard.project))
+                        ?? (liveCard.paneSessionKey == FirstMatePane.sessionName
+                            || liveCard.isFirstMates ? "First Mate"
+                            : (worktreeName.isEmpty ? liveCard.project : worktreeName)))
                     : entry.sourceLabel,
-                isSuggestion: entry.cardKind == Card.Kind.suggestion.rawValue,
                 onOption: { optionText in model.onOptionTapped?(liveCard, optionText) },
                 onDismiss: { model.onDismissOrder?(liveCard) },
-                onReveal: {
-                    guard !liveCard.isFirstMates else { return }
-                    model.onRevealSuggestion?(liveCard)
-                    model.close()
-                }
+                onReveal: { model.revealCard(liveCard) }
             )
         } else {
             Text(Self.cardSummary(entry, state: state, isChinese: model.language.isChinese))
@@ -635,6 +633,12 @@ struct OpenedSurfaceView: View {
 
     /// How many lines of a reply show before "More".
     static let replyPreviewLines = 3
+    /// Cards use the same folded length as replies, but expand in their own row.
+    static let cardPreviewLines = 3
+
+    static func cardMessageNeedsExpansion(_ text: String) -> Bool {
+        isLongReply(text)
+    }
 
     /// Whether a reply runs past its preview lines (an estimate: its non-blank
     /// lines, or enough characters to wrap past them).
@@ -1240,11 +1244,11 @@ private struct WaitingCardView: View {
     let order: Card
     let language: IslandLanguage
     let sourceLabel: String
-    let isSuggestion: Bool
     let onOption: (String) -> Void
     let onDismiss: () -> Void
-    /// Blank-area tap: jump to the raising pane without resolving the card.
+    /// Card content tap: jump to the raising pane without resolving the card.
     let onReveal: () -> Void
+    @State private var messageExpanded = false
 
     private var isQuestion: Bool {
         order.isAgentQuestion
@@ -1260,40 +1264,38 @@ private struct WaitingCardView: View {
         return isQuestion ? "questionmark.circle.fill" : "lightbulb.fill"
     }
 
+    private var isSuggestion: Bool { order.kind == .suggestion }
+
+    private var optionStyle: IslandCardOptionStyle {
+        IslandCardOptionStyle.forKind(order.kind)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 11))
-                    .foregroundStyle(isIntegration ? .orange : .yellow)
-                if !sourceLabel.isEmpty {
-                    Text(sourceLabel)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.85))
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(isIntegration ? .orange : (isSuggestion ? .white.opacity(0.5) : .yellow))
+                    Text(sourceLabel.isEmpty ? order.project : sourceLabel)
+                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(isSuggestion ? .white.opacity(0.58) : .white.opacity(0.82))
                         .lineLimit(1)
-                } else {
-                    Text(order.project)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.85))
-                    if !order.branch.isEmpty {
-                        Text(order.branch)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.5))
-                    } else if isIntegration {
-                        Text(language.integration)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(isSuggestion ? Color.white.opacity(0.055) : IslandStyle.accent.opacity(0.15)))
+                        .overlay(Capsule().stroke(isSuggestion ? Color.white.opacity(0.12) : IslandStyle.accent.opacity(0.28), lineWidth: 0.7))
+                        .contentShape(Capsule())
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 // onTapGesture, not Button: SwiftUI Buttons in a non-activating
                 // panel swallow the click for key acquisition.
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.white.opacity(0.45))
                     .frame(width: 20, height: 20)
                     .contentShape(Rectangle())
-                    .onTapGesture { onDismiss() }
+                    .highPriorityGesture(TapGesture().onEnded { onDismiss() })
             }
             if isQuestion, !order.header.isEmpty {
                 // The question's tab title in the agent's dialog.
@@ -1303,28 +1305,63 @@ private struct WaitingCardView: View {
                     .padding(.bottom, -4)
             }
             if !order.message.isEmpty {
-                Text(order.message)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
+                let needsExpansion = OpenedSurfaceView.cardMessageNeedsExpansion(order.message)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(messageExpanded ? order.message : OpenedSurfaceView.preview(order.message))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(isSuggestion ? 0.72 : 0.92))
+                        .lineSpacing(1.5)
+                        .lineLimit(messageExpanded ? nil : OpenedSurfaceView.cardPreviewLines)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onReveal() }
+                    if needsExpansion {
+                        HStack(spacing: 3) {
+                            Text(messageExpanded ? language.less : language.more)
+                            Image(systemName: messageExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 7, weight: .bold))
+                        }
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(isSuggestion ? 0.44 : 0.58))
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(TapGesture().onEnded {
+                            withAnimation(.easeInOut(duration: 0.15)) { messageExpanded.toggle() }
+                        })
+                    }
+                }
             }
-            // Options keep their own taps so they don't bubble to onReveal.
             OptionList(options: order.labels,
                        details: order.labels.indices.map { order.detail(forLabelAt: $0) },
+                       style: optionStyle,
                        onTap: onOption)
         }
         .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(IslandStyle.accent.opacity(0.3), lineWidth: 1)
-                )
-        )
+        .background(cardBackground)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture { onReveal() }
-        .opacity(isSuggestion ? 0.68 : 1)
+        .opacity(isSuggestion ? 0.84 : 1)
+    }
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(isSuggestion ? Color.white.opacity(0.025) : IslandStyle.accent.opacity(0.085))
+            .overlay(alignment: .leading) {
+                if !isSuggestion {
+                    UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 12)
+                        .fill(IslandStyle.accent)
+                        .frame(width: 3)
+                }
+            }
+            .overlay {
+                if isSuggestion {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        .foregroundStyle(Color.white.opacity(0.16))
+                } else {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(IslandStyle.accent.opacity(0.38), lineWidth: 1)
+                }
+            }
     }
 }
 
@@ -1333,53 +1370,117 @@ private struct OptionList: View {
     let options: [String]
     /// A line under each option ("" for none), as the agent's dialog shows it.
     var details: [String] = []
+    let style: IslandCardOptionStyle
     let onTap: (String) -> Void
     @State private var hoveredIndex: Int?
 
     var body: some View {
-        VStack(spacing: 6) {
-            ForEach(Array(options.enumerated()), id: \.offset) { index, option in
-                HStack(spacing: 10) {
-                        Text("\(index + 1)")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .frame(width: 18, height: 18)
-                            .background(
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(Color.white.opacity(0.14))
-                            )
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(option)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.95))
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                            if details.indices.contains(index), !details[index].isEmpty {
-                                Text(details[index])
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.white.opacity(0.55))
-                                    .lineLimit(3)
+        Group {
+            if style == .compactChips {
+                IslandFlowLayout(spacing: 6) {
+                    ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                        Text(option)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.white.opacity(0.06)))
+                            .overlay(Capsule().stroke(Color.white.opacity(0.13), lineWidth: 1))
+                            .contentShape(Capsule())
+                            .highPriorityGesture(TapGesture().onEnded { onTap(option) })
+                            .accessibilityIdentifier("island.card.option.chip")
+                    }
+                }
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(Array(options.enumerated()), id: \.offset) { index, option in
+                        HStack(spacing: 10) {
+                            Text("\(index + 1)")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .frame(width: 18, height: 18)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(Color.white.opacity(0.14))
+                                )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.95))
+                                    .lineLimit(2)
                                     .multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                if details.indices.contains(index), !details[index].isEmpty {
+                                    Text(details[index])
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.55))
+                                        .lineLimit(3)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color.white.opacity(hoveredIndex == index ? 0.18 : 0.08))
+                        )
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(TapGesture().onEnded { onTap(option) })
+                        .onHover { inside in
+                            withAnimation(.easeInOut(duration: 0.12)) {
+                                hoveredIndex = inside ? index : (hoveredIndex == index ? nil : hoveredIndex)
                             }
                         }
-                        Spacer(minLength: 0)
-                    }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 9)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Color.white.opacity(hoveredIndex == index ? 0.18 : 0.08))
-                )
-                .contentShape(Rectangle())
-                .onTapGesture { onTap(option) }
-                .onHover { inside in
-                    withAnimation(.easeInOut(duration: 0.12)) {
-                        hoveredIndex = inside ? index : (hoveredIndex == index ? nil : hoveredIndex)
                     }
                 }
             }
         }
+    }
+}
+
+/// A compact row of suggestion chips that wraps without introducing a nested
+/// scroll view, so the pointer wheel always belongs to the timeline.
+private struct IslandFlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .greatestFiniteMagnitude
+        let placement = positions(for: subviews, width: width)
+        return CGSize(width: min(placement.width, width), height: placement.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let placement = positions(for: subviews, width: bounds.width)
+        for (index, point) in placement.points.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y),
+                                  anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: nil))
+        }
+    }
+
+    private func positions(for subviews: Subviews, width: CGFloat) -> (points: [CGPoint], width: CGFloat, height: CGFloat) {
+        var points: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var usedWidth: CGFloat = 0
+        for subview in subviews {
+            var size = subview.sizeThatFits(.unspecified)
+            if size.width > width { size = subview.sizeThatFits(ProposedViewSize(width: width, height: nil)) }
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            points.append(CGPoint(x: x, y: y))
+            usedWidth = max(usedWidth, x + size.width)
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+        }
+        return (points, usedWidth, subviews.isEmpty ? 0 : y + rowHeight)
     }
 }
