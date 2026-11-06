@@ -17,8 +17,6 @@ use seahelm_core_types::Timestamp;
 use crate::event::{Kind, Message};
 use crate::project::{project, Coalesce};
 
-const CARD_ROWS_PER_PANE: usize = 200;
-
 /// What a client holding everything up to some seq is missing.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Replay {
@@ -41,7 +39,7 @@ impl Hub {
     pub fn new(store: Option<Store>, per_pane: usize) -> Self {
         let mut hub = Hub { rings: HashMap::new(), coalesce: HashMap::new(), next_seq: 0, per_pane, store };
         if let Some(store) = &mut hub.store {
-            hub.rings = store.load_tails(per_pane, CARD_ROWS_PER_PANE);
+            hub.rings = store.load_tails(per_pane);
             hub.next_seq = hub.rings.values().filter_map(|r| r.last().map(|m| m.seq)).max().unwrap_or(0);
         }
         hub
@@ -74,14 +72,14 @@ impl Hub {
             self.next_seq += 1;
             m.seq = self.next_seq;
             ring.push(m.clone());
-            let is_card = m.kind == Kind::Card;
-            let count = ring.iter().filter(|row| (row.kind == Kind::Card) == is_card).count();
-            let keep = if is_card { CARD_ROWS_PER_PANE } else { self.per_pane };
+            let is_activity = m.kind.is_activity();
+            let count = ring.iter().filter(|row| row.kind.is_activity() == is_activity).count();
+            let keep = self.per_pane;
             if count > keep {
                 let extra = count - keep;
                 let mut removed = 0;
                 ring.retain(|row| {
-                    if removed < extra && (row.kind == Kind::Card) == is_card {
+                    if removed < extra && row.kind.is_activity() == is_activity {
                         removed += 1;
                         false
                     } else {
@@ -137,12 +135,12 @@ impl Hub {
         let mut truncated = Vec::new();
         for (key, ring) in &self.rings {
             let newer: Vec<Message> = ring.iter().filter(|m| m.seq > after).cloned().collect();
-            let conversation: Vec<&Message> = ring.iter().filter(|m| m.kind != Kind::Card).collect();
-            let cards: Vec<&Message> = ring.iter().filter(|m| m.kind == Kind::Card).collect();
+            let conversation: Vec<&Message> = ring.iter().filter(|m| !m.kind.is_activity()).collect();
+            let activity: Vec<&Message> = ring.iter().filter(|m| m.kind.is_activity()).collect();
             let newer_conversation = conversation.iter().filter(|m| m.seq > after).count();
-            let newer_cards = cards.iter().filter(|m| m.seq > after).count();
+            let newer_activity = activity.iter().filter(|m| m.seq > after).count();
             if (conversation.len() >= self.per_pane && newer_conversation == conversation.len())
-                || (cards.len() >= CARD_ROWS_PER_PANE && newer_cards == cards.len())
+                || (activity.len() >= self.per_pane && newer_activity == activity.len())
             {
                 truncated.push(key.clone());
             }
@@ -181,8 +179,9 @@ impl Hub {
     }
 }
 
-/// The disk side: conversation rows and card rows have separate JSONL files
-/// per ring and independent retention, both oldest line first.
+/// The disk side keeps conversation rows and tool/status rows in separate
+/// JSONL buckets per ring. Card rows share the conversation budget, while
+/// staying in their existing file for compatible readers.
 pub struct Store {
     dir: PathBuf,
     keep: usize,
@@ -205,6 +204,11 @@ impl Store {
         self.dir.join(format!("{safe}.cards.jsonl"))
     }
 
+    fn activity_file(&self, key: &str) -> PathBuf {
+        let safe: String = key.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+        self.dir.join(format!("{safe}.activity.jsonl"))
+    }
+
     fn read_lines(path: &Path) -> Vec<String> {
         std::fs::read_to_string(path).map(|t| t.lines().filter(|l| !l.is_empty()).map(str::to_string).collect()).unwrap_or_default()
     }
@@ -220,100 +224,120 @@ impl Store {
         Some(m)
     }
 
-    fn load_tails(&mut self, count: usize, card_count: usize) -> HashMap<String, Vec<Message>> {
-        let mut conversations: HashMap<String, Vec<Message>> = HashMap::new();
-        let mut cards: HashMap<String, Vec<Message>> = HashMap::new();
-        let mut legacy_card_keys = std::collections::HashSet::new();
+    fn load_tails(&mut self, count: usize) -> HashMap<String, Vec<Message>> {
+        let mut all: HashMap<String, Vec<Message>> = HashMap::new();
+        let mut misplaced = std::collections::HashSet::new();
         let Ok(entries) = std::fs::read_dir(&self.dir) else { return HashMap::new() };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
-            let is_card_file = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".cards.jsonl"));
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            let is_card_file = name.ends_with(".cards.jsonl");
+            let is_activity_file = name.ends_with(".activity.jsonl");
             for line in Self::read_lines(&path) {
                 let Some(message) = Self::decode(&line) else { continue };
                 let key = message.ring_key().to_string();
-                let is_card = message.kind == Kind::Card;
-                if is_card {
-                    if !is_card_file {
-                        legacy_card_keys.insert(key.clone());
-                    }
-                    cards.entry(key.clone()).or_default().push(message);
-                } else if !is_card_file {
-                    conversations.entry(key.clone()).or_default().push(message);
+                let expected_card_file = message.kind == Kind::Card;
+                let expected_activity_file = message.kind.is_activity();
+                if is_card_file != expected_card_file || is_activity_file != expected_activity_file {
+                    misplaced.insert(key.clone());
                 }
-                *self.lines.entry((key, is_card)).or_default() += 1;
-            }
-        }
-        for rows in conversations.values_mut() {
-            rows.sort_by_key(|m| m.seq);
-            let excess = rows.len().saturating_sub(count);
-            rows.drain(..excess);
-        }
-        for rows in cards.values_mut() {
-            rows.sort_by_key(|m| m.seq);
-            rows.dedup_by_key(|m| m.seq);
-            let excess = rows.len().saturating_sub(card_count);
-            rows.drain(..excess);
-        }
-        // Move card rows from pre-split files into their own file before a
-        // later conversation trim can discard those legacy lines. Also heal
-        // any card file left beyond its cap by an interrupted write.
-        let mut rewrite_card_keys = legacy_card_keys;
-        rewrite_card_keys.extend(cards.iter().filter_map(|(key, _)| {
-            (self.lines.get(&(key.clone(), true)).copied().unwrap_or(0) > card_count).then(|| key.clone())
-        }));
-        for key in rewrite_card_keys {
-            if let Some(rows) = cards.get(&key) {
-                let body = rows.iter().map(|m| format!("{}\n", m.to_json())).collect::<String>();
-                if std::fs::write(self.card_file(&key), body).is_ok() {
-                    self.lines.insert((key, true), rows.len());
-                }
+                all.entry(key).or_default().push(message);
             }
         }
         let mut rings = HashMap::new();
-        for (key, mut rows) in conversations {
-            rows.extend(cards.remove(&key).unwrap_or_default());
+        for (key, mut rows) in all {
             rows.sort_by_key(|m| m.seq);
-            rings.insert(key, rows);
-        }
-        for (key, mut rows) in cards {
-            rows.sort_by_key(|m| m.seq);
-            rings.insert(key, rows);
+            rows.dedup_by_key(|m| m.seq);
+            let mut conversation: Vec<Message> = rows.iter().filter(|m| !m.kind.is_activity()).cloned().collect();
+            let mut activity: Vec<Message> = rows.into_iter().filter(|m| m.kind.is_activity()).collect();
+            if conversation.len() > self.keep || activity.len() > self.keep {
+                misplaced.insert(key.clone());
+                conversation.drain(..conversation.len().saturating_sub(self.keep));
+                activity.drain(..activity.len().saturating_sub(self.keep));
+            }
+            self.lines.insert((key.clone(), false), conversation.len());
+            self.lines.insert((key.clone(), true), activity.len());
+            if misplaced.contains(&key) {
+                self.persist_bucket(&key, false, &conversation);
+                self.persist_bucket(&key, true, &activity);
+            }
+
+            let mut memory: Vec<Message> = conversation[conversation.len().saturating_sub(count)..].to_vec();
+            memory.extend(activity[activity.len().saturating_sub(count)..].iter().cloned());
+            memory.sort_by_key(|m| m.seq);
+            if !memory.is_empty() {
+                rings.insert(key, memory);
+            }
         }
         rings
     }
 
     fn save(&mut self, m: &Message) {
         let key = m.ring_key().to_string();
-        let is_card = m.kind == Kind::Card;
-        let path = if is_card { self.card_file(&key) } else { self.file(&key) };
+        let is_activity = m.kind.is_activity();
+        let path = if is_activity { self.activity_file(&key) } else if m.kind == Kind::Card { self.card_file(&key) } else { self.file(&key) };
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
             let _ = writeln!(f, "{}", m.to_json());
         }
-        let n = self.lines.entry((key.clone(), is_card)).or_insert(0);
+        let n = self.lines.entry((key.clone(), is_activity)).or_insert(0);
         *n += 1;
-        let keep = if is_card { CARD_ROWS_PER_PANE } else { self.keep };
+        let keep = self.keep;
         let threshold = keep + keep / 2;
         if *n > threshold {
-            let matching: Vec<String> = Self::read_lines(&path).into_iter().filter(|line| {
-                Self::decode(line).is_some_and(|row| (row.kind == Kind::Card) == is_card)
-            }).collect();
-            let kept = &matching[matching.len().saturating_sub(keep)..];
-            let tmp = path.with_extension("tmp");
-            if std::fs::write(&tmp, kept.iter().map(|l| format!("{l}\n")).collect::<String>()).is_ok() {
-                let _ = std::fs::rename(&tmp, &path);
-            }
-            self.lines.insert((key, is_card), kept.len());
+            let mut rows = self.read_bucket(&key, is_activity);
+            rows.sort_by_key(|row| row.seq);
+            rows.dedup_by_key(|row| row.seq);
+            let excess = rows.len().saturating_sub(keep);
+            rows.drain(..excess);
+            self.persist_bucket(&key, is_activity, &rows);
+            self.lines.insert((key, is_activity), rows.len());
+        }
+    }
+
+    fn read_bucket(&self, key: &str, is_activity: bool) -> Vec<Message> {
+        let paths = if is_activity { vec![self.activity_file(key)] } else { vec![self.file(key), self.card_file(key)] };
+        let mut rows: Vec<Message> = paths
+            .iter()
+            .flat_map(|path| Self::read_lines(path))
+            .filter_map(|line| Self::decode(&line))
+            .filter(|row| row.ring_key() == key && row.kind.is_activity() == is_activity)
+            .collect();
+        rows.sort_by_key(|row| row.seq);
+        rows.dedup_by_key(|row| row.seq);
+        rows
+    }
+
+    fn persist_bucket(&self, key: &str, is_activity: bool, rows: &[Message]) {
+        if is_activity {
+            Self::replace_file(&self.activity_file(key), rows);
+        } else {
+            let conversation: Vec<Message> = rows.iter().filter(|row| row.kind != Kind::Card).cloned().collect();
+            let cards: Vec<Message> = rows.iter().filter(|row| row.kind == Kind::Card).cloned().collect();
+            Self::replace_file(&self.file(key), &conversation);
+            Self::replace_file(&self.card_file(key), &cards);
+        }
+    }
+
+    fn replace_file(path: &Path, rows: &[Message]) {
+        if rows.is_empty() {
+            let _ = std::fs::remove_file(path);
+            return;
+        }
+        let tmp = path.with_extension("tmp");
+        let body = rows.iter().map(|row| format!("{}\n", row.to_json())).collect::<String>();
+        if std::fs::write(&tmp, body).is_ok() {
+            let _ = std::fs::rename(&tmp, path);
         }
     }
 
     fn history(&self, key: &str, before: u64, limit: usize) -> (Vec<Message>, bool) {
-        let conversation = Self::read_lines(&self.file(key));
-        let cards = Self::read_lines(&self.card_file(key));
-        let mut older: Vec<Message> = conversation.iter().chain(cards.iter())
-            .filter_map(|line| Self::decode(line))
+        let mut older: Vec<Message> = [self.file(key), self.card_file(key), self.activity_file(key)]
+            .iter()
+            .flat_map(|path| Self::read_lines(path))
+            .filter_map(|line| Self::decode(&line))
             .filter(|m| m.ring_key() == key && m.seq < before)
             .collect();
         older.sort_by_key(|m| m.seq);
@@ -327,6 +351,7 @@ impl Store {
         self.lines.remove(&(key.to_string(), true));
         let _ = std::fs::remove_file(self.file(key));
         let _ = std::fs::remove_file(self.card_file(key));
+        let _ = std::fs::remove_file(self.activity_file(key));
     }
 }
 
@@ -450,39 +475,58 @@ mod tests {
         assert_eq!(texts(&again.snapshot(Some("k"))), t(&["m35", "m36", "m37", "m38", "m39"]));
         let (older, more) = again.history("k", 36, 100);
         assert_eq!(older.last().and_then(|m| m.text.clone()).as_deref(), Some("m34"));
-        assert_eq!(older.len(), lines - 5);
+        assert_eq!(older.len(), 5);
         assert!(!more);
     }
 
     #[test]
-    fn card_rows_have_separate_retention_from_conversation_rows() {
+    fn tool_flood_preserves_conversation_and_disk_margins() {
         let dir = tempfile::tempdir().unwrap();
-        let mut hub = Hub::new(Some(Store::open(dir.path(), 2000)), 80);
-        for i in 0..305 {
+        let mut hub = Hub::new(Some(Store::open(dir.path(), 12)), 5);
+        for i in 0..60 {
             hub.append(vec![ev(&format!("conversation-{i}"), "a", "k", i as f64)]);
-            let mut card = Message::new("seahelm-first-mate", "k", Kind::Card, i as f64 + 0.5).with_text(format!("card-{i}"));
-            card.card_id = Some(format!("c-{i}"));
-            card.state = Some("pending".into());
-            hub.append(vec![card]);
+            hub.append(vec![Message::new("a", "k", Kind::Tool, i as f64).with_text(format!("tool-{i}"))]);
         }
-        let snapshot = hub.snapshot(Some("k"));
-        assert_eq!(snapshot.iter().filter(|m| m.kind != Kind::Card).count(), 80);
-        assert_eq!(snapshot.iter().filter(|m| m.kind == Kind::Card).count(), 200);
-        assert!(snapshot.windows(2).all(|rows| rows[0].seq < rows[1].seq));
-        assert_eq!(snapshot.iter().find(|m| m.kind != Kind::Card).unwrap().text.as_deref(), Some("conversation-225"));
-        assert_eq!(snapshot.iter().find(|m| m.kind == Kind::Card).unwrap().text.as_deref(), Some("card-105"));
-        let card_file_rows = std::fs::read_to_string(dir.path().join("k.cards.jsonl")).unwrap().lines().count();
-        assert!((201..=300).contains(&card_file_rows), "{card_file_rows}");
-
-        let mut after_restart = Hub::new(Some(Store::open(dir.path(), 2000)), 80);
-        let snapshot = after_restart.snapshot(Some("k"));
-        assert_eq!(snapshot.iter().filter(|m| m.kind != Kind::Card).count(), 80);
-        assert_eq!(snapshot.iter().filter(|m| m.kind == Kind::Card).count(), 200);
-        assert!(snapshot.windows(2).all(|rows| rows[0].seq < rows[1].seq));
-        assert_eq!(snapshot.iter().find(|m| m.kind == Kind::Card).unwrap().text.as_deref(), Some("card-105"));
-        let (history, more) = after_restart.history("k", u64::MAX, 600);
-        assert_eq!(history.len(), 505);
+        for i in 0..2 {
+            hub.append(vec![Message::new("a", "k", Kind::Card, 61.0).with_text(format!("card-{i}"))]);
+        }
+        for snapshot in [hub.snapshot(Some("k")), Hub::new(Some(Store::open(dir.path(), 12)), 5).snapshot(Some("k"))] {
+            assert_eq!(snapshot.iter().filter(|m| !m.kind.is_activity()).count(), 5);
+            assert_eq!(snapshot.iter().filter(|m| m.kind.is_activity()).count(), 5);
+            assert_eq!(snapshot.iter().filter(|m| m.kind == Kind::Card).count(), 2);
+            assert!(snapshot.windows(2).all(|pair| pair[0].seq < pair[1].seq));
+            assert_eq!(snapshot.iter().find(|m| m.kind == Kind::User).unwrap().text.as_deref(), Some("conversation-57"));
+        }
+        let mut restarted = Hub::new(Some(Store::open(dir.path(), 12)), 5);
+        let (history, more) = restarted.history("k", u64::MAX, 100);
+        assert_eq!(history.len(), 24);
         assert!(!more);
+        assert!(history.windows(2).all(|pair| pair[0].seq < pair[1].seq));
+    }
+
+    #[test]
+    fn legacy_mixed_file_keeps_all_conversation_kinds_through_a_tool_flood() {
+        let dir = tempfile::tempdir().unwrap();
+        let kinds = [Kind::User, Kind::Assistant, Kind::Thinking, Kind::Decision, Kind::Notice, Kind::Note, Kind::Brief, Kind::Card];
+        let mut rows = Vec::new();
+        for (i, kind) in kinds.into_iter().enumerate() {
+            let mut row = Message::new("a", "k", kind, i as f64).with_text(format!("conversation-{i}"));
+            row.seq = i as u64 + 1;
+            rows.push(row);
+        }
+        for i in 0..133 {
+            let mut row = Message::new("a", "k", if i % 2 == 0 { Kind::Tool } else { Kind::Status }, 10.0);
+            row.seq = i + 9;
+            rows.push(row);
+        }
+        std::fs::write(dir.path().join("k.jsonl"), rows.iter().map(|row| format!("{}\n", row.to_json())).collect::<String>()).unwrap();
+        let mut hub = Hub::new(Some(Store::open(dir.path(), 2000)), 80);
+        let snapshot = hub.snapshot(Some("a"));
+        assert_eq!(snapshot.iter().filter(|row| !row.kind.is_activity()).count(), 8);
+        assert_eq!(snapshot.iter().filter(|row| row.kind.is_activity()).count(), 80);
+        assert!(snapshot.windows(2).all(|pair| pair[0].seq < pair[1].seq));
+        assert_eq!(hub.history("k", u64::MAX, 200).0.len(), 141);
+        assert!(dir.path().join("k.activity.jsonl").is_file());
     }
 
     #[test]

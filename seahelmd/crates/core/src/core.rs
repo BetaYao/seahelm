@@ -52,6 +52,8 @@ pub struct Core {
     /// Where each transcript was read to; its own lock, so reading one never
     /// holds `state`.
     transcripts: Mutex<seahelm_core_messages::Tail>,
+    /// Cursor chat-store checkpoints; reads SQLite without holding `state`.
+    cursor_transcripts: Mutex<seahelm_core_messages::CursorTail>,
     /// Stable pane handles (`#n`) for the command language.
     pub(crate) handles: Arc<Mutex<seahelm_core_command::Handles>>,
     /// Per worktree: its repo root and branch, and when they were read.
@@ -151,6 +153,18 @@ struct PaneScan {
     program_seq: u64,
 }
 
+struct TranscriptRequest {
+    pane: String,
+    alias: String,
+    source: TranscriptSource,
+    since: Timestamp,
+}
+
+enum TranscriptSource {
+    File(String),
+    Cursor { cwd: String, chat_id: String, session_start: bool },
+}
+
 /// What `core.ping` says about the `seahelm` CLI's verbs: bumped when the
 /// CLI starts to rely on something new here.
 pub const CLI_DIALECT: u64 = 1;
@@ -247,6 +261,7 @@ impl Core {
             first_mate: std::sync::OnceLock::new(),
             observer: std::sync::OnceLock::new(),
             transcripts: Mutex::new(seahelm_core_messages::Tail::default()),
+            cursor_transcripts: Mutex::new(seahelm_core_messages::CursorTail::default()),
             handles,
             git_cache: Mutex::new(HashMap::new()),
             discovered: Mutex::new(Vec::new()),
@@ -408,8 +423,20 @@ impl Core {
                 // transcript without the lock, and put on the timeline before
                 // this hook's own rows: above the tool call it introduces.
                 let wanted = self.lock().transcript_request(&p);
-                let prose = wanted.map(|(pane, alias, path, since)| {
-                    let entries = self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).new_prose(&path, since);
+                let prose = wanted.map(|request| {
+                    let entries = match request.source {
+                        TranscriptSource::File(path) => self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).new_prose(&path, request.since),
+                        TranscriptSource::Cursor { cwd, chat_id, session_start } => {
+                            let chats_root = hooks::titles::cursor_chats_root(&hooks::home_dir());
+                            self.cursor_transcripts.lock().unwrap_or_else(|e| e.into_inner()).new_prose(
+                                &chats_root,
+                                &cwd,
+                                &chat_id,
+                                session_start,
+                            )
+                        }
+                    };
+                    let (pane, alias) = (request.pane, request.alias);
                     (pane, alias, entries)
                 });
                 let mut st = self.lock();
@@ -1943,13 +1970,22 @@ impl State {
     /// For a hook that names a transcript: the pane it is about, what clients
     /// call it, the transcript, and how far back a first read may go (to
     /// where the pane's timeline already reaches, else five minutes).
-    fn transcript_request(&self, payload: &Value) -> Option<(String, String, String, Timestamp)> {
+    fn transcript_request(&self, payload: &Value) -> Option<TranscriptRequest> {
         let ev = hooks::event::parse(payload)?;
-        let path = ev.session_path.clone()?;
         let pane = self.registry.resolve(ev.pane_id.as_deref(), &ev.cwd)?;
         let alias = self.registry.pane(&pane).and_then(|p| p.alias.clone()).unwrap_or_else(|| pane.clone());
         let since = self.messages.last_ts(&pane).unwrap_or(now() - 300.0);
-        Some((pane, alias, path, since))
+        if ev.source == "cursor" && ev.is_subagent() { return None; }
+        let source = if ev.source == "cursor" {
+            TranscriptSource::Cursor {
+                cwd: ev.cwd,
+                chat_id: ev.session_id,
+                session_start: ev.event == hooks::event::WebhookEventType::SessionStart,
+            }
+        } else {
+            TranscriptSource::File(ev.session_path?)
+        };
+        Some(TranscriptRequest { pane, alias, source, since })
     }
 
     /// `cards.changed`: the whole list, so a renderer never has to merge.

@@ -3,6 +3,8 @@
 //! final message, but not what the agent writes between tool calls — the
 //! part that says what it is doing and why. Claude Code and Codex append
 //! every message to a JSONL transcript whose path comes with each hook.
+//! Cursor Agent keeps ordered JSON messages behind a protobuf root in its
+//! SQLite chat store; tool hooks trigger read-only reads of that store.
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -10,6 +12,7 @@ use std::io::{Read, Seek, SeekFrom};
 use serde_json::Value;
 
 use seahelm_core_hooks::suggest::strip_sentinel;
+use seahelm_core_hooks::cursor_store::{self, Message as CursorMessage};
 use seahelm_core_types::Timestamp;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -25,6 +28,40 @@ pub struct Tail {
     /// session is not replayed, only its recent end newer than `since`.
     first_read: u64,
     offsets: HashMap<String, u64>,
+}
+
+/// Cursor's ordered, SQLite-backed chat store has a stable message id rather
+/// than a JSONL byte offset. Keep one checkpoint per chat while the core runs.
+#[derive(Default)]
+pub struct CursorTail {
+    seen: HashMap<String, String>,
+}
+
+impl CursorTail {
+    /// New visible assistant prose in this Cursor chat, in chat-store order.
+    /// On a first read, start after the latest user message so a resumed chat
+    /// does not replay its earlier turns. A SessionStart takes a baseline at
+    /// the current end when the store already contains history.
+    pub fn new_prose(&mut self, chats_root: &std::path::Path, cwd: &str, chat_id: &str, session_start: bool) -> Vec<Entry> {
+        let Some(messages) = cursor_store::read_messages(chats_root, cwd, chat_id) else { return Vec::new() };
+        self.advance(&format!("{cwd}\0{chat_id}"), &messages, session_start)
+    }
+
+    fn advance(&mut self, key: &str, messages: &[CursorMessage], session_start: bool) -> Vec<Entry> {
+        let start = if let Some(last_id) = self.seen.get(key) {
+            messages.iter().rposition(|message| &message.id == last_id).map(|i| i + 1).unwrap_or_else(|| {
+                messages.iter().rposition(|message| message.role == "user").map(|i| i + 1).unwrap_or(messages.len())
+            })
+        } else if session_start {
+            messages.len()
+        } else {
+            messages.iter().rposition(|message| message.role == "user").map(|i| i + 1).unwrap_or(messages.len())
+        };
+        if let Some(last) = messages.last() {
+            self.seen.insert(key.to_string(), last.id.clone());
+        }
+        messages[start..].iter().filter_map(cursor_message_prose).collect()
+    }
 }
 
 impl Default for Tail {
@@ -73,6 +110,26 @@ impl Tail {
             .filter(|e| known.is_some() || e.timestamp.is_some_and(|t| t > since))
             .collect()
     }
+}
+
+fn cursor_message_prose(message: &CursorMessage) -> Option<Entry> {
+    if message.role != "assistant" {
+        return None;
+    }
+    let text = match &message.content {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    };
+    let text = strip_sentinel(&text);
+    let text = text.trim();
+    (!text.is_empty()).then(|| Entry { thinking: false, text: text.to_string(), timestamp: None })
 }
 
 /// The prose in one transcript line, if any.
@@ -182,6 +239,15 @@ mod tests {
         e.iter().map(|x| x.text.as_str()).collect()
     }
 
+    fn cursor_message(fixture: &str) -> CursorMessage {
+        let value: Value = serde_json::from_str(fixture).unwrap();
+        CursorMessage {
+            id: value["id"].as_str().unwrap().to_string(),
+            role: value["role"].as_str().unwrap().to_string(),
+            content: value["content"].clone(),
+        }
+    }
+
     #[test]
     fn reads_claude_prose_between_tool_calls_in_order() {
         let mut f = File::new();
@@ -256,6 +322,45 @@ mod tests {
         let got = Tail::default().new_prose(&f.path(), 0.0);
         assert_eq!(texts(&got), ["Checking the merge", "已合并 PR"]);
         assert_eq!(got.iter().map(|e| e.thinking).collect::<Vec<_>>(), [true, false]);
+    }
+
+    #[test]
+    fn reads_cursor_assistant_text_but_not_reasoning_or_tool_calls() {
+        let assistant = cursor_message(include_str!("../tests/fixtures/cursor-assistant-message.json"));
+        assert_eq!(cursor_message_prose(&assistant).unwrap().text, "I'll inspect the timeline.");
+        assert!(cursor_message_prose(&cursor_message(include_str!("../tests/fixtures/cursor-tool-message.json"))).is_none());
+    }
+
+    #[test]
+    fn cursor_tail_reads_new_assistant_messages_in_store_order() {
+        let user = cursor_message(include_str!("../tests/fixtures/cursor-user-message.json"));
+        let first = cursor_message(include_str!("../tests/fixtures/cursor-assistant-message.json"));
+        let tool = cursor_message(include_str!("../tests/fixtures/cursor-tool-message.json"));
+        let second = CursorMessage {
+            id: "msg-assistant-2".into(),
+            role: "assistant".into(),
+            content: json!([{"type": "text", "text": "Now I can explain the fix."}]),
+        };
+        let rows = [user.clone(), first.clone(), tool.clone(), second.clone()];
+        let mut tail = CursorTail::default();
+        assert_eq!(texts(&tail.advance("chat", &rows[..3], false)), ["I'll inspect the timeline."]);
+        assert_eq!(texts(&tail.advance("chat", &rows, false)), ["Now I can explain the fix."]);
+        assert!(tail.advance("chat", &rows, false).is_empty());
+    }
+
+    #[test]
+    fn cursor_session_start_baselines_existing_history() {
+        let user = cursor_message(include_str!("../tests/fixtures/cursor-user-message.json"));
+        let first = cursor_message(include_str!("../tests/fixtures/cursor-assistant-message.json"));
+        let rows = [user, first];
+        let mut tail = CursorTail::default();
+        assert!(tail.advance("chat", &rows, true).is_empty());
+        let next = CursorMessage {
+            id: "msg-assistant-next".into(),
+            role: "assistant".into(),
+            content: json!([{"type": "text", "text": "A new turn."}]),
+        };
+        assert_eq!(texts(&tail.advance("chat", &[rows[0].clone(), rows[1].clone(), next], false)), ["A new turn."]);
     }
 
     #[test]
