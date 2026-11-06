@@ -1017,7 +1017,7 @@ impl Core {
 
     /// The calls the core performs itself (`actions`).
     pub fn act(&self, method: &str, p: &Value) -> RpcResult {
-        if matches!(method, "pane.run" | "pane.send_text") {
+        if matches!(method, "pane.run" | "pane.send_text" | "pane.send_keys") {
             // The prompt this makes in the pane is not the user's typing.
             if let Some(key) = str_param(p, "pane_id").and_then(|h| self.resolve_pane(&h)) {
                 let text = str_param(p, "command").or_else(|| str_param(p, "text")).unwrap_or_default();
@@ -1499,6 +1499,15 @@ impl Core {
                 }
             }
             Verdict::Client { .. } | Verdict::Outside => {}
+            Verdict::OwnShell { pane } if !self.typed_into_recently(pane) => {}
+            Verdict::OwnShell { pane } => {
+                let why = format!("something other than the user's keyboard typed into pane {pane} within the last {:.0} s", first_mate::budget::tuning::PROGRAMMATIC_ECHO);
+                self.security(
+                    Text::new(format!("Refused {method} from pid {pid}: {why}"), format!("已拒绝 pid {pid} 的 {method}：{why}")),
+                    true,
+                );
+                return Err(RpcError::forbidden(format!("{method} refused: {why}. Run it again yourself in a moment, or outside seahelm")));
+            }
             Verdict::InPane(why) | Verdict::Unknown(why) => {
                 if method.starts_with("task-source.") {
                     self.security(Text::new("Refused task source access from a pane or unidentified caller", "已拒绝窗格内进程或身份未知的调用方访问任务来源"), true);
@@ -1533,6 +1542,15 @@ impl Core {
                         "{method} refused: only the user speaks to First Mate as the user, through a seahelm client; this caller is inside a seahelm pane or could not be identified ({why})"
                     )));
                 }
+                if method.starts_with("schedule.") {
+                    self.security(
+                        Text::new(format!("Refused {method} from pid {pid}: {why}"), format!("已拒绝 pid {pid} 的 {method}：{why}")),
+                        true,
+                    );
+                    return Err(RpcError::forbidden(format!(
+                        "{method} refused: only the user manages schedules (their own shell, in or outside seahelm); this caller is an agent or could not be identified ({why})"
+                    )));
+                }
                 let what = describe_guarded(method, p, &self.lock().cards);
                 self.security(
                     Text::new(
@@ -1561,6 +1579,14 @@ impl Core {
             }
         }
         Ok(())
+    }
+
+    /// Whether something other than the user's keyboard typed into `pane`
+    /// within `PROGRAMMATIC_ECHO` (an agent's `pane.run` into the user's
+    /// shell would otherwise pass as the user).
+    fn typed_into_recently(&self, pane: &str) -> bool {
+        let key = self.resolve_pane(pane).unwrap_or_else(|| pane.to_string());
+        self.presence.lock().unwrap_or_else(|e| e.into_inner()).typed_within(&key, first_mate::budget::tuning::PROGRAMMATIC_ECHO, now())
     }
 
     /// An audit line (and with `note`, a line in First Mate's conversation)
@@ -2383,6 +2409,24 @@ mod peer_gate_tests {
             let e = value(core.clone().call_checked(method, json!({"repo":"/nonexistent", "_meta":{"caller":fm_policy::SESSION}}), None, agent)).unwrap_err();
             assert_eq!(e.code, rpc::FORBIDDEN, "{method}");
         }
+    }
+
+    #[test]
+    fn the_users_own_shell_may_but_not_right_after_something_typed_into_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let id = raise(&core, "report-own-shell");
+        let own = || Verdict::OwnShell { pane: "seahelm-task-x".into() };
+        // The user typing in their own pane: allowed.
+        assert!(value(core.clone().call_checked("cards.dismiss", json!({"id": id}), Some(1), own)).is_ok());
+        // Right after an agent typed into that pane: refused, with why.
+        core.presence.lock().unwrap().typed_into("seahelm-task-x", "seahelm schedule add …", now());
+        let e = value(core.clone().call_checked("schedule.add", json!({"name": "x"}), Some(1), own)).unwrap_err();
+        assert_eq!(e.code, rpc::FORBIDDEN);
+        assert!(e.message.contains("typed into pane seahelm-task-x"), "{}", e.message);
+        // A refused schedule call no longer talks about answering cards.
+        let e = value(core.clone().call_checked("schedule.add", json!({"name": "x"}), Some(1), agent)).unwrap_err();
+        assert!(e.message.contains("manages schedules") && !e.message.contains("answers cards"), "{}", e.message);
     }
 
     #[test]
