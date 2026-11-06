@@ -47,11 +47,15 @@ pub fn project(o: &Outcome, pane_id: &str, config: &MessageConfig, coalesce: &Co
         }
     }
 
-    let decide = |out: &mut Vec<Message>, coal: &mut Coalesce, text: String, signature: Vec<String>| {
+    let decide = |out: &mut Vec<Message>,
+                  coal: &mut Coalesce,
+                  text: String,
+                  options: Vec<String>,
+                  signature: Vec<String>| {
         if coal.last_decision.as_ref() == Some(&signature) {
             return;
         }
-        out.push(base(Kind::Decision).with_text(text));
+        out.push(base(Kind::Decision).with_text(text).with_options(options));
         coal.last_decision = Some(signature);
     };
 
@@ -88,12 +92,18 @@ pub fn project(o: &Outcome, pane_id: &str, config: &MessageConfig, coalesce: &Co
         EventKind::Question { prompt, options, .. } => {
             let mut sig = vec!["question".to_string(), prompt.clone()];
             sig.extend(options.iter().cloned());
-            decide(&mut out, &mut coal, prompt.clone(), sig);
+            decide(&mut out, &mut coal, prompt.clone(), options.clone(), sig);
         }
         EventKind::Suggest { options } => {
             let mut sig = vec!["suggest".to_string()];
             sig.extend(options.iter().cloned());
-            decide(&mut out, &mut coal, options.join(" · "), sig);
+            decide(
+                &mut out,
+                &mut coal,
+                options.join(" · "),
+                options.clone(),
+                sig,
+            );
         }
         EventKind::Notification { text, .. } => {
             let t = text.trim();
@@ -256,11 +266,30 @@ mod tests {
     fn rescanned_question_emits_one_decision() {
         let (first, mut c) = run(&outcome(approval(), true, Running, Waiting, false, ""), &Coalesce::default());
         assert_eq!(decisions(&first), 1);
+        let decision = first.iter().find(|row| row.kind == Kind::Decision).unwrap();
+        assert_eq!(
+            decision.options.as_ref().unwrap(),
+            &vec!["1. Yes".to_string(), "2. No".to_string()]
+        );
         for _ in 0..3 {
             let (again, next) = run(&outcome(approval(), false, Waiting, Waiting, false, ""), &c);
             assert!(again.is_empty());
             c = next;
         }
+    }
+
+    #[test]
+    fn suggestion_decision_keeps_its_options_for_card_matching() {
+        let options = vec!["Start the worktree".to_string(), "Not now".to_string()];
+        let messages = run(
+            &plain(EventKind::Suggest {
+                options: options.clone(),
+            }),
+            &Coalesce::default(),
+        )
+        .0;
+        let decision = messages.iter().find(|row| row.kind == Kind::Decision).unwrap();
+        assert_eq!(decision.options.as_ref(), Some(&options));
     }
 
     #[test]

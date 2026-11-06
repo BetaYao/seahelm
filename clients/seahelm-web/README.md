@@ -18,6 +18,8 @@ Once paired it connects straight to `wss://…/ws` and speaks JSON-RPC request/r
 A narrow screen (≤760px) opens on the **Timeline** (MessageStream) and never calls `pane.vt_open`:
 
 - the server pushes `pane.message` (user / tool / assistant / status / decision / notice), replaying each pane's last 80 on connect
+- First Mate's timeline also reads `card` rows from its MessageStream: each card stays at its first row, later rows update its resolved state, and waiting buttons come from the current `cards` feed
+- the First Mate `Pending N` / `待办 N` toggle filters to waiting cards and suggestions; hidden message runs and older suggestions expand in place
 - scrolling up loads earlier messages (`message.history`, paged by `before_seq`, 50 at a time)
 - the timeline is stored at `~/.config/seahelm/message-stream/<pane_session_key>.jsonl`, about 2000 rows kept per pane; it survives an app restart and is deleted when the pane closes
 - assistant replies render as markdown (`markdown.js` — escape first, then format; only http/https links are allowed through)
@@ -44,8 +46,9 @@ Fleet notifies: `pane.status`, `pane.added` (a Pane row), `pane.closed`. The pan
 
 Everything waiting on the user is a seahelm-core card. The gateway sends `cards {cards: [Card]}` with the **full** current list after auth and on every change, and the page rebuilds its decision state from it (`card-model.js`):
 
-- `question` / `choice` → the question card above that pane's composer; `suggestion` → the "What next?" card. One per pane, a question outranking a suggestion.
-- `approval` / `proposal` / `report` → First Mate's cards, above First Mate's composer, keyed by card id (they may have no pane); the ⎈ count is how many there are.
+- `question` / `choice` → the question card above that pane's composer; `suggestion` → the "What next?" card under its pane and, among the three newest, in First Mate's timeline.
+- First Mate's timeline merges `card` rows by `card_id` with its conversation. The row's first position and source are kept; the latest row supplies the state, while current buttons come from the live feed.
+- `approval` / `proposal` / `report` remain keyed by card id (they may have no pane). The ⎈ count and the timeline's `Pending N` / `待办 N` count exclude suggestions.
 - tapping label *i* → `cards.answer {id, index: i}`; Skip → `cards.dismiss {id}`. For a multi-select question the labels are the options with ☑/☐ ticks then "✔ Done": an option toggles, Done (index `options.length`) answers. The next `cards` notify is the truth.
 - danger styling is computed here: `/(delete|remove|rm -rf|drop|force|reset --hard|overwrite|revoke)/i` on the message, for question / choice / approval.
 
@@ -72,6 +75,7 @@ push:     {"type":"notify","method","params"}
 | `timeline-scroll.js` | the timeline sticks to the bottom while you are at it and holds your row when you are not — a rebuild replaces every row, so the place has to be taken and put back by hand |
 | `timeline-patch.js` | plans the smallest DOM change from the timeline on screen to the next one: a new message appends, a growing run of calls or the `live` line rewrites the tail, and only a different pane or history paged in above rebuilds |
 | `card-model.js` | the core's card list → one decision per pane plus First Mate's cards, danger, multi-select ticks |
+| `card-timeline.js` | card-row merging, First Mate decision deduplication, waiting-only suggestion cap, waiting filter, and collapsed message runs |
 | `pane-pick.js` | which pane a worktree opens on, and the words a row uses for its status |
 | `composer-action.js` | what the composer's one button means right now — send, stop, or nothing. Typed text always wins, so an agent being busy never refuses the message you just wrote |
 | `devbroker/` | dependency-free node unit tests for the modules above, plus the result collector for `bench.html` |
@@ -86,7 +90,7 @@ Dark and iOS-native on a phone (17px body, 44pt targets, the system font for pro
 - **Terminal** has no composer of ours: tap the screen and type, keys go straight to the pane. A bar carries the keys a phone keyboard lacks — keyboard show/hide, esc, tab, ⇧tab, a sticky **ctrl** (applies to the next key), ^C, ^D and the arrows — and sits above the soft keyboard (`visualViewport`).
 - **⋯ menus** — the page's (message log, disconnect) and the pane's (Timeline / Terminal, terminal layout, renderer, copy, new pane, close).
 - **New work** — the **+** in the list's title bar opens a sheet: prompt, project, agent.
-- **First Mate** — the ⎈ beside it (amber with a count when cards wait) opens First Mate's pane; its cards are answered above the composer.
+- **First Mate** — the ⎈ beside it (amber with a count when cards wait) opens the conversation and cards in one timeline; the title's waiting toggle narrows it without changing the composer.
 - **PRs** — a worktree with a PR shows `#12 ✓ approved` on its row and, as a link to GitHub, in the detail header.
 - **Message log** — a developer column, off by default, toggled from the page menu.
 
