@@ -30,6 +30,10 @@ pub struct Replay {
     pub truncated: Vec<String>,
 }
 
+/// Two user rows with the same text this close together are one prompt
+/// reported twice.
+const USER_ECHO_SECS: f64 = 5.0;
+
 pub struct Hub {
     rings: HashMap<String, Vec<Message>>,
     coalesce: HashMap<String, Coalesce>,
@@ -71,6 +75,14 @@ impl Hub {
             // A turn's final message comes twice, from the transcript and from
             // the Stop hook, in either order.
             if m.kind == Kind::Assistant && ring.iter().filter(|r| r.kind == Kind::Assistant).rev().take(3).any(|r| r.text == m.text) {
+                continue;
+            }
+            // One prompt reported twice at once (Cursor fires two prompt hooks
+            // for one submit): the same text from the same pane within a few
+            // seconds is one message. Typing the same thing again later is not.
+            if m.kind == Kind::User
+                && ring.iter().rev().find(|r| r.kind == Kind::User).is_some_and(|r| r.text == m.text && (m.ts - r.ts).abs() <= USER_ECHO_SECS)
+            {
                 continue;
             }
             if matches!(m.kind, Kind::Assistant | Kind::Thinking) {
@@ -331,6 +343,15 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_prompt_reported_twice_is_one_user_row() {
+        let mut h = Hub::new(None, 80);
+        let row = |ts: f64| Message::new("p", "p", Kind::User, ts).with_text("按支付渠道汇总 改成 汇总".to_string());
+        assert_eq!(h.append(vec![row(100.0)]).len(), 1);
+        assert_eq!(h.append(vec![row(100.2)]).len(), 0, "the same prompt at once");
+        assert_eq!(h.append(vec![row(200.0)]).len(), 1, "typed again later");
+    }
 
     fn ev(text: &str, pane: &str, key: &str, ts: f64) -> Message {
         Message::new(pane, key, Kind::User, ts).with_text(text)
