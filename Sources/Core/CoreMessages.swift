@@ -20,6 +20,8 @@ final class CoreMessages {
         return (r["messages"] as? [[String: Any]] ?? []).compactMap(MessageEvent.init(dict:))
     }
 
+    // The first page also fills gaps between the core's independent snapshot budgets.
+    // Those rows can be newer than beforeSeq; preserve sequence order when merging.
     func history(paneId: String, beforeSeq: UInt64, limit: Int) -> (events: [MessageEvent], hasMore: Bool) {
         guard case .success(let r) = CoreSocketClient.call(
             "message.history", ["pane_id": paneId, "before_seq": beforeSeq, "limit": limit]) else { return ([], false) }

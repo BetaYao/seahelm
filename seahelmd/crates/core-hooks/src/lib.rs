@@ -16,6 +16,7 @@
 //! [`wire`].
 
 pub mod activity;
+pub mod cursor_store;
 pub mod decode;
 pub mod event;
 pub mod install;

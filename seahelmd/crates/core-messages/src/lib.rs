@@ -17,4 +17,4 @@ pub mod transcript;
 pub use event::{Kind, Message};
 pub use hub::{Hub, Replay};
 pub use project::{project, Coalesce};
-pub use transcript::Tail;
+pub use transcript::{CursorTail, Tail};

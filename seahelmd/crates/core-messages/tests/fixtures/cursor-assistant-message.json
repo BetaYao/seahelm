@@ -1,0 +1,1 @@
+{"id":"msg-assistant-1","role":"assistant","content":[{"type":"reasoning","text":"Inspect the relevant code."},{"type":"text","text":"I'll inspect the timeline."},{"type":"tool-call","toolName":"read_file","input":{"path":"src/messages.rs"}}]}

@@ -30,6 +30,12 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Tool calls and status transitions share a budget separate from the
+    /// conversation a client needs to keep visible between them.
+    pub fn is_activity(self) -> bool {
+        matches!(self, Kind::Tool | Kind::Status)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::User => "user",

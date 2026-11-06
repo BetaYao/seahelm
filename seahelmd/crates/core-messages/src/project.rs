@@ -22,6 +22,15 @@ pub struct Coalesce {
     last_decision: Option<Vec<String>>,
 }
 
+impl Coalesce {
+    pub fn break_tool_run(&mut self) {
+        self.last_tool = None;
+        self.last_detail = None;
+        self.last_is_error = None;
+        self.last_count = 0;
+    }
+}
+
 /// The rows one outcome adds, and the pane's coalescing state after it.
 /// `pane_id` is what clients call the pane (its alias, else its key).
 pub fn project(o: &Outcome, pane_id: &str, config: &MessageConfig, coalesce: &Coalesce, now: Timestamp) -> (Vec<Message>, Coalesce) {
