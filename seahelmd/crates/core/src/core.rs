@@ -53,7 +53,7 @@ pub struct Core {
     /// holds `state`.
     transcripts: Mutex<seahelm_core_messages::Tail>,
     /// Cursor chat-store checkpoints; reads SQLite without holding `state`.
-    cursor_transcripts: Mutex<seahelm_core_messages::CursorTail>,
+    cursor_transcripts: Mutex<HashMap<String, std::sync::mpsc::Sender<(String, String, bool)>>>,
     /// Stable pane handles (`#n`) for the command language.
     pub(crate) handles: Arc<Mutex<seahelm_core_command::Handles>>,
     /// Per worktree: its repo root and branch, and when they were read.
@@ -261,7 +261,7 @@ impl Core {
             first_mate: std::sync::OnceLock::new(),
             observer: std::sync::OnceLock::new(),
             transcripts: Mutex::new(seahelm_core_messages::Tail::default()),
-            cursor_transcripts: Mutex::new(seahelm_core_messages::CursorTail::default()),
+            cursor_transcripts: Mutex::new(HashMap::new()),
             handles,
             git_cache: Mutex::new(HashMap::new()),
             discovered: Mutex::new(Vec::new()),
@@ -403,6 +403,32 @@ impl Core {
         reply
     }
 
+    fn queue_cursor_prose(self: &Arc<Self>, pane: String, alias: String, cwd: String, chat: String, start: bool) {
+        let mut workers = self.cursor_transcripts.lock().unwrap_or_else(|e| e.into_inner());
+        let sender = workers.entry(pane.clone()).or_insert_with(|| {
+            let (sender, receiver) = std::sync::mpsc::channel::<(String, String, bool)>();
+            let core = Arc::downgrade(self);
+            let checkpoint = self.audit_path.parent().unwrap_or(std::path::Path::new(".")).join("cursor-checkpoints").join(hooks::titles::md5_hex(&pane));
+            std::thread::spawn(move || {
+                let mut tail = seahelm_core_messages::CursorTail::default();
+                tail.restore(&checkpoint);
+                for (cwd, chat, start) in receiver {
+                    let Some(core) = core.upgrade() else { break };
+                    let entries = tail.new_prose(&hooks::titles::cursor_chats_root(&hooks::home_dir()), &cwd, &chat, start);
+                    let mut state = core.lock();
+                    if state.registry.pane(&pane).is_none() { continue; }
+                    let rows = entries.into_iter().map(|entry| seahelm_core_messages::Message::new(&alias, &pane, seahelm_core_messages::Kind::Assistant, now()).with_text(entry.text)).collect();
+                    state.messages.append(rows);
+                    drop(state);
+                    tail.persist(&checkpoint);
+                    core.changed.notify_all();
+                }
+            });
+            sender
+        });
+        let _ = sender.send((cwd, chat, start));
+    }
+
     fn dispatch(self: Arc<Self>, method: &str, p: Value, now: Timestamp) -> Reply {
         let result: RpcResult = match method {
             // `cli`: this core answers the `seahelm` CLI's verbs in the app's
@@ -427,13 +453,8 @@ impl Core {
                     let entries = match request.source {
                         TranscriptSource::File(path) => self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).new_prose(&path, request.since),
                         TranscriptSource::Cursor { cwd, chat_id, session_start } => {
-                            let chats_root = hooks::titles::cursor_chats_root(&hooks::home_dir());
-                            self.cursor_transcripts.lock().unwrap_or_else(|e| e.into_inner()).new_prose(
-                                &chats_root,
-                                &cwd,
-                                &chat_id,
-                                session_start,
-                            )
+                            self.queue_cursor_prose(request.pane.clone(), request.alias.clone(), cwd, chat_id, session_start);
+                            Vec::new()
                         }
                     };
                     let (pane, alias) = (request.pane, request.alias);

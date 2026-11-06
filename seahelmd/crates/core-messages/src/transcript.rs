@@ -30,11 +30,12 @@ pub struct Tail {
     offsets: HashMap<String, u64>,
 }
 
-/// Cursor's ordered, SQLite-backed chat store has a stable message id rather
-/// than a JSONL byte offset. Keep one checkpoint per chat while the core runs.
+/// Cursor uses a root-list position and blob hash rather than its non-unique
+/// message ids. Checkpoints can be persisted per pane across core restarts.
 #[derive(Default)]
 pub struct CursorTail {
     seen: HashMap<String, String>,
+    checkpoints: HashMap<String, cursor_store::Checkpoint>,
 }
 
 impl CursorTail {
@@ -43,8 +44,31 @@ impl CursorTail {
     /// does not replay its earlier turns. A SessionStart takes a baseline at
     /// the current end when the store already contains history.
     pub fn new_prose(&mut self, chats_root: &std::path::Path, cwd: &str, chat_id: &str, session_start: bool) -> Vec<Entry> {
-        let Some(messages) = cursor_store::read_messages(chats_root, cwd, chat_id) else { return Vec::new() };
-        self.advance(&format!("{cwd}\0{chat_id}"), &messages, session_start)
+        let key = format!("{cwd}\0{chat_id}");
+        let Some(batch) = cursor_store::read_incremental(chats_root, cwd, chat_id, self.checkpoints.get(&key)) else { return Vec::new() };
+        let first = !self.checkpoints.contains_key(&key);
+        if let Some(checkpoint) = batch.checkpoint { self.checkpoints.insert(key.clone(), checkpoint); }
+        if first { self.advance(&key, &batch.messages, session_start) }
+        else { batch.messages.iter().filter_map(cursor_message_prose).collect() }
+    }
+
+    pub fn restore(&mut self, path: &std::path::Path) {
+        if let Ok(bytes) = std::fs::read(path) {
+            if let Ok(Value::Object(values)) = serde_json::from_slice::<Value>(&bytes) {
+                for (key, value) in values {
+                    if let (Some(position), Some(hash)) = (value["position"].as_u64(), value["hash"].as_str()) {
+                        self.checkpoints.insert(key, cursor_store::Checkpoint { position: position as usize, hash: hash.into() });
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn persist(&self, path: &std::path::Path) {
+        let values: serde_json::Map<String, Value> = self.checkpoints.iter().map(|(key, cp)| (key.clone(), serde_json::json!({"position": cp.position, "hash": cp.hash}))).collect();
+        if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+        let temporary = path.with_extension("tmp");
+        if std::fs::write(&temporary, Value::Object(values).to_string()).is_ok() { let _ = std::fs::rename(temporary, path); }
     }
 
     fn advance(&mut self, key: &str, messages: &[CursorMessage], session_start: bool) -> Vec<Entry> {
@@ -246,6 +270,18 @@ mod tests {
             role: value["role"].as_str().unwrap().to_string(),
             content: value["content"].clone(),
         }
+    }
+
+    #[test]
+    fn cursor_checkpoint_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checkpoint");
+        let mut tail = CursorTail::default();
+        tail.checkpoints.insert("pane/chat".into(), cursor_store::Checkpoint { position: 20, hash: "ab".repeat(32) });
+        tail.persist(&path);
+        let mut restarted = CursorTail::default();
+        restarted.restore(&path);
+        assert_eq!(restarted.checkpoints, tail.checkpoints);
     }
 
     #[test]

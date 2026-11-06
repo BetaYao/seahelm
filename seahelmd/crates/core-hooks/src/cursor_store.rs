@@ -21,7 +21,7 @@ const MAX_ROOT_REFERENCES: usize = 50_000;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Message {
-    /// Cursor's stable message id, or its content-addressed blob id.
+    /// Content-addressed blob hash; Cursor's JSON message id is not unique.
     pub id: String,
     pub role: String,
     pub content: Value,
@@ -32,6 +32,14 @@ pub struct Message {
 /// `chats_root` is normally `~/.cursor/chats`; taking it as an argument keeps
 /// the reader testable and lets callers isolate alternate Cursor profiles.
 pub fn read_messages(chats_root: &Path, cwd: &str, conversation_id: &str) -> Option<Vec<Message>> {
+    read_incremental(chats_root, cwd, conversation_id, None).map(|batch| batch.messages)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Checkpoint { pub position: usize, pub hash: String }
+pub struct Batch { pub messages: Vec<Message>, pub checkpoint: Option<Checkpoint> }
+
+pub fn read_incremental(chats_root: &Path, cwd: &str, conversation_id: &str, checkpoint: Option<&Checkpoint>) -> Option<Batch> {
     if cwd.is_empty() || !safe_component(conversation_id) {
         return None;
     }
@@ -49,23 +57,34 @@ pub fn read_messages(chats_root: &Path, cwd: &str, conversation_id: &str) -> Opt
     if !is_hash(root_id) {
         return None;
     }
-    let root: Vec<u8> = tx.query_row("SELECT data FROM blobs WHERE id = ?1", [root_id], |row| row.get(0)).ok()?;
+    let root: Vec<u8> = tx.query_row("SELECT data FROM blobs WHERE id = ?1 AND length(data) <= 8388608", [root_id], |row| row.get(0)).ok()?;
     let references = root_references(&root)?;
 
-    let mut statement = tx.prepare_cached("SELECT data FROM blobs WHERE id = ?1").ok()?;
+    let start = match checkpoint {
+        Some(previous) if references.get(previous.position) == Some(&previous.hash) => previous.position + 1,
+        // Compaction may move the checkpoint. A unique content hash still
+        // identifies it; absent or ambiguous anchors baseline the new list.
+        Some(previous) => {
+            let matches: Vec<_> = references.iter().enumerate().filter(|(_, hash)| *hash == &previous.hash).map(|(index, _)| index).collect();
+            if matches.len() == 1 { matches[0] + 1 } else { references.len() }
+        },
+        None => 0,
+    };
+    let next = references.last().map(|hash| Checkpoint { position: references.len() - 1, hash: hash.clone() });
+    let mut statement = tx.prepare_cached("SELECT data FROM blobs WHERE id = ?1 AND length(data) <= 1048576").ok()?;
     let mut messages = Vec::new();
-    for blob_id in references {
+    for blob_id in references.into_iter().skip(start) {
         let Ok(bytes) = statement.query_row([&blob_id], |row| row.get::<_, Vec<u8>>(0)) else { continue };
         let Ok(Value::Object(object)) = serde_json::from_slice::<Value>(&bytes) else { continue };
         let Some(role) = object.get("role").and_then(Value::as_str) else { continue };
         if !matches!(role, "user" | "assistant" | "tool" | "system") {
             continue;
         }
-        let id = object.get("id").and_then(Value::as_str).unwrap_or(&blob_id).to_string();
+        let id = blob_id;
         let content = object.get("content").cloned().unwrap_or(Value::Null);
         messages.push(Message { id, role: role.to_string(), content });
     }
-    Some(messages)
+    Some(Batch { messages, checkpoint: next })
 }
 
 pub fn chat_store_path(chats_root: &Path, cwd: &str, conversation_id: &str) -> PathBuf {
@@ -204,7 +223,7 @@ mod tests {
         let (_writer, _) = setup_store(root.path());
         let messages = read_messages(root.path(), CWD, CHAT).unwrap();
         assert_eq!(messages.iter().map(|message| message.role.as_str()).collect::<Vec<_>>(), ["user", "assistant", "tool"]);
-        assert_eq!(messages[1].id, "msg-assistant-1");
+        assert_eq!(messages[1].id, hex(&[2; 32]));
         assert_eq!(messages[1].content[1]["text"], "I'll inspect the timeline.");
         assert!(!safe_component("../outside"));
     }
@@ -220,7 +239,42 @@ mod tests {
         writer.execute("UPDATE blobs SET data = ?1 WHERE id = ?2", rusqlite::params![root_blob, hex(&[4; 32])]).unwrap();
         let messages = read_messages(root.path(), CWD, CHAT).unwrap();
         assert_eq!(messages.len(), 4);
-        assert_eq!(messages.last().unwrap().id, "msg-next");
+        assert_eq!(messages.last().unwrap().id, hex(&[5; 32]));
+    }
+
+    #[test]
+    fn duplicate_cursor_ids_use_root_position_and_blob_hash() {
+        let root = tempfile::tempdir().unwrap();
+        let (writer, mut root_blob) = setup_store(root.path());
+        let first = read_incremental(root.path(), CWD, CHAT, None).unwrap();
+        assert_eq!(first.checkpoint.as_ref().unwrap().position, 2);
+        assert!(read_incremental(root.path(), CWD, CHAT, first.checkpoint.as_ref()).unwrap().messages.is_empty());
+        let next = json!({"id": "1", "role": "assistant", "content": "new prose"}).to_string();
+        writer.execute("INSERT INTO blobs (id, data) VALUES (?1, ?2)", rusqlite::params![hex(&[5; 32]), next.as_bytes()]).unwrap();
+        append_reference(&mut root_blob, &[5; 32]);
+        writer.execute("UPDATE blobs SET data=?1 WHERE id=?2", rusqlite::params![root_blob, hex(&[4; 32])]).unwrap();
+        let next = read_incremental(root.path(), CWD, CHAT, first.checkpoint.as_ref()).unwrap();
+        assert_eq!(next.messages.len(), 1);
+        assert_eq!(next.messages[0].content, "new prose");
+        let rewritten = Checkpoint { position: 2, hash: hex(&[99; 32]) };
+        assert!(read_incremental(root.path(), CWD, CHAT, Some(&rewritten)).unwrap().messages.is_empty());
+    }
+
+    #[test]
+    fn twenty_assistant_messages_with_the_same_json_id_are_not_skipped() {
+        let root = tempfile::tempdir().unwrap();
+        let (writer, mut root_blob) = setup_store(root.path());
+        let mut checkpoint = read_incremental(root.path(), CWD, CHAT, None).unwrap().checkpoint;
+        for i in 10..30_u8 {
+            let message = json!({"id": "1", "role": "assistant", "content": format!("prose-{i}")}).to_string();
+            writer.execute("INSERT INTO blobs (id,data) VALUES (?1,?2)", rusqlite::params![hex(&[i; 32]), message.as_bytes()]).unwrap();
+            append_reference(&mut root_blob, &[i; 32]);
+            writer.execute("UPDATE blobs SET data=?1 WHERE id=?2", rusqlite::params![&root_blob, hex(&[4; 32])]).unwrap();
+            let batch = read_incremental(root.path(), CWD, CHAT, checkpoint.as_ref()).unwrap();
+            assert_eq!(batch.messages.len(), 1);
+            assert_eq!(batch.messages[0].content, format!("prose-{i}"));
+            checkpoint = batch.checkpoint;
+        }
     }
 
     #[test]
