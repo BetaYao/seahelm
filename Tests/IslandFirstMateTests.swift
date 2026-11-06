@@ -188,7 +188,8 @@ final class IslandFirstMateTests: XCTestCase {
     func testLiveCardUsesFleetSourceLabelBeforeItsTimelineRowArrives() throws {
         let card = try XCTUnwrap(Card(json: [
             "id": "pane-question", "kind": "question", "pane_session_key": "pane-session",
-            "project": "saas-mono", "message": "Pick one", "options": ["A", "B"],
+            "project": "saas-mono", "branch": "feature/island", "worktree_path": "/repo/worktrees/island",
+            "message": "Pick one", "options": ["A", "B"],
         ], terminalID: { _, _ in "pane-id" }))
         let items = ConversationItem.items(from: [], liveCards: [card],
                                            sourceLabels: [card.id: "#7 · saas-mono"])
@@ -196,6 +197,25 @@ final class IslandFirstMateTests: XCTestCase {
             return XCTFail("Expected a live card row")
         }
         XCTAssertEqual(entry.sourceLabel, "#7 · saas-mono")
+        let fallback = ConversationItem.items(from: [], liveCards: [card])
+        guard case let .card(fallbackEntry) = try XCTUnwrap(fallback.first).kind else {
+            return XCTFail("Expected a fallback live card row")
+        }
+        XCTAssertEqual(fallbackEntry.sourceLabel, "feature/island")
+    }
+
+    func testFleetCardSourceLabelUsesWorktreeNameInsteadOfProject() {
+        let path = "/repo/worktrees/island-timeline"
+        let pane = PaneRef(handle: 7, id: "pane-id", sessionKey: "pane-session",
+                           project: "seahelm", branch: "feature/island-timeline", worktreePath: path,
+                           type: "Claude", title: "Timeline")
+        let worktree = WorktreeRef(repo: "seahelm", branch: pane.branch, path: path)
+        let index = FleetIndex(panes: [pane], worktrees: [worktree])
+        XCTAssertEqual(index.cardSourceLabel(for: pane), "#7 · feature/island-timeline")
+
+        let detached = PaneRef(handle: nil, id: "detached", project: "seahelm", branch: "",
+                               worktreePath: "/repo/worktrees/review", type: "Claude", title: "Review")
+        XCTAssertEqual(FleetIndex(panes: [detached]).cardSourceLabel(for: detached), "review")
     }
 
     func testCardStatesRenderAsAnsweredOrQuietHistory() throws {

@@ -100,4 +100,14 @@ struct FleetIndex: Equatable {
     func worktree(path: String) -> WorktreeRef? {
         worktrees.first { $0.path == path }
     }
+
+    /// Source printed for a card in the shared timeline: a pane handle and
+    /// the worktree the card belongs to, rather than the containing repo.
+    func cardSourceLabel(for pane: PaneRef) -> String {
+        let worktreeName = worktree(path: pane.worktreePath)?.name
+            ?? WorktreeRef.name(branch: pane.branch, path: pane.worktreePath)
+        let name = worktreeName.isEmpty ? pane.project : worktreeName
+        guard !name.isEmpty else { return pane.handle.map { "#\($0)" } ?? "" }
+        return pane.handle.map { "#\($0) · \(name)" } ?? name
+    }
 }

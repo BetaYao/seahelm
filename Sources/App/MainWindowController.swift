@@ -2092,6 +2092,8 @@ extension MainWindowController {
         guard NSClassFromString("XCTestCase") == nil else { return }
 
         let model = islandController.model
+        let language = IslandLanguage.readConfig()
+        if model.language != language { model.language = language }
         model.onNavigate = { [weak self] worktreePath, paneIndex in
             self?.tabCoordinator.handleNavigateToWorktree(worktreePath: worktreePath, paneIndex: paneIndex)
             self?.window?.makeKeyAndOrderFront(nil)
@@ -2219,7 +2221,6 @@ extension MainWindowController {
         guard config.islandEnabled else { return }
         let model = islandController.model
         let firstMate = tabCoordinator.firstMate
-        model.language = IslandLanguage.configured()
         let (word, _) = FirstMateStateText.describe(firstMate.state.activity, isChinese: model.language.isChinese)
         let tone = FirstMateStateText.tone(firstMate.state)
         if model.mateActivity != word { model.mateActivity = word }
@@ -2232,9 +2233,6 @@ extension MainWindowController {
     /// While the opened island is on screen: First Mate's timeline, read off main.
     fileprivate func refreshIslandConversation() {
         let model = islandController.model
-        if model.isOpened, model.language != IslandLanguage.configured() {
-            refreshIsland()
-        }
         guard config.islandEnabled, model.isOpened, !islandMateFetching else { return }
         islandMateFetching = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -2309,14 +2307,11 @@ extension MainWindowController {
                 (!card.paneSessionKey.isEmpty && $0.sessionKey == card.paneSessionKey)
                     || (!card.terminalID.isEmpty && $0.id == card.terminalID)
             }) else {
-                if !card.project.isEmpty { sourceLabels[card.id] = card.project }
+                let worktreeName = WorktreeRef.name(branch: card.branch, path: card.worktreePath)
+                sourceLabels[card.id] = worktreeName.isEmpty ? card.project : worktreeName
                 continue
             }
-            if let handle = pane.handle {
-                sourceLabels[card.id] = "#\(handle) · \(pane.project)"
-            } else if !pane.project.isEmpty {
-                sourceLabels[card.id] = pane.project
-            }
+            sourceLabels[card.id] = index.cardSourceLabel(for: pane)
         }
         if model.liveCardSourceLabels != sourceLabels { model.liveCardSourceLabels = sourceLabels }
 
@@ -2474,7 +2469,8 @@ extension MainWindowController: SettingsDelegate {
         tabCoordinator.applyAutopilotConfig()
         updateCoordinator.config = merged
         dashboardVC?.integrationEnabled = merged.integrationEnabled
-        islandController.model.language = IslandLanguage.configured()
+        let language = IslandLanguage.readConfig()
+        if islandController.model.language != language { islandController.model.language = language }
         refreshIsland()
         normalizeBackendAvailabilityIfNeeded()
 

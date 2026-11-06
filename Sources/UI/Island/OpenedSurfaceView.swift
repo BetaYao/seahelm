@@ -997,8 +997,9 @@ enum IslandLanguage: String, Equatable {
     var isChinese: Bool { self == .chinese }
 
     /// `first_mate_language` is owned by seahelm-core and intentionally stays
-    /// a foreign key in the Swift Config model. Read the preserved raw value.
-    static func configured(at url: URL = Config.configPath) -> IslandLanguage {
+    /// a foreign key in the Swift Config model. Read it on startup or when the
+    /// app's config-update callback fires, then cache it on IslandModel.
+    static func readConfig(at url: URL = Config.configPath) -> IslandLanguage {
         fromConfigData(try? Data(contentsOf: url))
     }
 
@@ -1078,10 +1079,13 @@ struct ConversationItem: Identifiable, Equatable {
         for card in fallbackCards {
             nextSequence &+= 1
             let isFirstMate = card.paneSessionKey == FirstMatePane.sessionName || card.isFirstMates
+            let worktreeName = WorktreeRef.name(branch: card.branch, path: card.worktreePath)
+            let sourceLabel = isFirstMate ? "First Mate"
+                : (sourceLabels[card.id] ?? (worktreeName.isEmpty ? card.project : worktreeName))
             cardEntries.append(CardTimelineEntry(
                 id: card.id, sequence: nextSequence, createdAt: card.createdAt, updatedAt: card.createdAt,
                 cardKind: card.kind.rawValue, sourcePane: card.paneSessionKey,
-                sourceLabel: isFirstMate ? "First Mate" : (sourceLabels[card.id] ?? card.project),
+                sourceLabel: sourceLabel,
                 text: card.message, options: card.options, state: .pending, option: nil, via: nil
             ))
         }
