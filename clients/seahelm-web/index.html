@@ -330,9 +330,17 @@
     min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--attention);color:#1c1300;
     font-size:13px;font-weight:700;line-height:20px;text-align:center}
   .dh-title{grid-area:title;min-width:0;display:flex;flex-direction:column}
+  .dh-title.mate{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:center}
+  .dh-title.mate #detailHead{grid-column:1;grid-row:1}
+  .dh-title.mate #detailSub{grid-column:1;grid-row:2}
+  .dh-title.mate #mateTodoToggle{grid-column:2;grid-row:1 / span 2}
   #detailHead{font-size:17px;font-weight:600;line-height:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #detailSub{font-size:var(--fs-cap);line-height:16px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #detailSub:empty{display:none}
+  #mateTodoToggle{height:34px;min-width:68px;padding:0 11px;border:1px solid var(--panel3);border-radius:17px;
+    background:var(--panel);color:var(--muted);font-size:var(--fs-cap);white-space:nowrap;cursor:pointer}
+  #mateTodoToggle.on{border-color:var(--attention);background:var(--attention-16);color:var(--attention);font-weight:650}
+  #mateTodoToggle[hidden]{display:none}
   /* Timeline / Terminal lives at the top of the pane's ⋯ menu: the head keeps
      its height for the content. */
   .menu #surfaceBadge{height:40px;margin:2px 2px 6px}
@@ -467,6 +475,28 @@
   .tl-thinking{margin:10px 0 8px;font-size:var(--fs-sub);line-height:1.55;color:var(--muted);word-break:break-word}
   .tl-thinking strong{color:inherit}
   .tl-decision{margin:8px 0;font-size:var(--fs-sub);line-height:1.5;color:var(--muted)}
+  .tl-card{margin:10px 0;padding:14px;border:1px solid var(--attention-16);border-radius:18px;background:var(--panel);display:flex;flex-direction:column;gap:10px}
+  .tl-card.danger{border-color:var(--danger-16)}
+  .tl-card.suggestion{border-color:var(--sep);background:color-mix(in srgb,var(--panel) 65%,transparent);opacity:.72}
+  .tl-card-source{font-size:var(--fs-cap);font-weight:600;color:var(--attention);line-height:1.3;overflow-wrap:anywhere}
+  .tl-card.danger .tl-card-source{color:var(--danger)}
+  .tl-card.suggestion .tl-card-source{color:var(--muted)}
+  .tl-card-prompt{font-size:var(--fs-body);line-height:1.45;overflow-wrap:anywhere;white-space:pre-wrap}
+  .tl-card-options{display:flex;flex-direction:column;gap:7px}
+  .tl-card-options button{min-height:44px;padding:9px 13px;border:0;border-radius:12px;background:var(--panel2);text-align:left;
+    font-size:var(--fs-sub);line-height:1.35;overflow-wrap:anywhere;cursor:pointer}
+  .tl-card-options button:hover{background:var(--panel3)}
+  .tl-card-options button:disabled{opacity:.45;cursor:wait}
+  .tl-card-option-detail{display:block;margin-top:3px;color:var(--muted);font-size:var(--fs-cap)}
+  .tl-card-skip{align-self:flex-end;min-height:36px;padding:0 8px;border:0;background:none;color:var(--muted);font-size:var(--fs-sub);cursor:pointer}
+  .tl-card-line{margin:8px 0;font-size:var(--fs-sub);line-height:1.45;color:var(--text2);overflow-wrap:anywhere}
+  .tl-card-line.expired,.tl-card-line.gone,.tl-card-line.dismissed{color:var(--faint)}
+  .tl-fold{display:block;width:100%;min-height:34px;margin:7px 0;border:0;background:none;color:var(--faint);font-size:var(--fs-cap);
+    text-align:center;cursor:pointer}
+  .tl-fold:hover{color:var(--muted)}
+  .tl-card.highlight{animation:tl-card-arrive 2.2s ease-out}
+  @keyframes tl-card-arrive{0%,55%{box-shadow:0 0 0 2px var(--attention),0 0 24px var(--attention-16)}100%{box-shadow:none}}
+  @media (prefers-reduced-motion:reduce){.tl-card.highlight{animation:none;outline:2px solid var(--attention)}}
   .md p{margin:0 0 .65em}
   .md>:last-child{margin-bottom:0}
   .md strong{font-weight:600;color:#fff}
@@ -627,6 +657,7 @@
         <div class="dh-title">
           <h2 id="detailHead">Terminal</h2>
           <span id="detailSub"></span>
+          <button id="mateTodoToggle" type="button" aria-pressed="false" hidden></button>
         </div>
         <div class="seg" id="shareSurface" role="tablist" aria-label="View"></div>
         <button class="icon-btn" id="paneMenuBtn" type="button" aria-haspopup="menu" aria-label="Pane actions">
@@ -736,6 +767,7 @@
 <script src="./pane-pick.js"></script>
 <script src="./composer-action.js"></script>
 <script src="./card-model.js"></script>
+<script src="./card-timeline.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -773,10 +805,12 @@ const S = {
   gw:null,   // gateway WebSocket state
   panes:new Map(), worktrees:new Map(),
   firstMate:null,   // autopilot.state, as the core reports it
-  // Decisions, rebuilt from every `cards` notify (card-model.js): `events` is
-  // one per pane, keyed by pane_session_key; `mateCards` are First Mate's
-  // approvals, proposals and reports, keyed by card id.
-  focus:null, dnd:null, events:new Map(), mateCards:[],
+  // `events` is the pane reply bar's current decision; `cards` is the whole
+  // live feed, including the cards woven into First Mate's timeline.
+  focus:null, dnd:null, events:new Map(), cards:[], cardsReady:false,
+  todoFilter:false, todoExpanded:new Set(), suggestionsExpanded:false,
+  cardSelections:new Map(), cardActions:new Set(), cardActionSignatures:new Map(), timelineJumpCard:null,
+  timelineHighlightCard:null,
   // Tool runs the reader has opened, by the run's first `seq` (tool-group.js).
   toolOpen:new Set(),
   // `sel` is the selected worktree path; `selPane` the pane whose terminal is shown.
@@ -806,6 +840,7 @@ const S = {
   // the time on the right of each fleet row counts from.
   rowTimes:new Map(),
 };
+const FM_KEY = 'seahelm-first-mate';
 // Opening size only. The relay reports no geometry and has no resize verb, so the
 // bridge reads the session's real grid from outside (pid → tty → `stty size`)
 // and ships it with the snapshot; we resize to that before replaying. These
@@ -1321,13 +1356,44 @@ function markShownPaneSeen(){
 }
 
 /** The core's whole card list: rebuild every decision from it. */
+function cardActionSignature(card){
+  return JSON.stringify([card.kind, card.message, card.options, card.labels, card.checked, card.multi_select]);
+}
+
 function applyCards(cards){
-  const { byPane, mate } = SeahelmCardModel.buildDecisions(cards);
+  const previous = S.cards;
+  const hadCards = S.cardsReady;
+  const oldIds = new Set(previous.map(c => String(c && c.id || '')));
+  S.cards = Array.isArray(cards) ? cards.slice() : [];
+  S.cardsReady = true;
+  const { byPane } = SeahelmCardModel.buildDecisions(cards);
   S.events = byPane;
-  S.mateCards = SHARE_PANE ? [] : mate;
+  const currentIds = new Set(S.cards.map(c => String(c && c.id || '')));
+  const byId = new Map(S.cards.filter(c => c && c.id != null).map(c => [String(c.id), c]));
+  for (const id of S.cardActions) {
+    const updated = byId.get(id);
+    if (!updated || cardActionSignature(updated) !== S.cardActionSignatures.get(id)) S.cardActions.delete(id);
+  }
+  for (const id of S.cardActionSignatures.keys()) if (!S.cardActions.has(id)) S.cardActionSignatures.delete(id);
+  for (const id of S.cardSelections.keys()) if (!currentIds.has(id)) S.cardSelections.delete(id);
+  for (const card of S.cards) {
+    const id = String(card && card.id || '');
+    if (!id) continue;
+    if (card.multi_select) S.cardSelections.set(id, (card.checked || []).slice());
+    else S.cardSelections.delete(id);
+  }
+  if (S.todoFilter && SeahelmCardTimeline.waitingCount(S.cards) === 0) S.todoFilter = false;
   renderSuggestions();
   renderMateButton();
+  renderMateTodoToggle();
   refreshFleetSoon(false);   // the row and the pane's tab say so too
+  if (S.selPane === FM_KEY && loadSurfaceMode() === 'text') scheduleTimeline();
+  if (hadCards) {
+    for (const card of S.cards) {
+      const id = String(card && card.id || '');
+      if (id && !oldIds.has(id)) notifyNewTimelineCard(id);
+    }
+  }
 }
 
 /** A pane the core just registered (`pane.new`, or one started elsewhere). */
@@ -1510,7 +1576,107 @@ function messageRowHTML(m){
   }
 }
 
-function renderMessageTimeline(key){
+function firstMateTimelineSource(item){
+  const source = item.source || {};
+  if (source.label) return String(source.label);
+  const card = item.card || {};
+  const key = source.pane || card.pane_session_key || card.pane_id;
+  if (!key) return 'First Mate';
+  const pane = S.panes.get(key);
+  const worktree = pane && buildFleet().find(row => row.path === pane.worktree_path);
+  const project = card.project || (pane && pane.project) || (worktree && worktree.project) || '';
+  const alias = card.pane_id || (pane && pane.pane_id) || key;
+  const ref = `#${shortId(alias)}`;
+  return project ? `${ref} · ${project}` : `${ref} · ${pane ? paneLabel(pane).text : 'Pane'}`;
+}
+
+function renderFirstMateCard(item){
+  const source = firstMateTimelineSource(item);
+  const body = item.text || (item.card && item.card.message) || '';
+  if (item.state !== 'pending' || !item.card) {
+    const state = String(item.state || 'gone').toLowerCase();
+    const status = state === 'answered'
+      ? (webUsesChinese() ? '已回答' : 'answered')
+      : state === 'dismissed' ? (webUsesChinese() ? '已跳过' : 'dismissed')
+      : state === 'expired' ? (webUsesChinese() ? '已过期' : 'expired')
+      : (webUsesChinese() ? '已失效' : 'gone');
+    const mark = state === 'answered' ? '✓ ' : '';
+    const option = item.option ? ` · ${esc(item.option)}` : '';
+    return `<div class="tl-card-line ${esc(state)}" data-card-id="${esc(item.cardId)}" data-seq="${Number(item.seq)}">${mark}${esc(source)} · ${esc(body)}${option} · ${status}</div>`;
+  }
+
+  const card = item.card;
+  const multi = !!card.multi_select;
+  const labels = SeahelmCardModel.mateLabels(card);
+  const selected = new Set(S.cardSelections.get(item.cardId) || card.checked || []);
+  const heading = card.header ? `<b class="tl-card-heading">${esc(card.header)}</b><br>` : '';
+  const options = labels.map((label, index) => {
+    const done = multi && index === labels.length - 1;
+    const labelText = multi && !done ? `${selected.has(index) ? '☑' : '☐'} ${String(label).replace(/^\s*[☑☐✓✔]\s*/, '')}` : label;
+    const detail = card.details && card.details[index] ? `<span class="tl-card-option-detail">${esc(card.details[index])}</span>` : '';
+    const disabled = S.cardActions.has(item.cardId) ? ' disabled' : '';
+    return `<button type="button" data-card-index="${index}"${disabled}>${esc(labelText)}${detail}</button>`;
+  }).join('');
+  const skip = webUsesChinese() ? '跳过' : 'Skip';
+  const danger = SeahelmCardModel.isDanger(card) ? ' danger' : '';
+  return `<section class="tl-card${item.suggestion ? ' suggestion' : ''}${danger}" data-card-id="${esc(item.cardId)}" data-card-state="pending" data-card-kind="${esc(item.cardKind)}" data-seq="${Number(item.seq)}">`
+    + `<div class="tl-card-source">${esc(source)}</div><div class="tl-card-prompt">${heading}${esc(card.message || body)}</div>`
+    + `<div class="tl-card-options">${options}</div>`
+    + `<button type="button" class="tl-card-skip" data-card-dismiss>${skip}</button></section>`;
+}
+
+function renderFirstMateEntry(item){
+  if (item.type === 'card') return renderFirstMateCard(item);
+  if (item.type === 'message') return renderMessageRow(item.message);
+  const count = Number(item.count) || 0;
+  if (item.type === 'hidden-run' || item.type === 'hidden-less') {
+    const text = item.type === 'hidden-less'
+      ? (webUsesChinese() ? `收起 ${count} 条消息` : `Hide ${count} ${count === 1 ? 'message' : 'messages'}`)
+      : (webUsesChinese() ? `··· ${count} 条消息` : `··· ${count} ${count === 1 ? 'message' : 'messages'}`);
+    return `<button type="button" class="tl-fold" data-timeline-fold="${esc(item.id)}" data-seq="${Number(item.seq)}">${text}</button>`;
+  }
+  if (item.type === 'suggestions-more' || item.type === 'suggestions-less') {
+    const text = item.type === 'suggestions-less'
+      ? (webUsesChinese() ? '收起建议' : 'Fewer suggestions')
+      : (webUsesChinese() ? '更多建议' : 'More suggestions');
+    return `<button type="button" class="tl-fold" data-suggestions-more data-seq="${Number(item.seq)}">${text} · ${count}</button>`;
+  }
+  return '';
+}
+
+function foldFirstMateMessages(entries){
+  const out = [];
+  let run = [];
+  const flush = () => {
+    if (!run.length) return;
+    for (const item of SeahelmToolGroup.fold(run)) {
+      if (item.kind === 'tools') out.push(item);
+      else out.push({ type: 'message', id: `message:${item.msg.seq}`, seq: item.msg.seq, message: item.msg });
+    }
+    run = [];
+  };
+  for (const entry of entries) {
+    if (entry.type === 'message' && entry.message && entry.message.kind === 'tool') run.push(entry.message);
+    else { flush(); out.push(entry); }
+  }
+  flush();
+  return out;
+}
+
+function timelineCardNode(id){
+  return [...$('messageTimeline').querySelectorAll('[data-card-id]')].find(node => node.dataset.cardId === String(id)) || null;
+}
+
+function paintNewCardHighlight(){
+  const id = S.timelineHighlightCard;
+  if (!id) return;
+  const node = timelineCardNode(id);
+  if (!node) return;
+  node.classList.add('highlight');
+  if (tl.follow) $('messageTimeline').scrollTop = $('messageTimeline').scrollHeight;
+}
+
+function renderMessageTimeline(key, options = {}){
   const host = $('messageTimeline');
   if (!host) return;
   renderSendButton();
@@ -1525,18 +1691,25 @@ function renderMessageTimeline(key){
     return;
   }
   const all = S.messages[key] || [];
+  const timeline = key === FM_KEY
+    ? SeahelmCardTimeline.present(SeahelmCardTimeline.merge(all, S.cards), {
+        filtered: S.todoFilter,
+        expandedRuns: S.todoExpanded,
+        suggestionsExpanded: S.suggestionsExpanded,
+      })
+    : all;
   if (host.dataset.key !== key) { tl.follow = true; tl.startSeq = null; }
-  const held = tl.startSeq == null ? -1 : all.findIndex(m => Number(m.seq) === tl.startSeq);
+  const held = tl.startSeq == null ? -1 : timeline.findIndex(m => Number(m.seq) === tl.startSeq);
   let start = 0;
-  if (held < 0) start = Math.max(0, all.length - TL_WINDOW);
+  if (held < 0) start = Math.max(0, timeline.length - TL_WINDOW);
   else if (!tl.follow) start = held;
   // Following, the top stays put until the window has grown by a step: sliding
   // it on every message would change the first row each time, and with it the
   // whole list the patch compares against.
-  else start = all.length - held > TL_WINDOW + TL_WINDOW_STEP ? all.length - TL_WINDOW : held;
-  tl.startSeq = all.length ? Number(all[start].seq) : null;
-  const rows = start ? all.slice(start) : all;
-  const items = SeahelmToolGroup.fold(rows);
+  else start = timeline.length - held > TL_WINDOW + TL_WINDOW_STEP ? timeline.length - TL_WINDOW : held;
+  tl.startSeq = timeline.length ? Number(timeline[start].seq) : null;
+  const rows = start ? timeline.slice(start) : timeline;
+  const items = key === FM_KEY ? foldFirstMateMessages(rows) : SeahelmToolGroup.fold(rows);
   // Only the newest run can be the one still being run, and only while the pane
   // is actually working — a finished turn's last run must not keep breathing.
   const live = normStatus((S.panes.get(key) || {}).status) === 'running';
@@ -1557,6 +1730,11 @@ function renderMessageTimeline(key){
     // pane is working — a finished turn's last call must not keep breathing.
     const now = live && i === items.length - 1;
     if (it.kind === 'tools') { shown.push({ id: `t${it.key}`, html: renderToolGroup(it, now) }); return; }
+    if (key === FM_KEY) {
+      const html = renderFirstMateEntry(it);
+      if (html) shown.push({ id: it.id || `r${it.seq}`, html });
+      return;
+    }
     let row = renderMessageRow(it.msg);
     if (!row) return;   // a kind this page does not draw: no element, so no item
     // A call still on its own breathes the same way a folded run does: the
@@ -1564,16 +1742,26 @@ function renderMessageTimeline(key){
     if (now && it.msg.kind === 'tool') row = row.replace('class="tl-tool', 'class="tl-tool live');
     shown.push({ id: `r${it.msg.seq}`, html: row });
   });
-  if (rows.length) paintTimeline(host, key, shown);
+  if (rows.length && shown.length) paintTimeline(host, key, shown);
   else {
-    host.innerHTML = '<div class="tl"><div class="tl-empty">Nothing yet — messages appear here once the agent starts working</div></div>';
+    const empty = key === FM_KEY
+      ? (S.todoFilter
+        ? (webUsesChinese() ? '没有待办卡片' : 'No waiting cards')
+        : (webUsesChinese() ? 'First Mate 的消息和卡片会显示在这里' : 'First Mate messages and cards will appear here'))
+      : 'Nothing yet — messages appear here once the agent starts working';
+    host.innerHTML = `<div class="tl"><div class="tl-empty">${esc(empty)}</div></div>`;
     tlShown = [];
   }
   host.dataset.key = key;
   // Synchronously, before anything can paint or read the position back: a
   // rebuild emptied the scroller, so scrollTop is 0 until this lands.
-  host.scrollTop = SeahelmTimelineScroll.restore(host, anchor, (seq) => timelineRowTop(host, seq));
+  if (options.cardAnchor && restoreCardAnchor(host, options.cardAnchor)) {
+    // Filter changes keep the closest visible card at the same viewport offset.
+  } else {
+    host.scrollTop = SeahelmTimelineScroll.restore(host, anchor, (seq) => timelineRowTop(host, seq));
+  }
   tl.lastTop = host.scrollTop;   // ours, so the scroll handler does not read it as the reader's
+  paintNewCardHighlight();
   renderTimelineToBottom();
   // Near the top, or too little to scroll at all: fetch the page before.
   requestAnimationFrame(() => { if (host.scrollTop < 200) loadOlderMessages(key); });
@@ -1625,7 +1813,10 @@ function renderTimelineToBottom(){
   const btn = $('toBottom'), host = $('messageTimeline'), mid = $('midcol');
   if (!btn || !host || loadSurfaceMode() !== 'text') return;
   const held = host.scrollHeight - host.scrollTop - host.clientHeight > TL_BOTTOM_SLOP;
-  btn.classList.toggle('on', held);
+  const jump = S.selPane === FM_KEY && !!S.timelineJumpCard;
+  btn.textContent = jump ? (webUsesChinese() ? '↓ 新卡片' : '↓ New card') : '↓ Latest';
+  btn.title = jump ? (webUsesChinese() ? '跳到新卡片' : 'Jump to the new card') : 'Jump to the latest output';
+  btn.classList.toggle('on', held || jump);
   if (held && mid) btn.style.bottom = (mid.clientHeight - host.offsetTop - host.offsetHeight + 12) + 'px';
 }
 
@@ -1668,7 +1859,10 @@ $('messageTimeline').addEventListener('scroll', (ev) => {
   // Up by the reader lets go — even a few pixels, even inside the slop. The
   // `fromEnd > 2` keeps iOS's bounce back from the end out of it.
   if (h.scrollTop < tl.lastTop - 1 && fromEnd > 2) tl.follow = false;
-  else if (fromEnd <= TL_BOTTOM_SLOP && h.scrollTop >= tl.lastTop) tl.follow = true;
+  else if (fromEnd <= TL_BOTTOM_SLOP && h.scrollTop >= tl.lastTop) {
+    tl.follow = true;
+    S.timelineJumpCard = null;
+  }
   tl.lastTop = h.scrollTop;
   tl.quietAt = performance.now() + TL_SETTLE_MS;
   if (h.scrollTop < 200) loadOlderMessages(h.dataset.key);
@@ -1694,7 +1888,56 @@ function toggleToolGroup(head){
   renderMessageTimeline(S.selPane);
 }
 
+function sendTimelineCardAction(id, { index = null, dismiss = false } = {}){
+  const cardId = String(id || '');
+  if (!cardId || !isLinked() || S.cardActions.has(cardId)) return;
+  const item = SeahelmCardTimeline.merge(S.messages[FM_KEY] || [], S.cards).find(x => x.type === 'card' && x.cardId === cardId);
+  const card = item && item.card;
+  if (!card) return;
+  let previousSelection = null;
+  if (!dismiss && card.multi_select && index !== SeahelmCardModel.mateLabels(card).length - 1) {
+    previousSelection = (S.cardSelections.get(cardId) || card.checked || []).slice();
+    S.cardSelections.set(cardId, SeahelmCardModel.toggleChecked(previousSelection, index));
+  }
+  S.cardActions.add(cardId);
+  S.cardActionSignatures.set(cardId, cardActionSignature(card));
+  renderMessageTimeline(FM_KEY);
+  const method = dismiss ? 'cards.dismiss' : 'cards.answer';
+  const params = dismiss ? { id: cardId } : { id: cardId, index };
+  sendCommand(method, params, (r) => {
+    if (r && r.ok === false) {
+      S.cardActions.delete(cardId);
+      S.cardActionSignatures.delete(cardId);
+      if (previousSelection) S.cardSelections.set(cardId, previousSelection);
+      renderMessageTimeline(FM_KEY);
+      showActionToast((r.error && r.error.message) || 'Not sent', true);
+    }
+  });
+}
+
 $('messageTimeline').addEventListener('click', (ev) => {
+  const fold = ev.target.closest('[data-timeline-fold]');
+  if (fold) {
+    const id = fold.dataset.timelineFold;
+    if (S.todoExpanded.has(id)) S.todoExpanded.delete(id); else S.todoExpanded.add(id);
+    renderMessageTimeline(S.selPane);
+    return;
+  }
+  if (ev.target.closest('[data-suggestions-more]')) {
+    S.suggestionsExpanded = !S.suggestionsExpanded;
+    renderMessageTimeline(S.selPane);
+    return;
+  }
+  const card = ev.target.closest('[data-card-id]');
+  if (card && ev.target.closest('[data-card-dismiss]')) {
+    sendTimelineCardAction(card.dataset.cardId, { dismiss: true });
+    return;
+  }
+  const option = ev.target.closest('[data-card-index]');
+  if (card && option) {
+    sendTimelineCardAction(card.dataset.cardId, { index: Number(option.dataset.cardIndex) });
+    return;
+  }
   const head = ev.target.closest('[data-tools]');
   if (head) toggleToolGroup(head);
 });
@@ -1770,6 +2013,7 @@ function applySurfaceMode(){
   const keys = $('keyBar');
   if (keys) keys.hidden = text || !S.sel;
   document.body.dataset.surface = text ? 'text' : 'vt';
+  renderMateTodoToggle();
   renderSendButton();
   // With a worktree open the head names it (renderDetail); only fall back to
   // the mode when there is nothing to name.
@@ -1910,6 +2154,7 @@ function sendComposerText(byTap){
   const text = (input && input.value || '').trim();
   const key = S.selPane;
   if (!text || !key || !isLinked()) return;
+  if (S.todoFilter) setMateTodoFilter(false);
   const pane = S.panes.get(key) || {};
   const paneId = pane.pane_id || key;
   sendCommand('pane.send_text', { pane_id: paneId, text, enter: true }, () => {});
@@ -1941,6 +2186,7 @@ function sendComposerText(byTap){
     const action = SeahelmComposerKeys.composerKeyAction(ev);
     if (action === 'send') { ev.preventDefault(); sendComposerText(); }
     if (action === 'esc') {
+      if (S.todoFilter) { ev.preventDefault(); setMateTodoFilter(false); return; }
       const key = S.selPane;
       const pane = S.panes.get(key) || {};
       const paneId = pane.pane_id || key;
@@ -2328,8 +2574,8 @@ function renderSuggestions(){
 function renderReplyBar(){
   const bar = $('replyBar');
   const pid = S.selPane;
-  // First Mate's own agent asking something comes first; its cards after.
-  if (pid === FM_KEY && !S.events.has(FM_KEY)) { renderMateCards(bar); return; }
+  // First Mate cards now live at their dated positions in the conversation.
+  if (pid === FM_KEY) { bar.hidden = true; bar.innerHTML = ''; return; }
   const e = pid ? S.events.get(pid) : null;
   bar.hidden = !e;
   bar.innerHTML = '';
@@ -2349,10 +2595,9 @@ function renderReplyBar(){
     + '<button class="rb-skip" type="button">Skip</button>';
   card.setAttribute('aria-label', question ? (e.prompt || 'Needs your approval') : 'What next?');
   head.querySelector('.rb-skip').onclick = () => {
-    // Optimistic; the next `cards` notify is the truth either way.
-    S.events.delete(pid);
-    renderSuggestions();
-    sendCommand('cards.dismiss', { id: e.id });
+    sendCommand('cards.dismiss', { id: e.id }, (r) => {
+      if (r && r.ok === false) showActionToast((r.error && r.error.message) || 'Not sent', true);
+    });
   };
   card.appendChild(head);
   bar.appendChild(card);
@@ -2365,18 +2610,8 @@ function renderReplyBar(){
   // A multi-select row only toggles: the card stays up, ticked, and Done —
   // index options.length, the card's last label — is what answers it.
   const answer = (i, toggle) => {
-    // Optimistic, like dismissing: the core pushes the card list it now holds
-    // (new ticks, the next question, or none) once the answer lands.
-    if (toggle) {
-      S.events.set(pid, Object.assign({}, e, { checked: SeahelmCardModel.toggleChecked(checked, i) }));
-    } else {
-      S.events.delete(pid);
-    }
-    renderSuggestions();
     sendCommand('cards.answer', { id: e.id, index: i }, (r) => {
       if (r && r.ok === false) {
-        S.events.set(pid, e);
-        renderSuggestions();
         showActionToast((r.error && r.error.message) || 'Not sent', true);
       }
     });
@@ -2417,7 +2652,82 @@ function renderReplyBar(){
 // (its dot the colour of what it needs from you, amber with a count when cards
 // wait) that opens its pane like any other — timeline, terminal, composer —
 // with its approval and proposal cards answered above the composer.
-const FM_KEY = 'seahelm-first-mate';
+function webUsesChinese(){
+  return String((navigator && navigator.language) || document.documentElement.lang || '').toLowerCase().startsWith('zh');
+}
+
+function renderMateTodoToggle(){
+  const button = $('mateTodoToggle');
+  if (!button) return;
+  const shown = !SHARE_PANE && !!(S.firstMate && S.firstMate.enabled) && S.selPane === FM_KEY && loadSurfaceMode() === 'text';
+  button.hidden = !shown;
+  if (!shown) return;
+  const count = SeahelmCardTimeline.waitingCount(S.cards);
+  button.textContent = `${webUsesChinese() ? '待办' : 'Pending'} ${count}`;
+  button.classList.toggle('on', S.todoFilter);
+  button.setAttribute('aria-pressed', String(S.todoFilter));
+  button.setAttribute('aria-label', `${button.textContent}${S.todoFilter ? (webUsesChinese() ? '，筛选已开启' : ', filter on') : ''}`);
+}
+
+function nearestCardAnchor(host, eligibleIds = null){
+  if (!host) return null;
+  const top = host.getBoundingClientRect().top;
+  const bottom = top + host.clientHeight;
+  let nodes = [...host.querySelectorAll('[data-card-id]')];
+  if (eligibleIds) nodes = nodes.filter(node => eligibleIds.has(node.dataset.cardId));
+  if (!nodes.length) return null;
+  const visible = nodes.filter(node => {
+    const r = node.getBoundingClientRect();
+    return r.bottom > top && r.top < bottom;
+  });
+  const pool = visible.length ? visible : nodes;
+  const node = pool.reduce((best, next) => {
+    const d = n => Math.abs(n.getBoundingClientRect().top - top);
+    return d(next) < d(best) ? next : best;
+  });
+  return { id: node.dataset.cardId, offset: node.getBoundingClientRect().top - top };
+}
+
+function restoreCardAnchor(host, anchor){
+  if (!host || !anchor) return false;
+  const node = [...host.querySelectorAll('[data-card-id]')].find(x => x.dataset.cardId === anchor.id);
+  if (!node) return false;
+  host.scrollTop += node.getBoundingClientRect().top - host.getBoundingClientRect().top - anchor.offset;
+  return true;
+}
+
+function setMateTodoFilter(on){
+  if (S.todoFilter === !!on) return;
+  const host = $('messageTimeline');
+  let anchor = null;
+  if (S.selPane === FM_KEY && loadSurfaceMode() === 'text') {
+    const visible = SeahelmCardTimeline.present(SeahelmCardTimeline.merge(S.messages[FM_KEY] || [], S.cards), {
+      filtered: !!on, expandedRuns: S.todoExpanded, suggestionsExpanded: S.suggestionsExpanded,
+    });
+    const ids = new Set(visible.filter(item => item.type === 'card').map(item => item.cardId));
+    anchor = nearestCardAnchor(host, ids);
+  }
+  S.todoFilter = !!on;
+  renderMateTodoToggle();
+  if (S.selPane === FM_KEY && loadSurfaceMode() === 'text') renderMessageTimeline(FM_KEY, { cardAnchor: anchor });
+}
+
+function notifyNewTimelineCard(id){
+  if (S.selPane !== FM_KEY || loadSurfaceMode() !== 'text') return;
+  if (tl.follow) {
+    S.timelineJumpCard = null;
+    S.timelineHighlightCard = String(id);
+    scheduleTimeline();
+    setTimeout(() => {
+      if (S.timelineHighlightCard === String(id)) S.timelineHighlightCard = null;
+      const card = [...$('messageTimeline').querySelectorAll('[data-card-id]')].find(x => x.dataset.cardId === String(id));
+      if (card) card.classList.remove('highlight');
+    }, 2300);
+  } else {
+    S.timelineJumpCard = String(id);
+    renderTimelineToBottom();
+  }
+}
 
 function applyFirstMate(state){
   if (SHARE_PANE) return;
@@ -2427,7 +2737,7 @@ function applyFirstMate(state){
   else S.panes.delete(FM_KEY);
   renderMateButton();
   refreshFleetSoon(false);
-  if (S.selPane === FM_KEY) { renderDetailChrome(); renderReplyBar(); }
+  if (S.selPane === FM_KEY) { renderDetailChrome(); renderReplyBar(); renderMateTodoToggle(); }
 }
 
 function renderMateButton(){
@@ -2437,8 +2747,7 @@ function renderMateButton(){
   if (!st) return;
   const tone = st.enabled ? (st.tone || 'watching') : 'quiet';
   btn.className = 'icon-btn ' + ({ wants_you: 'wants', working: 'working', watching: 'watching' }[tone] || '');
-  // The count is the cards waiting above First Mate's composer.
-  const pending = S.mateCards.length;
+  const pending = SeahelmCardTimeline.waitingCount(S.cards);
   if (pending > 0) btn.setAttribute('data-count', pending > 9 ? '9+' : String(pending));
   else btn.removeAttribute('data-count');
   const label = st.enabled ? `First Mate — ${st.activity}. ${st.detail || ''}` : 'First Mate is off';
@@ -2454,46 +2763,6 @@ function openFirstMate(){
   }
   const row = buildFleet().find(r => r.firstMate);
   if (row) selectWorktree(row, FM_KEY);
-}
-
-/** First Mate's cards above its composer — approvals, proposals and reports,
- *  keyed by card id: tap a label to answer, Skip to dismiss. */
-function renderMateCards(bar){
-  const cards = S.mateCards;
-  bar.hidden = !cards.length;
-  bar.innerHTML = '';
-  for (const c of cards){
-    const card = document.createElement('div');
-    card.className = 'rb-card';
-    card.setAttribute('role', 'group');
-    const head = document.createElement('div');
-    head.className = 'rb-head' + (c.danger ? ' danger' : '');
-    head.innerHTML = '<span class="rb-ic" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.2"/><path d="M12 4v5.8M12 14.2V20M4 12h5.8M14.2 12H20"/></svg></span>'
-      + `<span>${esc(c.message || '')}</span>`
-      + '<button class="rb-skip" type="button">Skip</button>';
-    // Optimistic: the core pushes the cards that remain once it has the answer.
-    const drop = () => {
-      S.mateCards = S.mateCards.filter(x => x.id !== c.id);
-      renderReplyBar();
-      renderMateButton();
-    };
-    const failed = (r) => {
-      if (r && r.ok === false) showActionToast((r.error && r.error.message) || 'Not sent', true);
-    };
-    head.querySelector('.rb-skip').onclick = () => { drop(); sendCommand('cards.dismiss', { id: c.id }, failed); };
-    card.appendChild(head);
-    const opts = document.createElement('div');
-    opts.className = 'rb-opts';
-    SeahelmCardModel.mateLabels(c).forEach((label, index) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = label;
-      b.onclick = () => { drop(); sendCommand('cards.answer', { id: c.id, index }, failed); };
-      opts.appendChild(b);
-    });
-    card.appendChild(opts);
-    bar.appendChild(card);
-  }
 }
 
 /** Other panes waiting on a decision: one line under the head, a tap away. */
@@ -2835,20 +3104,27 @@ function renderDetailChrome(){
   if (!row){
     tabs.hidden = true;
     tabs.innerHTML = '';
-    if (S.sel) return;               // a worktree still being made: openNewWorktree named it
+    if (S.sel) { renderMateTodoToggle(); return; } // a worktree still being made: openNewWorktree named it
+    head.closest('.dh-title')?.classList.remove('mate');
+    head.closest('.detail-head')?.classList.remove('mate');
     sub.textContent = '';
+    renderMateTodoToggle();
     return;
   }
   const detailHead = head.closest('.detail-head');
+  const title = head.closest('.dh-title');
   if (row.firstMate) {
     detailHead && detailHead.classList.add('mate');
+    title && title.classList.add('mate');
     head.innerHTML = $('mateBtn').querySelector('svg').outerHTML + '<span>First Mate</span>';
     sub.textContent = (S.firstMate && S.firstMate.detail) || '';
     tabs.hidden = true;
     tabs.innerHTML = '';
+    renderMateTodoToggle();
     return;
   }
   detailHead && detailHead.classList.remove('mate');
+  title && title.classList.remove('mate');
   head.textContent = row.title || row.branch || row.path;
   const pane = S.selPane && S.panes.get(S.selPane);
   // The branch's PR, as the row draws it, and a tap away on GitHub.
@@ -2869,7 +3145,7 @@ function renderDetailChrome(){
     ].filter(Boolean).join(' · ');
   }
   tabs.hidden = row.panes.length < 2;
-  if (tabs.hidden) { tabs.innerHTML = ''; return; }
+  if (tabs.hidden) { tabs.innerHTML = ''; renderMateTodoToggle(); return; }
   tabs.innerHTML = '';
   for (const [key, p] of row.panes){
     const st = shownStatus(p.status, p.unseen);
@@ -2923,6 +3199,7 @@ function showScreen(screen){
       fitAllPanes();
     });
   }
+  renderMateTodoToggle();
 }
 
 function backToList(){
@@ -3993,6 +4270,10 @@ $('drawerBtn').onclick = backToList;
 $('toBottom').onclick=()=>{
   if (loadSurfaceMode() === 'text') {
     const host = $('messageTimeline');
+    if (S.selPane === FM_KEY && S.timelineJumpCard) {
+      S.timelineHighlightCard = S.timelineJumpCard;
+      S.timelineJumpCard = null;
+    }
     // Instant, not smooth: a smooth scroll runs past the next repaint, which
     // would read a position still on its way and hold the reader short of the end.
     tl.follow = true;
@@ -4088,12 +4369,19 @@ function closeMenus(){
 document.addEventListener('pointerdown', (ev) => {
   if (!ev.target.closest('.menu, [aria-haspopup="menu"]')) closeMenus();
 }, true);
-document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeMenus(); });
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && S.todoFilter && !SeahelmComposerKeys.isComposing(ev)) {
+    ev.preventDefault();
+    setMateTodoFilter(false);
+  }
+  if (ev.key === 'Escape') closeMenus();
+});
 // Any choice closes the menu it was made in.
 for (const m of document.querySelectorAll('.menu')) m.addEventListener('click', (ev) => {
   if (ev.target.closest('button')) setTimeout(closeMenus, 0);
 });
 $('mateBtn').onclick = openFirstMate;
+$('mateTodoToggle').onclick = () => setMateTodoFilter(!S.todoFilter);
 $('menuBtn').onclick = (ev) => {
   const m = $('menu');
   if (!m.hidden) { closeMenus(); return; }
