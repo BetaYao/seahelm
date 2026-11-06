@@ -800,6 +800,20 @@ function scrollbackForLeafCount(count){
   return count >= VT_SHALLOW_FROM_LEAVES ? VT_SCROLLBACK_SHALLOW : VT_SCROLLBACK_DEEP;
 }
 
+// `?pane=<session key or id>` opens a page of that pane alone. `&share=` is the
+// token the Mac minted for that pane: with it the page signs in to that pane
+// only, no pairing code, and the gateway sends nothing else. Declared before
+// anything runs: start-up code (applySurfaceMode → renderMateTodoToggle) reads
+// it, and a `const` read before its line throws and left the page blank.
+const SHARE_PANE = (() => {
+  try { return new URLSearchParams(location.search).get('pane'); }
+  catch (e) { return null; }
+})();
+const SHARE_TOKEN = (() => {
+  try { return SHARE_PANE && new URLSearchParams(location.search).get('share') || null; }
+  catch (e) { return null; }
+})();
+
 const S = {
   mac:'testmac', transport:null,   // transport: null | 'gateway'
   gw:null,   // gateway WebSocket state
@@ -2250,17 +2264,6 @@ for (const b of document.querySelectorAll('#fmModes button'))
   b.onclick = () => setGroupingMode(b.dataset.mode);
 syncModeButtons();
 
-// `?pane=<session key or id>` opens a page of that pane alone. `&share=` is the
-// token the Mac minted for that pane: with it the page signs in to that pane
-// only, no pairing code, and the gateway sends nothing else.
-const SHARE_PANE = (() => {
-  try { return new URLSearchParams(location.search).get('pane'); }
-  catch (e) { return null; }
-})();
-const SHARE_TOKEN = (() => {
-  try { return SHARE_PANE && new URLSearchParams(location.search).get('share') || null; }
-  catch (e) { return null; }
-})();
 if (SHARE_PANE) document.body.dataset.share = 'pane';
 // Who is on this end of an open share link. The Mac signs every message sent
 // from here with it, so it is asked once and kept for the next link. A link
