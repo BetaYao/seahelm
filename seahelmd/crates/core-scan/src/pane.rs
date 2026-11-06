@@ -241,11 +241,14 @@ impl PaneScanner {
             background_busy: detection.background_busy,
         };
         let question = (has_approval && !choices::is_agent_question_dialog(content, choices::DEFAULT_BOTTOM_LINES)).then(|| {
+            // Where the cursor was when the dialog was read: an unnumbered
+            // menu shows no number to find it by when the card is answered.
+            let cursor = options.iter().position(|o| o.selected).unwrap_or(0);
             EventKind::Question {
                 prompt: format!("{} requires approval", agent_type.display_name()),
                 options: options.into_iter().map(|o| o.label).collect(),
                 followups: Vec::new(),
-                flags: QuestionFlags::default(),
+                flags: QuestionFlags { cursor, ..QuestionFlags::default() },
             }
         });
         ScanOutput { event: Some(event), agent_type, command_line, question }
