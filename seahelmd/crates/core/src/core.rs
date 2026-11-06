@@ -52,8 +52,6 @@ pub struct Core {
     /// Where each transcript was read to; its own lock, so reading one never
     /// holds `state`.
     transcripts: Mutex<seahelm_core_messages::Tail>,
-    /// Cursor chat-store checkpoints; reads SQLite without holding `state`.
-    cursor_transcripts: Mutex<HashMap<String, std::sync::mpsc::Sender<(String, String, bool)>>>,
     /// Stable pane handles (`#n`) for the command language.
     pub(crate) handles: Arc<Mutex<seahelm_core_command::Handles>>,
     /// Per worktree: its repo root and branch, and when they were read.
@@ -77,7 +75,15 @@ pub struct Core {
     presence: Mutex<first_mate::presence::Tracker>,
 }
 
+struct CursorWorker {
+    sender: std::sync::mpsc::Sender<(String, String, bool, Value, Timestamp)>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    checkpoint: PathBuf,
+    checkpoint_gate: Arc<Mutex<()>>,
+}
+
 struct State {
+    cursor_workers: HashMap<String, CursorWorker>,
     registry: Registry,
     aggregator: Aggregator,
     provider: hooks::provider::Provider,
@@ -231,6 +237,7 @@ impl Core {
             .unwrap_or_default();
         Arc::new(Self {
             state: Mutex::new(State {
+                cursor_workers: HashMap::new(),
                 registry: Registry::new(),
                 aggregator: Aggregator::new(),
                 provider: hooks::provider::Provider::new(),
@@ -261,7 +268,7 @@ impl Core {
             first_mate: std::sync::OnceLock::new(),
             observer: std::sync::OnceLock::new(),
             transcripts: Mutex::new(seahelm_core_messages::Tail::default()),
-            cursor_transcripts: Mutex::new(HashMap::new()),
+
             handles,
             git_cache: Mutex::new(HashMap::new()),
             discovered: Mutex::new(Vec::new()),
@@ -403,30 +410,43 @@ impl Core {
         reply
     }
 
-    fn queue_cursor_prose(self: &Arc<Self>, pane: String, alias: String, cwd: String, chat: String, start: bool) {
-        let mut workers = self.cursor_transcripts.lock().unwrap_or_else(|e| e.into_inner());
-        let sender = workers.entry(pane.clone()).or_insert_with(|| {
-            let (sender, receiver) = std::sync::mpsc::channel::<(String, String, bool)>();
+    fn queue_cursor_prose(self: &Arc<Self>, pane: String, alias: String, cwd: String, chat: String, start: bool, payload: Value, at: Timestamp) {
+        let mut state = self.lock();
+        let worker = state.cursor_workers.entry(pane.clone()).or_insert_with(|| {
+            let (sender, receiver) = std::sync::mpsc::channel::<(String, String, bool, Value, Timestamp)>();
             let core = Arc::downgrade(self);
             let checkpoint = self.audit_path.parent().unwrap_or(std::path::Path::new(".")).join("cursor-checkpoints").join(hooks::titles::md5_hex(&pane));
+            let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let cancel = cancelled.clone();
+            let worker_checkpoint = checkpoint.clone();
+            let checkpoint_gate = Arc::new(Mutex::new(()));
+            let gate = checkpoint_gate.clone();
             std::thread::spawn(move || {
+                let checkpoint = worker_checkpoint;
                 let mut tail = seahelm_core_messages::CursorTail::default();
                 tail.restore(&checkpoint);
-                for (cwd, chat, start) in receiver {
+                for (cwd, chat, start, payload, at) in receiver {
+                    if cancel.load(std::sync::atomic::Ordering::Acquire) { break; }
                     let Some(core) = core.upgrade() else { break };
                     let entries = tail.new_prose(&hooks::titles::cursor_chats_root(&hooks::home_dir()), &cwd, &chat, start);
                     let mut state = core.lock();
-                    if state.registry.pane(&pane).is_none() { continue; }
-                    let rows = entries.into_iter().map(|entry| seahelm_core_messages::Message::new(&alias, &pane, seahelm_core_messages::Kind::Assistant, now()).with_text(entry.text)).collect();
-                    state.messages.append(rows);
+                    if cancel.load(std::sync::atomic::Ordering::Acquire) || state.registry.pane(&pane).is_none() { break; }
+                    let before = state.messages.seq();
+                    state.cursor_hook(&pane, &alias, entries, payload, at);
+                    let prompts = user_prompts(&state, before, at);
+                    let active = state.app_active;
                     drop(state);
-                    tail.persist(&checkpoint);
+                    {
+                        let _guard = gate.lock().unwrap_or_else(|e| e.into_inner());
+                        if !cancel.load(std::sync::atomic::Ordering::Acquire) { tail.persist(&checkpoint); }
+                    }
+                    core.prompts_seen(&prompts, active, at);
                     core.changed.notify_all();
                 }
             });
-            sender
+            CursorWorker { sender, cancelled, checkpoint, checkpoint_gate }
         });
-        let _ = sender.send((cwd, chat, start));
+        let _ = worker.sender.send((cwd, chat, start, payload, at));
     }
 
     fn dispatch(self: Arc<Self>, method: &str, p: Value, now: Timestamp) -> Reply {
@@ -449,13 +469,14 @@ impl Core {
                 // transcript without the lock, and put on the timeline before
                 // this hook's own rows: above the tool call it introduces.
                 let wanted = self.lock().transcript_request(&p);
+                if let Some(TranscriptRequest { pane, alias, source: TranscriptSource::Cursor { cwd, chat_id, session_start }, .. }) = &wanted {
+                    self.queue_cursor_prose(pane.clone(), alias.clone(), cwd.clone(), chat_id.clone(), *session_start, p, now);
+                    return Reply::Value(Ok(match stdout { Some(out) => json!({"stdout": out}), None => json!({}) }));
+                }
                 let prose = wanted.map(|request| {
                     let entries = match request.source {
                         TranscriptSource::File(path) => self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).new_prose(&path, request.since),
-                        TranscriptSource::Cursor { cwd, chat_id, session_start } => {
-                            self.queue_cursor_prose(request.pane.clone(), request.alias.clone(), cwd, chat_id, session_start);
-                            Vec::new()
-                        }
+                        TranscriptSource::Cursor { .. } => unreachable!(),
                     };
                     let (pane, alias) = (request.pane, request.alias);
                     (pane, alias, entries)
@@ -1759,7 +1780,18 @@ impl State {
         }
     }
 
+    fn cursor_hook(&mut self, pane: &str, alias: &str, entries: Vec<seahelm_core_messages::transcript::Entry>, payload: Value, at: Timestamp) {
+        let rows = entries.into_iter().map(|entry| seahelm_core_messages::Message::new(alias, pane, seahelm_core_messages::Kind::Assistant, at).with_text(entry.text)).collect();
+        self.messages.append(rows);
+        self.hook(payload, at);
+    }
+
     fn unregister(&mut self, pane: &str) {
+        if let Some(worker) = self.cursor_workers.remove(pane) {
+            worker.cancelled.store(true, std::sync::atomic::Ordering::Release);
+            let _guard = worker.checkpoint_gate.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = std::fs::remove_file(worker.checkpoint);
+        }
         if let Some(info) = self.registry.pane(pane) {
             let wt = info.worktree_path.clone();
             self.aggregator.unregister_pane(pane, &wt);
@@ -2948,6 +2980,42 @@ mod card_timeline_tests {
             agent_type: AgentType::ClaudeCode,
             started_at: None,
         }
+    }
+
+    #[test]
+    fn cursor_store_prose_precedes_the_tool_hook_in_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Core::for_test(dir.path());
+        let mut state = core.lock();
+        state.register(registration());
+        for (i, text) in ["Inspect the file.", "Now fix the problem."].iter().enumerate() {
+            let payload = json!({"source":"cursor", "session_id":"chat", "event":"tool_use_start", "cwd":"/workspace/saas-mono", "seahelm_pane_id":"seahelm-pane-1", "data":{"tool_name":"Shell", "tool_input":{"command":format!("command-{i}")}}});
+            state.cursor_hook("seahelm-pane-1", "client-pane-1", vec![seahelm_core_messages::transcript::Entry { thinking:false, text:text.to_string(), timestamp:None }], payload, 100.0 + i as f64 * 10.0);
+        }
+        let rows = state.messages.snapshot(Some("seahelm-pane-1"));
+        let relevant: Vec<_> = rows.iter().filter(|row| matches!(row.kind, seahelm_core_messages::Kind::Assistant | seahelm_core_messages::Kind::Tool)).collect();
+        assert_eq!(relevant.iter().map(|row| row.kind).collect::<Vec<_>>(), [seahelm_core_messages::Kind::Assistant, seahelm_core_messages::Kind::Tool, seahelm_core_messages::Kind::Assistant, seahelm_core_messages::Kind::Tool]);
+        assert!(relevant.windows(2).all(|pair| pair[0].seq < pair[1].seq));
+    }
+
+    #[test]
+    fn unregister_stops_cursor_worker_and_deletes_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Core::for_test(dir.path());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let checkpoint = dir.path().join("checkpoint");
+        std::fs::write(&checkpoint, "saved").unwrap();
+        {
+            let mut state = core.lock();
+            state.register(registration());
+            state.cursor_workers.insert("seahelm-pane-1".into(), CursorWorker { sender, cancelled:cancelled.clone(), checkpoint:checkpoint.clone(), checkpoint_gate:Arc::new(Mutex::new(())) });
+        }
+        core.close_pane("seahelm-pane-1");
+        assert!(core.lock().cursor_workers.is_empty());
+        assert!(cancelled.load(std::sync::atomic::Ordering::Acquire));
+        assert!(!checkpoint.exists());
+        assert!(matches!(receiver.recv_timeout(Duration::from_millis(100)), Err(std::sync::mpsc::RecvTimeoutError::Disconnected)));
     }
 
     fn second_registration() -> Registration {

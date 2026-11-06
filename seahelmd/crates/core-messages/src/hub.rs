@@ -67,11 +67,14 @@ impl Hub {
         let mut kept = Vec::with_capacity(rows.len());
         for mut m in rows {
             let key = m.ring_key().to_string();
-            let ring = self.rings.entry(key).or_default();
+            let ring = self.rings.entry(key.clone()).or_default();
             // A turn's final message comes twice, from the transcript and from
             // the Stop hook, in either order.
             if m.kind == Kind::Assistant && ring.iter().filter(|r| r.kind == Kind::Assistant).rev().take(3).any(|r| r.text == m.text) {
                 continue;
+            }
+            if matches!(m.kind, Kind::Assistant | Kind::Thinking) {
+                if let Some(coalesce) = self.coalesce.get_mut(&key) { coalesce.break_tool_run(); }
             }
             self.next_seq += 1;
             m.seq = self.next_seq;
@@ -122,7 +125,7 @@ impl Hub {
     pub fn history(&mut self, pane: &str, before: u64, limit: usize) -> (Vec<Message>, bool) {
         let key = self.key_for(pane);
         if let Some(store) = &self.store {
-            let (mut page, more) = store.history(&key, before, limit);
+            let (mut page, mut more) = store.history(&key, before, limit);
             let ring = self.rings.get(&key).map(Vec::as_slice).unwrap_or(&[]);
             // The first history page must also fill holes between independent
             // snapshot budgets. Otherwise its global oldest seq hides newer
@@ -130,7 +133,9 @@ impl Hub {
             // the requested page of older rows.
             if ring.first().is_some_and(|row| row.seq == before) {
                 let (all, _) = store.history(&key, u64::MAX, usize::MAX);
-                page.extend(all.into_iter().filter(|row| row.seq >= before && !ring.iter().any(|known| known.seq == row.seq)));
+                let hidden: Vec<_> = all.into_iter().filter(|row| row.seq >= before && !ring.iter().any(|known| known.seq == row.seq)).collect();
+                more |= hidden.len() > limit;
+                page.extend(hidden.into_iter().take(limit));
                 page.sort_by_key(|row| row.seq);
                 page.dedup_by_key(|row| row.seq);
             }
@@ -548,10 +553,10 @@ mod tests {
         for i in 0..10 { hub.append(vec![Message::new("a", "k", Kind::Tool, 1.0).with_text(format!("tool-{i}"))]); }
         let snapshot = hub.snapshot(Some("k"));
         let (history, more) = hub.history("k", snapshot[0].seq, 2);
-        assert_eq!(history.len(), 7);
-        assert!(!more);
+        assert_eq!(history.len(), 2);
+        assert!(more);
         let mut all = snapshot; all.extend(history); all.sort_by_key(|m| m.seq);
-        assert_eq!(all.iter().map(|m| m.seq).collect::<Vec<_>>(), (1..=11).collect::<Vec<_>>());
+        assert!(all.windows(2).all(|rows| rows[0].seq < rows[1].seq));
     }
 
     #[test]

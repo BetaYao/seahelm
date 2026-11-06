@@ -65,10 +65,13 @@ impl CursorTail {
     }
 
     pub fn persist(&self, path: &std::path::Path) {
-        let values: serde_json::Map<String, Value> = self.checkpoints.iter().map(|(key, cp)| (key.clone(), serde_json::json!({"position": cp.position, "hash": cp.hash}))).collect();
+        if self.checkpoints.is_empty() { return; }
+        let values: std::collections::BTreeMap<String, Value> = self.checkpoints.iter().map(|(key, cp)| (key.clone(), serde_json::json!({"position": cp.position, "hash": cp.hash}))).collect();
+        let body = serde_json::to_string(&values).unwrap_or_default();
+        if std::fs::read_to_string(path).ok().as_deref() == Some(body.as_str()) { return; }
         if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
         let temporary = path.with_extension("tmp");
-        if std::fs::write(&temporary, Value::Object(values).to_string()).is_ok() { let _ = std::fs::rename(temporary, path); }
+        if std::fs::write(&temporary, body).is_ok() { let _ = std::fs::rename(temporary, path); }
     }
 
     fn advance(&mut self, key: &str, messages: &[CursorMessage], session_start: bool) -> Vec<Entry> {
@@ -282,6 +285,19 @@ mod tests {
         let mut restarted = CursorTail::default();
         restarted.restore(&path);
         assert_eq!(restarted.checkpoints, tail.checkpoints);
+    }
+
+    #[test]
+    fn unchanged_cursor_checkpoint_does_not_replace_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checkpoint");
+        let mut tail = CursorTail::default();
+        tail.checkpoints.insert("chat".into(), cursor_store::Checkpoint { position: 1, hash: "ab".repeat(32) });
+        tail.persist(&path);
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        tail.persist(&path);
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+        assert!(!path.with_extension("tmp").exists());
     }
 
     #[test]
