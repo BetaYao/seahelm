@@ -593,12 +593,12 @@ impl FirstMate {
     /// version, is replaced.
     fn ensure_session(&mut self) {
         let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("seahelm-core"));
-        pane::provision(&self.dir, &exe);
+        pane::provision(&self.dir, &exe, self.config.language);
         let agent = self.config.agent;
         let young = self.launched_at.is_some_and(|t| t.elapsed() < Duration::from_secs(60));
         let mut exists = seahelmd::client::connect(policy::SESSION).is_ok();
         let has_agent = self.core.pane_agent(policy::SESSION).is_some_and(|a| a.is_ai_agent());
-        if exists && (!pane::session_is_current(&self.dir, agent) || (!young && self.launched_at.is_some() && !has_agent)) {
+        if exists && (!pane::session_is_current(&self.dir, agent, self.config.language) || (!young && self.launched_at.is_some() && !has_agent)) {
             let _ = seahelmd::client::request(policy::SESSION, &seahelmd::proto::Msg::Kill);
             let deadline = Instant::now() + Duration::from_secs(5);
             while seahelmd::client::connect(policy::SESSION).is_ok() && Instant::now() < deadline {
@@ -607,7 +607,7 @@ impl FirstMate {
             exists = false;
         }
         if !exists {
-            pane::mark_session_current(&self.dir, agent);
+            pane::mark_session_current(&self.dir, agent, self.config.language);
             let out = std::process::Command::new(crate::actions::seahelmd_bin())
                 .current_dir(&self.dir)
                 .args(["new", "--hold", "10", policy::SESSION, "--"])
