@@ -124,6 +124,20 @@ pub fn mandate(text: &str, name: &str, aliases: &[String], remote: Option<&str>)
         || aliases.iter().any(|a| names(text, a))
         || issue_link(text).is_some_and(|(r, _)| remote.is_some_and(|remote| r.eq_ignore_ascii_case(remote)))
 }
+/// A README's first prose paragraph as one line of at most 120 characters:
+/// headings, badges, images, HTML and link-only lines skipped, so every
+/// message to First Mate does not carry a wall of shield URLs.
+fn readme_summary(text: &str) -> String {
+    let prose = |p: &str| {
+        let t = p.trim();
+        !t.is_empty() && !t.starts_with('#') && !t.starts_with("[![") && !t.starts_with("![") && !t.starts_with('<') && !t.starts_with("---")
+    };
+    let para = text.split("\n\n").find(|p| prose(p)).unwrap_or_default();
+    let line = para.lines().filter(|l| prose(l)).collect::<Vec<_>>().join(" ");
+    let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.chars().count() > 120 { format!("{}…", line.chars().take(120).collect::<String>()) } else { line }
+}
+
 impl FirstMate {
     pub(super) fn project_list(&self) -> Value {
         let today = super::clock::Local::at(seahelm_core_types::now()).day_key();
@@ -143,15 +157,7 @@ impl FirstMate {
                     ["README.md", "README", "readme.md"]
                         .iter()
                         .find_map(|f| std::fs::read_to_string(Path::new(&repo).join(f)).ok())
-                        .map(|s| {
-                            s.split("\n\n")
-                                .find(|p| !p.trim().is_empty() && !p.trim().starts_with('#'))
-                                .unwrap_or_default()
-                                .replace('\n', " ")
-                                .chars()
-                                .take(240)
-                                .collect()
-                        })
+                        .map(|s| readme_summary(&s))
                         .unwrap_or_default()
                 });
                 json!({"repo":repo, "name":super::short(&repo), "description":description, "aliases":aliases})
@@ -261,6 +267,13 @@ impl FirstMate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readme_summaries_skip_badges_and_stay_short() {
+        let readme = "# teamclaw\n\n[![License: MIT](https://img.shields.io/x.svg)](https://o) [![CI](https://g/b.svg)](https://g)\n\nTeam chat for agents.\nRuns locally.\n\nMore.";
+        assert_eq!(readme_summary(readme), "Team chat for agents. Runs locally.");
+        assert!(readme_summary(&"word ".repeat(60)).chars().count() <= 121);
+    }
     #[test]
     fn only_user_names_aliases_or_matching_links_mandate() {
         assert!(mandate("修复 seahelm 的登录", "seahelm", &[], None));

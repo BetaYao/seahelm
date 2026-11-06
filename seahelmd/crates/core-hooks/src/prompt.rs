@@ -26,8 +26,22 @@ pub fn human_text(raw: &str) -> Option<String> {
     if trimmed.is_empty() || is_wholly_machine_block(trimmed) {
         return None;
     }
-    let unwrapped = unwrap_pasted_content(trimmed);
+    let unwrapped = strip_seahelm_context(&unwrap_pasted_content(trimmed));
     (!unwrapped.is_empty()).then_some(unwrapped)
+}
+
+/// The user's words without the context seahelm appended for the agent.
+/// The core delivers the user's message to First Mate as
+/// `<their words>\n\n[seahelm projects] <json>`: the block is for the
+/// agent, not something the user said, and shown in the timeline it made
+/// the web's echo of the sent message never match (two bubbles for one).
+/// Only a block that follows the user's own words is cut; a prompt that is
+/// all seahelm (`[seahelm event] …`) is left whole.
+pub fn strip_seahelm_context(text: &str) -> String {
+    match text.find("\n\n[seahelm ") {
+        Some(at) if !text[..at].trim().is_empty() => text[..at].trim_end().to_string(),
+        _ => text.to_string(),
+    }
 }
 
 /// Whether `trimmed` is one machine block and nothing else.
@@ -57,6 +71,17 @@ pub fn unwrap_pasted_content(text: &str) -> String {
     // The tags sat on lines of their own; removing them leaves the blank
     // lines that held them apart.
     gaps.replace_all(&stripped, "\n\n").trim().to_string()
+}
+
+#[cfg(test)]
+mod seahelm_context_tests {
+    use super::*;
+    #[test]
+    fn the_users_words_without_seahelms_context() {
+        assert_eq!(human_text("记住，PR 用英文\n\n[seahelm projects] [{\"repo\":\"/r\"}]").as_deref(), Some("记住，PR 用英文"));
+        assert_eq!(human_text("[seahelm event] research.done\nJob: x").as_deref(), Some("[seahelm event] research.done\nJob: x"));
+        assert_eq!(human_text("plain").as_deref(), Some("plain"));
+    }
 }
 
 #[cfg(test)]
