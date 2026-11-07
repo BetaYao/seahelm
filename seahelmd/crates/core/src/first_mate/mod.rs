@@ -79,7 +79,11 @@ pub struct UserConfig {
 
 impl UserConfig {
     pub fn load() -> Self {
-        Self::parse(&std::fs::read_to_string(crate::rpc::config_dir().join("config.json")).unwrap_or_default())
+        Self::load_from(&crate::rpc::config_dir().join("config.json"))
+    }
+
+    pub fn load_from(path: &Path) -> Self {
+        Self::parse(&std::fs::read_to_string(path).unwrap_or_default())
     }
 
     pub fn parse(text: &str) -> Self {
@@ -145,6 +149,9 @@ pub enum Msg {
     Security { text: lang::Text, note: bool },
     /// The user asked for the inventory again (`habits.inventory`).
     Inventory { reply: Sender<RpcResult> },
+    /// `config.json` changed under First Mate (`autopilot.configure`): read
+    /// it now rather than at the next tick, up to 20 s away.
+    ConfigChanged,
     /// The inventory measured and grouped the worktrees.
     Inventoried { measured: usize, groups: Vec<(inventory::Group, Vec<sweep::Candidate>)> },
     /// The deletions of a group the user said to delete finished.
@@ -201,6 +208,45 @@ impl Handle {
 /// still where the user looks).
 pub fn audit_directly(path: &Path, text: &str) {
     Audit::open(path.to_path_buf()).append(&Entry::new(seahelm_core_types::now(), "security", text));
+}
+
+/// `autopilot.configure`: turn First Mate on or off and pick its agent, from a
+/// client that has no Settings window of its own (seahelm-web). Only these
+/// keys of `config.json` change; the rest of the file is kept as it was.
+/// The file is written whole, through a temporary beside it.
+pub fn configure(path: &Path, enabled: Option<bool>, agent: Option<&str>) -> Result<(), String> {
+    if let Some(a) = agent {
+        if a != Agent::Claude.raw() && a != Agent::Codex.raw() {
+            return Err(format!("unknown agent {a:?}: claudeCode or codex"));
+        }
+    }
+    let mut doc: serde_json::Map<String, Value> = match std::fs::read_to_string(path) {
+        Ok(text) if !text.trim().is_empty() => match serde_json::from_str::<Value>(&text) {
+            Ok(Value::Object(o)) => o,
+            // Rewriting a file we cannot read would throw the user's settings away.
+            _ => return Err(format!("{} is not a JSON object; not touching it", path.display())),
+        },
+        Ok(_) => Default::default(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
+        Err(e) => return Err(format!("read {}: {e}", path.display())),
+    };
+    if let Some(on) = enabled {
+        doc.insert("autopilot_enabled".into(), Value::Bool(on));
+    }
+    if let Some(a) = agent {
+        doc.insert("autopilot_agent".into(), Value::String(a.into()));
+    }
+    let text = serde_json::to_string_pretty(&Value::Object(doc)).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("json.configure-tmp");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&tmp, text).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    // Keep the file's permissions: it may hold secrets and be 0600.
+    if let Ok(meta) = std::fs::metadata(path) {
+        let _ = std::fs::set_permissions(&tmp, meta.permissions());
+    }
+    std::fs::rename(&tmp, path).map_err(|e| format!("replace {}: {e}", path.display()))
 }
 
 pub fn refused(message: impl Into<String>) -> RpcError {
@@ -435,6 +481,7 @@ impl FirstMate {
             Msg::State { reply } => {
                 let _ = reply.send(self.state_json());
             }
+            Msg::ConfigChanged => self.tick(now),
             Msg::Say { text, reply } => {
                 let _ = reply.send(self.say(&text, now));
             }
@@ -1220,6 +1267,7 @@ impl FirstMate {
             (Some((text, _)), _) => text.clone(),
             _ => String::new(),
         };
+        let on_disk = UserConfig::load();
         let mut v = json!({
             "enabled": self.running,
             "owner": "core",
@@ -1232,12 +1280,20 @@ impl FirstMate {
             "language": self.config.language.pick("en", "zh"),
             "cards": cards,
             "held": self.held.len(),
+            // What config.json says now, read for this answer (the tick's copy
+            // can be 20 s old): clients that keep their own copy of these keys
+            // (the macOS app) follow it, so a save of theirs cannot undo a
+            // change made elsewhere — and a change of theirs is not undone by
+            // a stale reading.
+            "configured": {"enabled": on_disk.enabled, "agent": on_disk.agent.raw()},
         });
         if self.running {
             v["pane"] = json!({
                 "pane_id": policy::SESSION, "pane_session_key": policy::SESSION,
                 "worktree_path": self.dir, "project": pane::PROJECT, "branch": "",
                 "status": status.map(|s| s.as_str()).unwrap_or("Unknown"), "first_mate": true,
+                // Without it a client takes the pane for a bare terminal.
+                "agent_type": self.config.agent.raw(),
             });
         }
         v
@@ -1297,6 +1353,39 @@ fn usage_percent() -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configure_changes_only_its_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"theme_mode": "dark", "autopilot_enabled": false, "workspace_paths": ["/w"]}"#).unwrap();
+        configure(&path, Some(true), Some("codex")).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["autopilot_enabled"], json!(true));
+        assert_eq!(v["autopilot_agent"], json!("codex"));
+        assert_eq!(v["theme_mode"], json!("dark"));
+        assert_eq!(v["workspace_paths"], json!(["/w"]));
+        let c = UserConfig::load_from(&path);
+        assert!(c.enabled);
+        assert_eq!(c.agent, Agent::Codex);
+        // Only the enable switch: the agent stays.
+        configure(&path, Some(false), None).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!((v["autopilot_enabled"].clone(), v["autopilot_agent"].clone()), (json!(false), json!("codex")));
+    }
+
+    #[test]
+    fn configure_creates_a_missing_file_and_refuses_bad_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        configure(&path, Some(true), Some("claudeCode")).unwrap();
+        assert!(UserConfig::load_from(&path).enabled);
+        assert!(configure(&path, None, Some("gemini")).is_err());
+        // A file that does not parse is left alone, not replaced.
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(configure(&path, Some(true), None).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
+    }
 
     #[test]
     fn config_reads_switch_agent_and_defaults() {

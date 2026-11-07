@@ -679,6 +679,21 @@ impl Core {
                     }
                 }
             }
+            // seahelm-web's activation page: First Mate on or off, and its agent.
+            "autopilot.configure" => {
+                let enabled = p.get("enabled").and_then(Value::as_bool);
+                let agent = str_param(&p, "agent");
+                let path = rpc::config_dir().join("config.json");
+                match first_mate::configure(&path, enabled, agent.as_deref()) {
+                    Ok(()) => {
+                        if let Some(fm) = self.first_mate.get() {
+                            fm.send(first_mate::Msg::ConfigChanged);
+                        }
+                        Ok(json!({"ok": true}))
+                    }
+                    Err(e) => Err(RpcError::invalid_params(e)),
+                }
+            }
             "autopilot.state" => Ok(match self.first_mate.get() {
                 Some(fm) => fm.state(),
                 None => json!({"enabled": false, "owner": "core"}),
