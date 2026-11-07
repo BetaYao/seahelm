@@ -532,7 +532,13 @@ final class IslandFirstMateTests: XCTestCase {
             MessageEvent(seq: 3, paneId: "fm", paneSessionKey: "k", kind: .assistant, ts: Date(), text: "Safe to delete."),
             MessageEvent(seq: 4, paneId: "fm", paneSessionKey: "k", kind: .decision, ts: Date(), text: "A · B"),
         ])
-        XCTAssertEqual(items.map(\.id), [1, 3, 2, 4], "the reply first, its choices under it; a trailing one stays last")
+        // Only the latest set of choices stays (2 went once 4 came).
+        XCTAssertEqual(items.map(\.id), [1, 3, 4], "the reply first; an earlier set of choices goes once a later one comes")
+        let one = ConversationItem.items(from: [
+            MessageEvent(seq: 2, paneId: "fm", paneSessionKey: "k", kind: .decision, ts: Date(), text: "Delete · Keep"),
+            MessageEvent(seq: 3, paneId: "fm", paneSessionKey: "k", kind: .assistant, ts: Date(), text: "Safe to delete."),
+        ])
+        XCTAssertEqual(one.map(\.id), [3, 2], "a suggestion still goes under its reply")
     }
 
     func testFoldedReplyDropsBlankLines() {
@@ -581,5 +587,13 @@ final class IslandFirstMateTests: XCTestCase {
     func testOpenedHitHeightCoversHeaderAndSurface() {
         XCTAssertEqual(IslandRootView.openedHeight(700, notch: 32), 732)
         XCTAssertEqual(IslandRootView.openedHeight(0, notch: 32), 0)
+    }
+
+    func testOnlyTheLatestSuggestionChipsStay() {
+        let older = ConversationItem(id: 1, kind: .decision(["a", "b"]), ts: Date(timeIntervalSince1970: 1))
+        let reply = ConversationItem(id: 2, kind: .note("reply"), ts: Date(timeIntervalSince1970: 2))
+        let newer = ConversationItem(id: 3, kind: .decision(["c", "d"]), ts: Date(timeIntervalSince1970: 3))
+        let kept = ConversationItem.latestDecisionOnly([older, reply, newer])
+        XCTAssertEqual(kept.map(\.id), [2, 3])
     }
 }
