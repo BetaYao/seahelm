@@ -179,7 +179,17 @@ notarize_artifact() {
   fi
 
   echo "==> Stapling notarization ticket"
-  xcrun stapler staple "$APP_PATH"
+  # The ticket is fetched from Apple's CDN, which drops connections now and
+  # then ("The network connection was lost", error 68) after notarization
+  # has already been accepted: try a few times before giving up.
+  for attempt in 1 2 3 4; do
+    if xcrun stapler staple "$APP_PATH"; then
+      break
+    fi
+    [[ $attempt -lt 4 ]] || exit 1
+    echo "==> Stapling failed (attempt $attempt); retrying in $((attempt * 15))s" >&2
+    sleep $((attempt * 15))
+  done
 
   echo "==> Repackaging stapled app"
   rm -f "$OUTPUT_PATH"
