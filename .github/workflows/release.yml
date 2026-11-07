@@ -17,7 +17,7 @@ jobs:
   # save is silently dropped).
   ghostty:
     name: GhosttyKit
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     outputs:
       sha: ${{ steps.ghostty.outputs.sha }}
@@ -84,12 +84,13 @@ jobs:
       matrix:
         include:
           - arch: arm64
-            runner: macos-14
+            runner: macos-15
           # macos-13 was the last Intel runner and was retired in Dec 2025, so the
-          # x86_64 slice is cross-compiled on Apple Silicon. GhosttyKit's macOS
+          # x86_64 slice is cross-compiled on Apple Silicon. (macos-14 itself was
+          # retired on 2026-11-02; macos-15 still carries Xcode 16.1.) GhosttyKit's macOS
           # slice is universal (macos-arm64_x86_64), so it links either way.
           - arch: x86_64
-            runner: macos-14
+            runner: macos-15
 
     steps:
       - name: Checkout
@@ -227,7 +228,7 @@ jobs:
       matrix:
         include:
           - name: macos-arm64
-            runner: macos-14
+            runner: macos-15
             zig_target: aarch64-macos
             vt_slice: libghostty-vt
             exe: ""
