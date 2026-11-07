@@ -206,8 +206,18 @@
   }
 
   /** Filter to pending cards/suggestions and collapse each hidden run in place. */
+  /** Only a pane's latest suggestion line stays: each reply that ended with
+   *  suggestions left its `decision` row, and they piled up down the
+   *  timeline. An earlier one goes once a later one comes. */
+  function latestDecisionOnly(items) {
+    const isDecision = item => item.type === 'message' && item.message && item.message.kind === 'decision';
+    let last = -1;
+    items.forEach((item, i) => { if (isDecision(item)) last = i; });
+    return items.filter((item, i) => !isDecision(item) || i === last);
+  }
+
   function present(items, { filtered = false, expandedRuns = new Set(), suggestionsExpanded = false, suggestionLimit = 3 } = {}) {
-    const capped = capSuggestions(items, suggestionLimit, suggestionsExpanded);
+    const capped = capSuggestions(latestDecisionOnly(items), suggestionLimit, suggestionsExpanded);
     if (!filtered) return capped;
     const out = [];
     let hidden = [];

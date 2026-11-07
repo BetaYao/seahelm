@@ -187,5 +187,11 @@ console.log('card timeline fixtures');
 check(waitingCount([card('c1', 'question'), card('c2', 'approval'), card('c3', 'suggestion')]) === 2,
   'the todo count excludes suggestions');
 
+{
+  const d = (id, seq) => ({ type: 'message', id, seq, message: { kind: 'decision', text: id } });
+  const out = present([d('old', 1), { type: 'message', id: 'reply', seq: 2, message: { kind: 'assistant' } }, d('new', 3)]);
+  check(out.map(x => x.id).join() === 'reply,new', 'only the latest suggestion line stays');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

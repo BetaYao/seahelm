@@ -1196,7 +1196,18 @@ struct ConversationItem: Identifiable, Equatable {
             out.append(ConversationItem(id: entry.sequence, kind: .card(entry), ts: entry.createdAt,
                                         scrollID: "card:\(entry.id)"))
         }
-        return out
+        return latestDecisionOnly(out)
+    }
+
+    /// Only the latest set of suggestion chips stays: each reply that ended
+    /// with suggestions kept its chips, and they piled up down the timeline.
+    /// An earlier set goes once a later one comes.
+    static func latestDecisionOnly(_ items: [ConversationItem]) -> [ConversationItem] {
+        guard let last = items.lastIndex(where: { if case .decision = $0.kind { return true }; return false }) else { return items }
+        return items.enumerated().compactMap { index, item in
+            if case .decision = item.kind, index != last { return nil }
+            return item
+        }
     }
 }
 
