@@ -17,7 +17,7 @@ use crate::core_client::{self, WorktreeState};
 use crate::notify;
 use crate::fleet::{self, Dot, GitStats, Group, Grouping, Item, Snapshot};
 use crate::gateway_page::GatewayPage;
-use crate::settings_page::SettingsPage;
+use crate::settings_page::{SettingsPage, SettingsSection};
 use crate::platform;
 use crate::session;
 #[path = "worktree_menu.rs"]
@@ -135,7 +135,8 @@ pub struct Workspace {
     first_mate_view: Option<Entity<TerminalView>>,
     /// The running spinner's step (see `SPIN_STEP`).
     spin_phase: u8,
-    /// Remote access (seahelm-gateway's settings) is in the main area.
+    /// Settings is on its Telegram or Pairing page (seahelm-gateway's): the
+    /// gateway page polls only while this is set.
     gateway_open: bool,
     gateway_page: Entity<GatewayPage>,
     /// The left column shows Files or Changes in place of the fleet
@@ -149,6 +150,8 @@ pub struct Workspace {
     row_menu: Option<RowMenu>,
     /// Settings is in the main area.
     settings_open: bool,
+    /// The Settings page on show, kept across closing and reopening.
+    settings_section: SettingsSection,
     settings_page: Entity<SettingsPage>,
     /// What the core knows about each pane, by session (`pane_extras`).
     pane_facts: pane_extras::Facts,
@@ -207,6 +210,7 @@ impl Workspace {
             new_worktree: None,
             row_menu: None,
             settings_open: false,
+            settings_section: SettingsSection::General,
             settings_page: cx.new(SettingsPage::new),
             pane_facts: HashMap::new(),
             presence: HashMap::new(),
@@ -644,34 +648,100 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The share button opens Remote access over the main area, or closes it.
+    /// The gear opens Settings over the main area (on the page last shown), or
+    /// closes it.
     fn toggle_settings(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.settings_open = !self.settings_open;
-        if self.settings_open {
+        let open = !self.settings_open;
+        self.set_settings_open(open, window, cx);
+    }
+
+    /// Settings, on `section`: the main header's share button opens Pairing.
+    fn open_settings(&mut self, section: SettingsSection, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_section = section;
+        self.set_settings_open(true, window, cx);
+    }
+
+    fn set_settings_open(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_open = open;
+        notify::log(if open { "settings.open" } else { "settings.close" }, serde_json::json!({"page": self.settings_section.title()}));
+        if open {
             self.first_mate_open = false;
-            self.set_gateway_open(false, cx);
             self.settings_page.update(cx, |p, cx| {
                 p.reload();
                 cx.notify();
             });
+            self.show_settings_section(self.settings_section, cx);
         } else {
+            self.set_gateway_open(false, cx);
             self.refocus_terminal(window, cx);
         }
         cx.notify();
     }
 
-    fn toggle_gateway(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let open = !self.gateway_open;
-        if open {
-            self.first_mate_open = false;
-            self.settings_open = false;
+    /// A page from the Settings column: seahelm-core's pages are drawn by
+    /// `settings_page`, Telegram and Pairing by `gateway_page`, which polls the
+    /// gateway only while one of them is on screen.
+    fn show_settings_section(&mut self, section: SettingsSection, cx: &mut Context<Self>) {
+        self.settings_section = section;
+        if section.is_gateway() {
+            self.gateway_page.update(cx, |p, cx| p.set_section(section, cx));
+        } else {
+            self.settings_page.update(cx, |p, cx| p.set_section(section, cx));
         }
-        self.set_gateway_open(open, cx);
-        notify::log(if open { "gateway.open" } else { "gateway.close" }, serde_json::json!({}));
-        if !open {
-            self.refocus_terminal(window, cx);
-        }
+        self.set_gateway_open(self.settings_open && section.is_gateway(), cx);
         cx.notify();
+    }
+
+    /// The Settings column, then the page: the macOS app's Settings window,
+    /// in the main area.
+    fn settings_body(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let nav = SettingsSection::ALL.iter().fold(
+            div()
+                .w(px(200.))
+                .flex_none()
+                .h_full()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .px(px(10.))
+                .py(px(14.))
+                .bg(tokens::sidebar_tint())
+                .border_r_1()
+                .border_color(tokens::hairline())
+                .font_family(SYSTEM),
+            |nav, &section| {
+                let on = section == self.settings_section;
+                nav.child(
+                    div()
+                        .id(SharedString::from(format!("settings-nav-{}", section.title())))
+                        .h(px(30.))
+                        .px(px(10.))
+                        .rounded(px(7.))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(9.))
+                        .cursor_pointer()
+                        .when(on, |d| d.bg(tokens::row_selected()))
+                        .when(!on, |d| d.hover(|s| s.bg(tokens::row_hover())))
+                        .child(glyph(section.icon(), 12., if on { tokens::accent() } else { tokens::ink_dim() }))
+                        .child(
+                            div()
+                                .text_size(px(12.5))
+                                .text_color(if on { tokens::ink() } else { tokens::ink_dim() })
+                                .when(on, |d| d.font_weight(FontWeight::MEDIUM))
+                                .child(section.title()),
+                        )
+                        .on_click(cx.listener(move |w, _: &ClickEvent, _, cx| w.show_settings_section(section, cx))),
+                )
+            },
+        );
+        let page = if self.settings_section.is_gateway() {
+            div().flex_1().min_w_0().min_h_0().flex().child(self.gateway_page.clone())
+        } else {
+            div().flex_1().min_w_0().min_h_0().flex().child(self.settings_page.clone())
+        };
+        div().flex_1().min_h_0().flex().flex_row().child(nav).child(page).into_any_element()
     }
 
     /// The header's folder (Files) and diff (Changes) buttons: open the side
@@ -953,7 +1023,7 @@ impl Workspace {
 
     fn select(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         // Picking a worktree is leaving First Mate (its session lives on)
-        // and Remote access.
+        // and Settings.
         self.first_mate_open = false;
         self.set_gateway_open(false, cx);
         self.settings_open = false;
@@ -1333,9 +1403,7 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected.clone().filter(|id| self.fleet.find(id).is_some());
         let body = if self.settings_open {
-            Some(div().flex_1().min_h_0().flex().child(self.settings_page.clone()).into_any_element())
-        } else if self.gateway_open {
-            Some(div().flex_1().min_h_0().flex().child(self.gateway_page.clone()).into_any_element())
+            Some(self.settings_body(cx))
         } else if self.first_mate_open {
             Some(self.workbench(cx))
         } else {
@@ -1360,7 +1428,7 @@ impl Render for Workspace {
             })
             .detach();
         }
-        if self.needs_focus && !self.gateway_open && !self.settings_open && !selected.as_deref().is_some_and(|id| self.preview_active(id)) {
+        if self.needs_focus && !self.settings_open && !selected.as_deref().is_some_and(|id| self.preview_active(id)) {
             if let Some(view) = selected.as_deref().and_then(|id| self.terminal_for(id, window, cx)) {
                 window.focus(&view.focus_handle(cx));
                 self.needs_focus = false;
@@ -1368,13 +1436,12 @@ impl Render for Workspace {
         }
         let title: SharedString = match selected.as_deref().and_then(|id| self.fleet.find(id)) {
             _ if self.settings_open => "Settings".into(),
-            _ if self.gateway_open => "Remote access".into(),
             _ if self.first_mate_open => "First Mate".into(),
             Some(item) => item.title.clone().into(),
             None => "Seahelm".into(),
         };
         let width = self.sidebar_width;
-        let cards = if self.first_mate_open || self.gateway_open || self.settings_open { None } else { self.selected_worktree().and_then(|wt| self.card_strip(&wt, cx)) };
+        let cards = if self.first_mate_open || self.settings_open { None } else { self.selected_worktree().and_then(|wt| self.card_strip(&wt, cx)) };
 
         let mut root = div()
             .id("workspace")
@@ -1476,7 +1543,6 @@ impl Workspace {
             .pr(px(8.))
             .gap(px(2.))
             .child(chrome_icon("contrast", !theme::is_dark()).id("toggle-theme").on_click(cx.listener(Self::toggle_theme)))
-            .child(chrome_icon("share", self.gateway_open).id("toggle-gateway").on_click(cx.listener(Self::toggle_gateway)))
             .child(chrome_icon("settings", self.settings_open).id("toggle-settings").on_click(cx.listener(Self::toggle_settings)))
             .child(
                 chrome_icon("folder", self.side_tab == Some(SideTab::Files))
@@ -1666,7 +1732,14 @@ impl Workspace {
             .bg(theme::rgb(theme::bg()))
             .child(drag_area())
             .when(platform::MAC && !self.sidebar_visible, |d| d.pl(px(82.)))
-            .child(div().ml(px(12.)).child(chrome_icon("share", false)))
+            // Sharing lives in Settings ▸ Pairing (web access, share links).
+            .child(
+                div().ml(px(12.)).child(
+                    chrome_icon("share", self.settings_open && self.settings_section == SettingsSection::Pairing)
+                        .id("open-pairing")
+                        .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.open_settings(SettingsSection::Pairing, window, cx))),
+                ),
+            )
             .child(div().ml(px(6.)).font_family(SYSTEM).text_size(px(11.)).line_height(px(15.)).text_color(tokens::ink_dim()).child(memory))
             .child(
                 // Truly centred, over the whole header.
@@ -1688,20 +1761,6 @@ impl Workspace {
                     ),
             )
             .child(div().flex_1())
-            .when(self.gateway_open, |d| {
-                d.child(
-                    div()
-                        .id("close-gateway")
-                        .mr(px(12.))
-                        .px(px(6.))
-                        .cursor_pointer()
-                        .text_size(px(14.))
-                        .text_color(tokens::alpha(fg, 0.55))
-                        .hover(|s| s.text_color(fg))
-                        .child("×")
-                        .on_click(cx.listener(Self::toggle_gateway)),
-                )
-            })
             .when(self.settings_open, |d| {
                 d.child(
                     div()
@@ -1716,7 +1775,7 @@ impl Workspace {
                         .on_click(cx.listener(Self::toggle_settings)),
                 )
             })
-            .when(self.first_mate_open && !self.gateway_open, |d| {
+            .when(self.first_mate_open && !self.settings_open, |d| {
                 d.child(
                     div()
                         .id("close-first-mate")
@@ -1730,7 +1789,7 @@ impl Workspace {
                         .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.toggle_first_mate(window, cx))),
                 )
             })
-            .when(!self.first_mate_open && !self.gateway_open && !self.settings_open, |d| {
+            .when(!self.first_mate_open && !self.settings_open, |d| {
                 d.child(
                     div().mr(px(8.)).child(
                         icon_button("columns-2", tokens::alpha(fg, 0.55))
