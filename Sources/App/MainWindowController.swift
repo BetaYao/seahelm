@@ -2668,6 +2668,21 @@ extension MainWindowController {
         firstMate.onStateChange = { [weak self] _ in
             self?.refreshIslandFirstMate()
         }
+        firstMate.onConfigured = { [weak self] enabled, agent in
+            self?.adoptFirstMateConfig(enabled: enabled, agent: agent)
+        }
+    }
+
+    /// config.json changed under the app (seahelm-web turned First Mate on, or
+    /// picked its agent): take it into the app's copy, which every save writes
+    /// whole and would otherwise put back. Nothing is written here: the file
+    /// already says so.
+    fileprivate func adoptFirstMateConfig(enabled: Bool, agent: String) {
+        guard config.autopilotEnabled != enabled || config.autopilotAgent != agent else { return }
+        config.autopilotEnabled = enabled
+        config.autopilotAgent = agent
+        tabCoordinator.config.autopilotEnabled = enabled
+        tabCoordinator.config.autopilotAgent = agent
     }
 
     /// Waving a card away. For a First Mate approval that is a "no", and First

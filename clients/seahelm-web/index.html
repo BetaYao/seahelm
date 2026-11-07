@@ -291,9 +291,9 @@
   .nw-error{font-size:var(--fs-sub);color:var(--danger);padding:8px 16px 0}
   .nw-error[hidden]{display:none}
   .sheet-foot{flex:none;padding:12px 16px max(16px, calc(8px + var(--inset-bottom)))}
-  #nwGo{width:100%;height:52px;border:0;border-radius:14px;background:var(--accent);color:var(--accent-ink);
+  #nwGo,#fmGo{width:100%;height:52px;border:0;border-radius:14px;background:var(--accent);color:var(--accent-ink);
     font-size:17px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
-  #nwGo:disabled{background:var(--panel3);color:var(--faint);cursor:default}
+  #nwGo:disabled,#fmGo:disabled{background:var(--panel3);color:var(--faint);cursor:default}
   #newWork.busy #nwGo::before{content:'';width:16px;height:16px;border-radius:50%;
     border:2px solid currentColor;border-right-color:transparent;animation:fmspin .9s linear infinite}
 
@@ -746,6 +746,26 @@
       </div>
       <div class="sheet-foot">
         <button id="nwGo" type="submit" disabled>Start</button>
+      </div>
+    </form>
+  </div>
+  <div class="sheet" id="fmSheet" hidden>
+    <form class="sheet-card" id="fmForm" role="dialog" aria-modal="true" aria-labelledby="fmTitle" autocomplete="off">
+      <div class="sheet-grab" aria-hidden="true"></div>
+      <div class="sheet-head">
+        <button type="button" id="fmCancel">Cancel</button>
+        <h2 id="fmTitle">First Mate</h2>
+        <button type="submit" id="fmGoTop">Turn on</button>
+      </div>
+      <div class="sheet-body">
+        <span class="sheet-hint" style="padding:6px 0 4px">First Mate is an agent that watches the fleet for you: it reacts to CI failures and merged PRs, cleans up finished worktrees, and asks you before anything it is not allowed to do alone. It is off on this machine.</span>
+        <div class="sheet-label" id="fmAgentLabel">Agent</div>
+        <div class="nw-chips" id="fmAgents" role="radiogroup" aria-labelledby="fmAgentLabel"></div>
+        <span class="sheet-hint" style="padding:0">It runs in a session of its own on that machine. Change it later in Seahelm's Settings ▸ First Mate.</span>
+        <div class="nw-error" id="fmError" hidden></div>
+      </div>
+      <div class="sheet-foot">
+        <button id="fmGo" type="submit">Turn on</button>
       </div>
     </form>
   </div>
@@ -2017,6 +2037,9 @@ function defaultSurfaceMode(){
   return (window.innerWidth || 900) <= 760 ? 'text' : 'vt';
 }
 function loadSurfaceMode(){
+  // First Mate is a conversation on the web, never its terminal: the mode
+  // switch is hidden on it and the stored choice is kept for other panes.
+  if (S.selPane === FM_KEY) return 'text';
   if (S.surfaceMode === 'text' || S.surfaceMode === 'vt') return S.surfaceMode;
   const v = localStorage.getItem(SURFACE_KEY);
   if (v === 'text' || v === 'vt') { S.surfaceMode = v; return v; }
@@ -2047,6 +2070,8 @@ function applySurfaceMode(){
   const keys = $('keyBar');
   if (keys) keys.hidden = text || !S.sel;
   document.body.dataset.surface = text ? 'text' : 'vt';
+  const seg = $('surfaceBadge');
+  if (seg) seg.hidden = S.selPane === FM_KEY;
   renderMateTodoToggle();
   renderSendButton();
   // With a worktree open the head names it (renderDetail); only fall back to
@@ -2057,6 +2082,7 @@ function applySurfaceMode(){
 }
 
 function setSurfaceMode(mode){
+  if (S.selPane === FM_KEY) return;
   const next = mode === 'vt' ? 'vt' : 'text';
   const prev = loadSurfaceMode();
   S.surfaceMode = next;
@@ -2777,14 +2803,17 @@ function applyFirstMate(state){
   if (SHARE_PANE) return;
   S.firstMate = state || null;
   const pane = state && state.enabled && state.pane;
-  if (pane) S.panes.set(FM_KEY, Object.assign({}, S.panes.get(FM_KEY) || {}, pane));
+  // Its agent, so the composer says "Claude Code", not "Terminal · no agent"
+  // (a core older than the field sends it only beside the pane).
+  if (pane) S.panes.set(FM_KEY, Object.assign({}, S.panes.get(FM_KEY) || {}, { agent_type: state.agent }, pane));
   else {
     S.panes.delete(FM_KEY);
     if (S.selPane === FM_KEY) S.todoFilter = false;
   }
   renderMateButton();
   refreshFleetSoon(false);
-  if (S.selPane === FM_KEY) { renderDetailChrome(); renderReplyBar(); renderMateTodoToggle(); }
+  if (S.selPane === FM_KEY) { renderDetailChrome(); renderReplyBar(); renderMateTodoToggle(); renderComposerKind(S.panes.get(FM_KEY)); }
+  fmActivationProgress(state);
 }
 
 function renderMateButton(){
@@ -2804,13 +2833,106 @@ function renderMateButton(){
 
 function openFirstMate(){
   const st = S.firstMate;
-  if (!st || !st.enabled) {
-    showActionToast('First Mate is off — turn it on in Seahelm: Settings ▸ First Mate', true);
-    return;
-  }
+  if (!st || !st.enabled) { fmShowSheet(); return; }
   const row = buildFleet().find(r => r.firstMate);
   if (row) selectWorktree(row, FM_KEY);
 }
+
+// ── Turning First Mate on ───────────────────────────────────────────────
+// With First Mate off, its button opens this sheet instead of a toast that
+// sent you to the Mac: pick its agent and turn it on (`autopilot.configure`,
+// which writes config.json for the core). The core starts it on its own; the
+// sheet waits for `autopilot.state` to say so, then opens its conversation.
+const FM_AGENTS = [
+  { id: 'claudeCode', label: 'Claude Code' },
+  { id: 'codex', label: 'Codex' },
+];
+const fm = { agent: 'claudeCode', busy: false, waitTimer: null };
+
+function fmShowSheet(){
+  if (SHARE_PANE) return;
+  const st = S.firstMate || {};
+  const configured = (st.configured && st.configured.agent) || st.agent;
+  fm.agent = FM_AGENTS.some(a => a.id === configured) ? configured : 'claudeCode';
+  fmError('');
+  fmRender();
+  $('fmSheet').hidden = false;
+  setTimeout(() => $('fmGo').focus({ preventScroll: true }), 30);
+}
+
+function fmHideSheet(){
+  clearTimeout(fm.waitTimer);
+  fm.waitTimer = null;
+  fm.busy = false;
+  $('fmSheet').hidden = true;
+  $('mateBtn').focus({ preventScroll: true, focusVisible: false });
+}
+
+function fmError(text){
+  const el = $('fmError');
+  el.textContent = text || '';
+  el.hidden = !text;
+}
+
+function fmRender(){
+  $('fmAgents').innerHTML = FM_AGENTS.map(a =>
+    `<button type="button" role="radio" aria-checked="${a.id === fm.agent}" class="${a.id === fm.agent ? 'on' : ''}" data-fm-agent="${esc(a.id)}"${fm.busy ? ' disabled' : ''}>${esc(a.label)}</button>`).join('');
+  const label = fm.busy ? 'Starting…' : 'Turn on';
+  for (const id of ['fmGo', 'fmGoTop']) {
+    const b = $(id);
+    b.disabled = fm.busy || !isLinked();
+    b.textContent = label;
+  }
+}
+
+function fmSubmit(){
+  if (fm.busy) return;
+  if (!isLinked()) { fmError('Not connected'); return; }
+  fm.busy = true;
+  fmError('');
+  fmRender();
+  sendCommand('autopilot.configure', { enabled: true, agent: fm.agent }, (r) => {
+    if (!r || r.ok === false) {
+      fm.busy = false;
+      fmError((r && r.error && r.error.message) || 'Could not turn First Mate on');
+      fmRender();
+      return;
+    }
+    // The core starts its session now; give up waiting after a minute.
+    clearTimeout(fm.waitTimer);
+    fm.waitTimer = setTimeout(() => {
+      if (!fm.busy) return;
+      fm.busy = false;
+      fmError('First Mate is turned on but has not started yet. Check that the agent is installed on that machine.');
+      fmRender();
+    }, 60000);
+    fmActivationProgress(S.firstMate);
+  });
+}
+
+/** While the sheet waits: once First Mate is running, open its conversation. */
+function fmActivationProgress(state){
+  if (!fm.busy || !state || !state.enabled || !state.pane) return;
+  fmHideSheet();
+  showActionToast('First Mate is on');
+  openFirstMate();
+}
+
+(function wireFirstMateSheet(){
+  const sheet = $('fmSheet'), form = $('fmForm');
+  $('fmCancel').onclick = fmHideSheet;
+  sheet.addEventListener('click', (ev) => { if (ev.target === sheet) fmHideSheet(); });
+  sheet.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && !ev.isComposing) { ev.preventDefault(); fmHideSheet(); }
+  });
+  form.addEventListener('submit', (ev) => { ev.preventDefault(); fmSubmit(); });
+  form.addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-fm-agent]');
+    if (!b || fm.busy) return;
+    fm.agent = b.dataset.fmAgent;
+    fmRender();
+  });
+})();
 
 /** Other panes waiting on a decision: one line under the head, a tap away. */
 /** How many panes other than the one on screen are waiting on you, counted on

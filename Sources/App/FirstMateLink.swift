@@ -24,6 +24,11 @@ final class FirstMateLink {
         didSet { if state != oldValue { onStateChange?(state) } }
     }
     var onStateChange: ((State) -> Void)?
+    /// What config.json says about First Mate (`autopilot_enabled`,
+    /// `autopilot_agent`), as the core read it. seahelm-web can change both
+    /// (`autopilot.configure`); the app keeps its own copy of the config and
+    /// writes all of it on any save, so it follows the core's reading here.
+    var onConfigured: ((_ enabled: Bool, _ agent: String) -> Void)?
 
     /// The core says First Mate is running.
     private(set) var isRunning = false
@@ -83,6 +88,9 @@ final class FirstMateLink {
         }
         isRunning = r["enabled"] as? Bool ?? false
         if let a = r["agent"] as? String, let t = AgentType(rawValue: a) { agent = t }
+        if let c = r["configured"] as? [String: Any], let on = c["enabled"] as? Bool, let a = c["agent"] as? String {
+            onConfigured?(on, a)
+        }
         var s = State()
         s.activity = Self.activity(r["activity"] as? String)
         s.latest = r["detail"] as? String ?? ""
