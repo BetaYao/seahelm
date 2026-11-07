@@ -1,13 +1,14 @@
-//! Remote access: seahelm-gateway's settings, in the main area (the sidebar
-//! header's share button). What the macOS app keeps under Settings ▸
-//! Pairing and ▸ Telegram, so a Windows or Linux machine can turn on the
-//! web client and the Telegram bot without the macOS app:
+//! seahelm-gateway's settings: the Telegram and Pairing pages of Settings
+//! (`settings_page::SettingsSection`), as the macOS app has them under
+//! Settings ▸ Pairing and ▸ Telegram, so a Windows or Linux machine can turn
+//! on the web client and the Telegram bot without the macOS app. One page
+//! entity shows either (`set_section`):
 //!
-//! - Web: on/off, the address, port and public URL, the pairing code, the
+//! - Pairing ▸ Web: on/off, the address, port and public URL, the pairing code, the
 //!   devices signed in.
 //! - Telegram: on/off, the bot token (checked before it is saved), who may
 //!   give orders, and pairing a Telegram account by code.
-//! - Share links: what is shared, and revoking it.
+//! - Pairing ▸ Share links: what is shared, and revoking it.
 //!
 //! Everything is the gateway's (`gateway.sock`, `gateway_client`); this page
 //! keeps nothing but what is being typed.
@@ -19,6 +20,7 @@ use serde_json::json;
 
 use crate::fleet;
 use crate::gateway_client::{self as gw, Snapshot};
+use crate::settings_page::SettingsSection;
 use crate::text_input::{Submitted, TextInput};
 use crate::theme;
 use crate::tokens::{self, MONO, SYSTEM};
@@ -71,6 +73,8 @@ impl Field {
 }
 
 pub struct GatewayPage {
+    /// Telegram or Pairing.
+    section: SettingsSection,
     snap: Snapshot,
     loaded: bool,
     /// Polled only while on screen.
@@ -113,6 +117,7 @@ impl GatewayPage {
             cx.subscribe(&chat.input, |p, _, _: &Submitted, cx| p.save_users(cx)),
         ];
         let this = Self {
+            section: SettingsSection::Pairing,
             snap: Snapshot::default(),
             loaded: false,
             visible: false,
@@ -132,6 +137,15 @@ impl GatewayPage {
     }
 
     /// Shown or hidden by the workspace; shown reads at once.
+    /// Show the Telegram page or the Pairing page (web access, share links).
+    pub fn set_section(&mut self, section: SettingsSection, cx: &mut Context<Self>) {
+        if self.section != section {
+            self.section = section;
+            self.confirm_revoke_all = false;
+            cx.notify();
+        }
+    }
+
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         self.visible = visible;
         if visible {
@@ -382,7 +396,10 @@ impl Render for GatewayPage {
         let mut column = div().w_full().max_w(px(680.)).flex().flex_col().gap(px(18.)).px(px(28.)).py(px(24.)).font_family(SYSTEM);
         column = column.child(self.intro(cx));
         if self.loaded && self.snap.reachable() {
-            column = column.child(self.web(cx)).child(self.telegram(cx)).child(self.shares(cx));
+            column = match self.section {
+                SettingsSection::Telegram => column.child(self.telegram(cx)),
+                _ => column.child(self.web(cx)).child(self.shares(cx)),
+            };
         }
         div()
             .id("gateway-page")
@@ -392,7 +409,7 @@ impl Render for GatewayPage {
             .bg(theme::rgb(theme::bg()))
             .flex()
             .flex_col()
-            .items_center()
+            .items_start()
             .child(column)
     }
 }
@@ -403,13 +420,16 @@ impl GatewayPage {
             .flex()
             .flex_col()
             .gap(px(4.))
-            .child(div().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child("Remote access"))
+            .child(div().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child(self.section.title()))
             .child(
                 div()
                     .text_size(px(12.))
                     .line_height(px(17.))
                     .text_color(tokens::ink_dim())
-                    .child("seahelm-gateway serves the web client and the Telegram bot from this machine. Settings take effect at once."),
+                    .child(match self.section {
+                        SettingsSection::Telegram => "seahelm-gateway runs your Telegram bot from this machine. Settings take effect at once.",
+                        _ => "seahelm-gateway serves the web client from this machine: pair a browser or a phone, and see what is shared. Settings take effect at once.",
+                    }),
             );
         if !self.loaded {
             return head.child(muted("Asking seahelm-gateway…")).into_any_element();

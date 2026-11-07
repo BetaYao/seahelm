@@ -1,5 +1,5 @@
 //! seahelm-gateway's admin socket (`gateway.sock`, a named pipe on Windows;
-//! docs/seahelm-gateway-plan.md "gateway.sock"): what the Remote access page
+//! docs/seahelm-gateway-plan.md "gateway.sock"): what the Settings ▸ Telegram and ▸ Pairing pages
 //! reads and the changes it makes. Blocking calls; run them off the UI thread.
 
 use serde::Deserialize;

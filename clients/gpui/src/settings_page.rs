@@ -1,13 +1,14 @@
-//! Settings, in the main area (the sidebar header's gear): what this client
-//! can set of what seahelm-core reads from `config.json` (`user_config`),
-//! the same keys the macOS app's Settings write, so the two agree.
+//! Settings, in the main area (the sidebar header's gear), laid out like the
+//! macOS app's Settings window: pages in a column on the left
+//! (`SettingsSection`), the page on the right. This file holds the pages
+//! that are seahelm-core's (`config.json`, `user_config`, the same keys the
+//! macOS app writes, so the two agree); Telegram and Pairing are
+//! seahelm-gateway's (`gateway_page`).
 //!
+//! - General: `agent_yolo` (agents seahelm starts run without permission
+//!   prompts) and `seahelm-core install-hooks` again (it also runs at launch).
 //! - First Mate: `autopilot_enabled`. The core re-reads it and starts or
 //!   stops First Mate on its own.
-//! - Agents seahelm starts (new worktrees, forks): `agent_yolo`, without
-//!   permission prompts.
-//! - Agent hooks: `seahelm-core install-hooks` again (it also runs at
-//!   launch), with what it said.
 
 use gpui::{div, prelude::*, px, ClickEvent, Context, FontWeight, Window};
 use serde_json::json;
@@ -18,7 +19,45 @@ use crate::theme;
 use crate::tokens::{self, SYSTEM};
 use crate::user_config;
 
+/// The pages of Settings, in the order the macOS app lists them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsSection {
+    General,
+    FirstMate,
+    Telegram,
+    Pairing,
+}
+
+impl SettingsSection {
+    pub const ALL: [SettingsSection; 4] = [Self::General, Self::FirstMate, Self::Telegram, Self::Pairing];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::FirstMate => "First Mate",
+            Self::Telegram => "Telegram",
+            Self::Pairing => "Pairing",
+        }
+    }
+
+    /// The nav glyph (Lucide, for the macOS app's SF Symbol).
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::General => "settings",
+            Self::FirstMate => "ship-wheel",
+            Self::Telegram => "send",
+            Self::Pairing => "qr-code",
+        }
+    }
+
+    /// Telegram and Pairing are seahelm-gateway's page.
+    pub fn is_gateway(self) -> bool {
+        matches!(self, Self::Telegram | Self::Pairing)
+    }
+}
+
 pub struct SettingsPage {
+    section: SettingsSection,
     first_mate: bool,
     yolo: bool,
     /// The last thing done here, and whether it went well.
@@ -28,9 +67,18 @@ pub struct SettingsPage {
 
 impl SettingsPage {
     pub fn new(_cx: &mut Context<Self>) -> Self {
-        let mut p = Self { first_mate: false, yolo: false, note: None, busy: false };
+        let mut p = Self { section: SettingsSection::General, first_mate: false, yolo: false, note: None, busy: false };
         p.reload();
         p
+    }
+
+    /// Which of this file's pages to show (General or First Mate).
+    pub fn set_section(&mut self, section: SettingsSection, cx: &mut Context<Self>) {
+        if self.section != section {
+            self.section = section;
+            self.note = None;
+            cx.notify();
+        }
     }
 
     /// From the file again: the macOS app may have changed it meanwhile.
@@ -91,35 +139,38 @@ impl Render for SettingsPage {
             .px(px(28.))
             .py(px(24.))
             .font_family(SYSTEM)
-            .child(div().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child("Settings"))
-            .child(muted("Kept in ~/.config/seahelm/config.json with the macOS app's settings; seahelm-core reads them as it goes."))
-            .child(card().child(section_head(
+            .child(div().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child(self.section.title()))
+            .child(muted("Kept in ~/.config/seahelm/config.json with the macOS app's settings; seahelm-core reads them as it goes."));
+        column = match self.section {
+            SettingsSection::FirstMate => column.child(card().child(section_head(
                 "First Mate",
                 "The agent that watches the fleet, answers what it may, and asks you the rest (its cards appear beside the worktrees).",
                 self.first_mate,
                 state(self.first_mate, "On", "Off"),
                 cx.listener(Self::toggle_first_mate),
                 "settings-first-mate",
-            )))
-            .child(card().child(section_head(
-                "Skip permission prompts",
-                "For agents seahelm starts itself: a new worktree's agent and a fork. Agents you start by hand are not affected.",
-                self.yolo,
-                state(self.yolo, "Agents start without prompts", "Agents ask before acting"),
-                cx.listener(Self::toggle_yolo),
-                "settings-yolo",
-            )))
-            .child(
-                card()
-                    .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child("Agent hooks"))
-                    .child(muted("Claude Code and Codex report to seahelm-core through hooks, installed at launch. Install them again after reinstalling an agent."))
-                    .child(
-                        div().flex().flex_row().child(
-                            button("settings-hooks", if self.busy { "Installing…" } else { "Install hooks again" }, false, self.busy)
-                                .on_click(cx.listener(Self::install_hooks)),
+            ))),
+            _ => column
+                .child(card().child(section_head(
+                    "Skip permission prompts",
+                    "For agents seahelm starts itself: a new worktree's agent and a fork. Agents you start by hand are not affected.",
+                    self.yolo,
+                    state(self.yolo, "Agents start without prompts", "Agents ask before acting"),
+                    cx.listener(Self::toggle_yolo),
+                    "settings-yolo",
+                )))
+                .child(
+                    card()
+                        .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child("Agent hooks"))
+                        .child(muted("Claude Code and Codex report to seahelm-core through hooks, installed at launch. Install them again after reinstalling an agent."))
+                        .child(
+                            div().flex().flex_row().child(
+                                button("settings-hooks", if self.busy { "Installing…" } else { "Install hooks again" }, false, self.busy)
+                                    .on_click(cx.listener(Self::install_hooks)),
+                            ),
                         ),
-                    ),
-            );
+                ),
+        };
         if let Some((text, ok)) = &self.note {
             column = column.child(div().text_size(px(11.5)).text_color(if *ok { tokens::running() } else { tokens::danger() }).child(text.clone()));
         }
@@ -131,7 +182,7 @@ impl Render for SettingsPage {
             .bg(theme::rgb(theme::bg()))
             .flex()
             .flex_col()
-            .items_center()
+            .items_start()
             .child(column)
     }
 }

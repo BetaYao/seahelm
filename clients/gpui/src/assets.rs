@@ -15,7 +15,7 @@ macro_rules! icons {
 const ICONS: &[(&str, &[u8])] = icons![
     "contrast", "sailboat", "folder", "diff", "panel-left", "folder-plus", "group", "plus", "x",
     "git-merge", "ship-wheel", "chevron-right", "pause", "play", "share", "columns-2", "git-branch",
-    "trash-2", "spinner-arc", "merge", "chevron-down", "chevron-left", "refresh-cw", "settings", "caption-min", "caption-max", "caption-restore", "caption-close",
+    "trash-2", "spinner-arc", "merge", "chevron-down", "chevron-left", "refresh-cw", "settings", "send", "qr-code", "caption-min", "caption-max", "caption-restore", "caption-close",
 ];
 
 pub struct Assets;
