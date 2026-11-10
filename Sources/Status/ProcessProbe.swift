@@ -137,7 +137,7 @@ enum ProcessProbe {
         guard !descendants.isEmpty else {
             return context.table.contains { $0.pid == root } ? SessionProbe(sawSession: true) : .miss
         }
-        let agentId = identify(procs: descendants, manifests: ManifestStore.shared.all.map(\.manifest))
+        let agentId = identify(procs: descendants, manifests: ManifestStore.shared.all)
         return SessionProbe(agentId: agentId,
                             commandLine: foregroundCommandLine(from: descendants),
                             sawSession: true)
