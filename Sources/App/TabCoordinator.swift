@@ -723,6 +723,10 @@ class TabCoordinator {
                                                    createdByAgent: created)
                         case .session(let key, let ref):
                             StationRegistry.shared.station(forSessionName: key)?.agentSessionRef = AgentSessionRef(dict: ref)
+                        case .renamed:
+                            // Rows and the header name panes through PaneTitleResolver.
+                            self.delegate?.tabCoordinatorRequestUpdateTitleBar(self)
+                            self.scheduleCleanupRepaint()
                         default:
                             break
                         }

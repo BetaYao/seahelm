@@ -385,6 +385,16 @@ pub struct PaneFacts {
     pub location_worktree: Option<String>,
     /// Claude's session id (`agent.sessions`, kind `id`).
     pub claude_session: Option<String>,
+    /// The name the user gave the pane (`pane.rename`), on every client.
+    pub custom_title: Option<String>,
+    /// What clients call the pane: that name, else the agent's title.
+    pub display_title: Option<String>,
+}
+
+/// Name a pane for every client; an empty title gives it back its own.
+pub fn rename_pane(session: &str, title: &str) -> Result<Option<String>, String> {
+    let r = call("pane.rename", json!({"pane_id": session, "title": title}))?;
+    Ok(r.get("custom_title").and_then(Value::as_str).map(str::to_string))
 }
 
 /// Every pane's facts, by session: `pane.list`, `pane.locations` and
@@ -399,6 +409,8 @@ pub fn pane_facts() -> std::collections::HashMap<String, PaneFacts> {
             PaneFacts {
                 handle: p.get("handle").and_then(Value::as_u64),
                 agent: p.get("agent_type").and_then(Value::as_str).unwrap_or_default().to_string(),
+                custom_title: p.get("custom_title").and_then(Value::as_str).filter(|t| !t.is_empty()).map(str::to_string),
+                display_title: p.get("display_title").and_then(Value::as_str).filter(|t| !t.is_empty()).map(str::to_string),
                 ..Default::default()
             },
         );

@@ -486,6 +486,7 @@ impl Session {
                 self.sent_agent.insert(key.into(), a.into());
                 vec![notify("pane.status", pick(STATUS_KEYS))]
             }
+            "pane.renamed" => vec![notify("pane.status", pick(&["pane_id", "pane_session_key", "worktree_path", "custom_title", "display_title"]))],
             "pane.unseen_changed" => vec![notify("pane.status", pick(&["pane_id", "pane_session_key", "worktree_path", "unseen"]))],
             "pane.closed" => {
                 self.sent_agent.remove(key);

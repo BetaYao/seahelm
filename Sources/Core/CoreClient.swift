@@ -16,6 +16,9 @@ enum CoreEvent {
     case cardAnswered(card: [String: Any], option: String?)
     /// Where a pane's agent is working now.
     case location(terminalID: String, worktree: String?, location: String, createdByAgent: Bool)
+    /// The user named a pane, here or on another client (`pane.renamed`);
+    /// nil: it went back to its own title.
+    case renamed(paneSessionKey: String, title: String?)
     /// A pane's agent has a resume reference (`AgentSessionRef`).
     case session(paneSessionKey: String, ref: [String: Any])
     /// An agent is working in a worktree nobody tracks yet.
@@ -47,6 +50,9 @@ final class CoreClient {
     /// Resume references, by seahelmd session name (`agent.sessions`, then
     /// `agent.session`). Main thread.
     private(set) var sessions: [String: [String: Any]] = [:]
+    /// Names the user gave panes (`pane.rename`), by seahelmd session name;
+    /// shown before any title of the pane's own (`PaneTitleResolver`). Main thread.
+    private(set) var customTitles: [String: String] = [:]
 
     private var observers: [(CoreEvent) -> Void] = []
     private var thread: Thread?
@@ -54,7 +60,7 @@ final class CoreClient {
     private static let types = [
         "pane.status_changed", "pane.updated", "pane.notice", "pane.unseen_changed", "pane.location",
         "pane.closed", "pane.rehomed", "pane.registered", "cards.changed", "card.answered", "agent.session",
-        "worktree.discovered", "pane.presence",
+        "worktree.discovered", "pane.presence", "pane.renamed",
     ]
 
     /// Add an observer. Main thread.
@@ -133,7 +139,14 @@ final class CoreClient {
                 self.sessions = r["agent_sessions"] as? [String: [String: Any]] ?? [:]
             }
             if case .success(let r) = panes {
-                for row in r["panes"] as? [[String: Any]] ?? [] {
+                let rows = r["panes"] as? [[String: Any]] ?? []
+                self.customTitles = Dictionary(rows.compactMap { row -> (String, String)? in
+                    guard let key = row["pane_session_key"] as? String,
+                          let title = row["custom_title"] as? String, !title.isEmpty else { return nil }
+                    return (key, title)
+                }, uniquingKeysWith: { a, _ in a })
+                for key in self.customTitles.keys { self.emit(.renamed(paneSessionKey: key, title: self.customTitles[key])) }
+                for row in rows {
                     guard let info = row["info"] as? [String: Any],
                           let id = Self.terminalID(session: row["pane_session_key"] as? String ?? "",
                                                    alias: row["pane_id"] as? String ?? "") else { continue }
@@ -158,6 +171,11 @@ final class CoreClient {
                        seq: (ev["seq"] as? NSNumber)?.uint64Value ?? 0))
         case "pane.notice":
             emit(.notice(ev, terminalID: id))
+        case "pane.renamed":
+            guard !key.isEmpty else { return }
+            let title = (ev["custom_title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            customTitles[key] = title
+            emit(.renamed(paneSessionKey: key, title: title))
         case "pane.unseen_changed":
             guard let id else { return }
             emit(.unseen(terminalID: id, unseen: ev["unseen"] as? Bool ?? false))
@@ -200,6 +218,17 @@ final class CoreClient {
             Fleet.shared.apply(terminalID: id, info: info, isCompletion: completion, seq: seq)
         }
         for o in observers { o(event) }
+    }
+
+    /// Name a pane for every client; an empty title gives it back its own.
+    /// The name arrives back as `pane.renamed`. Main thread.
+    func rename(paneSessionKey: String, title: String, completion: ((String?) -> Void)? = nil) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = CoreSocketClient.call("pane.rename", ["pane_id": paneSessionKey, "title": title])
+            DispatchQueue.main.async {
+                if case .failure(let e) = r { completion?(String(describing: e)) } else { completion?(nil) }
+            }
+        }
     }
 
     private func emitConnected(_ up: Bool) {

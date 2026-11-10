@@ -147,6 +147,7 @@
      cannot show, and the mirrored layout would name the worktree's others. */
   body[data-share="pane"] #splitBtn,
   body[data-share="pane"] #closePaneBtn,
+  body[data-share="pane"] #renamePaneBtn,
   body[data-share="pane"] #vtModeBadge{display:none}
   /* No ‹ on the left to balance against, so the name starts at the edge. */
   @media (max-width:760px){
@@ -720,6 +721,7 @@
     <button id="rendererBadge" class="renderer-badge" type="button" role="menuitem">Renderer <span class="val"></span></button>
     <hr />
     <button id="copyBtn" type="button" role="menuitem">Copy selection</button>
+    <button id="renamePaneBtn" type="button" role="menuitem">Rename pane…</button>
     <button id="splitBtn" type="button" role="menuitem">New pane</button>
     <button id="closePaneBtn" type="button" role="menuitem" class="danger">Close pane…</button>
   </div>
@@ -1377,6 +1379,12 @@ function onPaneStatus(p){
   if (p.agent_type) pane.agent_type = p.agent_type;
   if (typeof p.last_message === 'string') pane.last_message = p.last_message;
   if (typeof p.unseen === 'boolean') pane.unseen = p.unseen;
+  // Renamed (here or on another client): the name, and the title it falls back to.
+  if ('custom_title' in p) {
+    pane.custom_title = p.custom_title || '';
+    pane.display_title = p.display_title || '';
+    renderDetail();
+  }
   refreshFleetSoon(false);
   if (key === S.selPane) { renderSendButton(); markShownPaneSeen(); }
 }
@@ -3103,6 +3111,9 @@ function groupsToRender(rows){
  *  shell is. A shell's title is whatever its prompt set — `user@host:/a/long/path`,
  *  `…/workspace/seahelm` — so only the last directory is kept. */
 function paneLabel(pane){
+  // A name the user gave it comes first, agent or shell.
+  const custom = String(pane && pane.custom_title || '').trim();
+  if (custom) return { text: custom, shell: false };
   const k = paneKindOf(pane);
   if (k.kind === 'agent') return { text: String(pane.display_title || '').trim() || k.label, shell: false };
   const title = String(pane && pane.title || '').trim().replace(/^[^\s@:]+@[^\s:]+:/, '');
@@ -4570,10 +4581,27 @@ $('paneMenuBtn').onclick = (ev) => {
   // First Mate's session is the core's; a pane beside it is not a thing.
   $('splitBtn').disabled = !live || (S.vt.focus || S.selPane) === FM_KEY;
   $('closePaneBtn').disabled = !live;
+  $('renamePaneBtn').disabled = !live || (S.vt.focus || S.selPane) === FM_KEY;
   openMenu(m, ev.currentTarget);
 };
 $('copyBtn').onclick = () => copySelection();
 $('splitBtn').onclick = () => paneAction('pane.new');
+$('renamePaneBtn').onclick = () => {
+  closeMenus();
+  const key = S.vt.focus || S.selPane;
+  const pane = key && S.panes.get(key);
+  if (!pane || !isLinked()) return;
+  const name = prompt('Rename pane (empty: back to its own title)', pane.custom_title || paneLabel(pane).text);
+  if (name === null) return;
+  sendCommand('pane.rename', { pane_id: pane.pane_id || key, title: name.trim() }, (r) => {
+    if (r && r.ok === false) { showActionToast((r.error && r.error.message) || 'Rename failed', true); return; }
+    const res = (r && r.result) || {};
+    pane.custom_title = res.custom_title || '';
+    if (!pane.custom_title) refreshFleetSoon(true);
+    renderDetail();
+    refreshFleetSoon(false);
+  });
+};
 $('closePaneBtn').onclick = () => {
   const key = S.vt.focus || S.selPane;
   const pane = S.panes.get(key) || {};

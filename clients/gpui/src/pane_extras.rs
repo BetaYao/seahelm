@@ -10,21 +10,35 @@
 //!   after the destination's branch) and stops the original's turn with
 //!   Esc, as the macOS app's fork does.
 //!
+//! - its name: one the user gave it (`pane.rename`, kept by the core and
+//!   shown by every client) beside the `#n`; clicking the `#n` names it.
+//!
 //! Zoom shows the focused pane alone, until zoomed out or the tree changes.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use gpui::{div, prelude::*, px, ClickEvent, Context, FontWeight, SharedString, Window};
+use gpui::{deferred, div, prelude::*, px, ClickEvent, Context, Entity, Focusable, FontWeight, MouseButton, SharedString, Subscription, Window};
 
 use super::{pane_session, session_name, Workspace};
 use crate::core_client::{self, PaneFacts};
 use crate::session;
 use crate::split::{Axis, LeafId};
+use crate::text_input::{Submitted, TextInput};
+use super::worktree_menu::CancelSheet;
 use crate::tokens::{self, SYSTEM};
 
 /// How long a call keeps its caller on the pane (the macOS app's 6 s).
 const PRESENCE_FOR: Duration = Duration::from_secs(6);
+
+/// The "Rename pane" sheet: one field, Enter or Rename to keep it.
+pub struct RenamePane {
+    key: String,
+    input: Entity<TextInput>,
+    busy: bool,
+    error: Option<String>,
+    _submit: Subscription,
+}
 
 pub struct Presence {
     actor: String,
@@ -169,14 +183,121 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The pane's corner: presence, the fork offer, its `#n`.
+    fn open_rename(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
+        let facts = self.pane_facts.get(&key).cloned().unwrap_or_default();
+        let current = facts.custom_title.or(facts.display_title).unwrap_or_default();
+        let input = cx.new(|cx| {
+            let mut t = TextInput::new("Pane name (empty: its own title)", cx);
+            t.set_text(&current, cx);
+            t
+        });
+        let submit = cx.subscribe(&input, |w, _, _: &Submitted, cx| w.submit_rename(cx));
+        window.focus(&input.focus_handle(cx));
+        self.rename_pane = Some(RenamePane { key, input, busy: false, error: None, _submit: submit });
+        cx.notify();
+    }
+
+    fn close_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.rename_pane.take().is_some() {
+            self.refocus_terminal(window, cx);
+            cx.notify();
+        }
+    }
+
+    fn submit_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(sheet) = self.rename_pane.as_mut() else { return };
+        if sheet.busy {
+            return;
+        }
+        sheet.busy = true;
+        let (key, title) = (sheet.key.clone(), sheet.input.read(cx).text().trim().to_string());
+        cx.spawn(async move |this, cx| {
+            let k = key.clone();
+            let r = cx.background_executor().spawn(async move { core_client::rename_pane(&k, &title) }).await;
+            let _ = this.update(cx, |w, cx| {
+                match r {
+                    Ok(name) => {
+                        let f = w.pane_facts.entry(key).or_default();
+                        f.custom_title = name.clone();
+                        if name.is_some() {
+                            f.display_title = name;
+                        }
+                        w.rename_pane = None;
+                        w.needs_focus = true;
+                    }
+                    Err(e) => {
+                        if let Some(s) = w.rename_pane.as_mut() {
+                            s.busy = false;
+                            s.error = Some(e);
+                        }
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn rename_sheet(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let s = self.rename_pane.as_ref()?;
+        let card = div()
+            .w(px(380.))
+            .p(px(18.))
+            .rounded(px(12.))
+            .bg(tokens::sidebar_tint())
+            .border_1()
+            .border_color(tokens::separator())
+            .shadow_lg()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .font_family(SYSTEM)
+            .text_size(px(12.5))
+            .key_context("RenamePaneSheet")
+            .on_action(cx.listener(|w, _: &CancelSheet, window, cx| w.close_rename(window, cx)))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child("Rename pane"))
+            .child(div().text_color(tokens::ink_dim()).child("Shown here, in the macOS app and on seahelm-web. Leave it empty to go back to the pane's own title."))
+            .child(s.input.clone())
+            .when_some(s.error.clone(), |d, e| d.child(div().text_color(tokens::danger()).child(e)))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_end()
+                    .gap(px(8.))
+                    .child(super::worktree_menu::sheet_button("rename-cancel", "Cancel", false, s.busy).on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.close_rename(window, cx))))
+                    .child(super::worktree_menu::sheet_button("rename-ok", "Rename", true, s.busy).on_click(cx.listener(|w, _: &ClickEvent, _, cx| w.submit_rename(cx)))),
+            );
+        Some(
+            deferred(
+                div()
+                    .id("rename-backdrop")
+                    .occlude()
+                    .absolute()
+                    .inset_0()
+                    .bg(tokens::alpha(gpui::rgb(0x000000), 0.35))
+                    .flex()
+                    .items_start()
+                    .justify_center()
+                    .pt(px(90.))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, cx| w.close_rename(window, cx)))
+                    .child(card),
+            )
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
+    /// The pane's corner: presence, the fork offer, its `#n` and name.
     pub(super) fn pane_corner(&self, id: &str, leaf: LeafId, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let key = pane_session(id, leaf);
         let facts = self.pane_facts.get(&key);
         let presence = self.presence.get(&key).filter(|p| p.until > Instant::now());
         let away = facts.filter(|f| f.claude_session.is_some()).and_then(|f| self.away_in(id, f));
         let handle = facts.and_then(|f| f.handle);
-        if presence.is_none() && away.is_none() && handle.is_none() {
+        let name = facts.and_then(|f| f.custom_title.clone());
+        if presence.is_none() && away.is_none() && handle.is_none() && name.is_none() {
             return None;
         }
         let mut row = div().absolute().top(px(6.)).right(px(10.)).flex().flex_row().items_center().gap(px(6.)).font_family(SYSTEM).text_size(px(11.));
@@ -197,8 +318,26 @@ impl Workspace {
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Fork there")),
             );
         }
-        if let Some(n) = handle {
-            row = row.child(div().px(px(5.)).rounded(px(4.)).bg(tokens::alpha(tokens::sidebar_tint(), 0.85)).text_color(tokens::ink_faint()).child(format!("#{n}")));
+        if handle.is_some() || name.is_some() {
+            let label = match (handle, &name) {
+                (Some(n), Some(t)) => format!("#{n} · {t}"),
+                (Some(n), None) => format!("#{n}"),
+                (None, Some(t)) => t.clone(),
+                (None, None) => String::new(),
+            };
+            let rename_key = key.clone();
+            row = row.child(
+                div()
+                    .id(SharedString::from(format!("name-{key}")))
+                    .px(px(5.))
+                    .rounded(px(4.))
+                    .bg(tokens::alpha(tokens::sidebar_tint(), 0.85))
+                    .text_color(if name.is_some() { tokens::ink_dim() } else { tokens::ink_faint() })
+                    .cursor_pointer()
+                    .hover(|s| s.text_color(tokens::ink()))
+                    .on_click(cx.listener(move |w, _: &ClickEvent, window: &mut Window, cx| w.open_rename(rename_key.clone(), window, cx)))
+                    .child(label),
+            );
         }
         Some(row.into_any_element())
     }

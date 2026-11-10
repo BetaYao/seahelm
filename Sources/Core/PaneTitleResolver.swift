@@ -11,7 +11,8 @@ import Foundation
 /// 6. Worktree path (never a wandering tool cwd outside the worktree)
 enum PaneTitleResolver {
     /// Resolution order (per-pane, never worktree-scoped, so sibling agent panes
-    /// stay distinct):
+    /// stay distinct), after a name the user gave the pane (`pane.rename`,
+    /// kept by seahelm-core, which wins outright):
     /// 1. Agent session title (per-session id) — *strong*, persisted
     /// 2. OSC title (agent panes, live) — *strong*, persisted
     /// 3. `Station.persistedTitle` — last strong title, so a restored pane shows
@@ -24,13 +25,19 @@ enum PaneTitleResolver {
     /// survives a relaunch (saved into the split layout).
     static func title(
         for pane: PaneInfo,
+        customTitle: (String) -> String? = { CoreClient.shared.customTitles[$0] },
         sessionTitle: (String, String) -> String? = { path, sid in
             SessionTitleLookup.title(worktreePath: path, sessionId: sid)
                 ?? CursorSessionTitleLookup.title(worktreePath: path, sessionId: sid)
         },
         pathDisplay: (String) -> String = { shortenPath($0) }
     ) -> String {
-        singleLine(resolvedTitle(for: pane, sessionTitle: sessionTitle, pathDisplay: pathDisplay))
+        // 0. A name the user gave the pane (`pane.rename`) outranks everything.
+        if let key = pane.station?.paneSessionKey,
+           let custom = customTitle(key)?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
+            return singleLine(custom)
+        }
+        return singleLine(resolvedTitle(for: pane, sessionTitle: sessionTitle, pathDisplay: pathDisplay))
     }
 
     /// Flatten to one line. Several sources are free-form user text — a Claude
