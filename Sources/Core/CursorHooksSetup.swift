@@ -20,9 +20,9 @@ enum CursorHooksSetup {
     ]
 
     private static func requiredEntry() -> [String: Any] {
-        // Declare the caller — Cursor's payload carries no key that identifies it
-        // (see WebhookEvent.inferNativeHookSource), and without a source the
-        // event can't be attributed to a Cursor pane or resume ref.
+        // Declare the caller — Cursor's payload carries no key that identifies it,
+        // and without a source the core can't attribute the event to a Cursor
+        // pane or resume ref.
         ["command": "\(SeahelmHookInstaller.scriptPath()) cursor"]
     }
 

@@ -25,7 +25,7 @@ struct AgentSessionRef: Codable, Equatable {
         case path
     }
 
-    /// Normalized agent name, e.g. "claude". Maps from a `WebhookEvent.source`
+    /// Normalized agent name, e.g. "claude". Maps from a hook's `source`
     /// via `agent(forSource:)`.
     let agent: String
     /// Whether `sessionId` holds an id or a filesystem path.
@@ -53,7 +53,7 @@ struct AgentSessionRef: Codable, Equatable {
         self.sessionId = sessionId
     }
 
-    /// Build from a `WebhookEvent.source`, preferring a session path over an id
+    /// Build from a hook's `source`, preferring a session path over an id
     /// for agents that resume by path (mirrors herdr's `session_ref_from_report`).
     /// Returns nil for unsupported agents or when no usable reference is present.
     init?(source: String, sessionId: String?, sessionPath: String? = nil) {
@@ -88,7 +88,7 @@ struct AgentSessionRef: Codable, Equatable {
         self.sessionId = sessionId
     }
 
-    /// Map a `WebhookEvent.source` to a normalized agent name we know how to
+    /// Map a hook's `source` to a normalized agent name we know how to
     /// resume. Only claude/codex are emitted by our native hooks today; the
     /// remainder are reachable via the generic webhook protocol (a payload with
     /// an explicit `source`), and each already has an argv row below.

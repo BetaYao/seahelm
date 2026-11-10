@@ -64,13 +64,13 @@ final class ProcessProbeTests: XCTestCase {
             guard let cm = store.manifest(for: id) else {
                 XCTFail("missing manifest \(id)"); continue
             }
-            XCTAssertNotNil(cm.manifest.process, "\(id) has no process block")
+            XCTAssertNotNil(cm.process, "\(id) has no process block")
             XCTAssertNotEqual(AgentType.fromManifestId(id), .unknown, "\(id) has no AgentType")
         }
     }
 
     func testIdentifyOpencodeFromProcess() {
-        let ms = ManifestStore.shared.all.map(\.manifest)
+        let ms = ManifestStore.shared.all
         let procs = [p(7, 1, ["node", "/opt/opencode/bin/opencode"])]
         XCTAssertEqual(ProcessProbe.identify(procs: procs, manifests: ms), "opencode")
     }
@@ -79,7 +79,7 @@ final class ProcessProbeTests: XCTestCase {
     /// alias). argv0 is `/…/bin/agent`; the install path still contains
     /// `cursor-agent`, so either exec_names or argv_contains must identify it.
     func testIdentifyCursorAgentCLIEntrypoint() {
-        let ms = ManifestStore.shared.all.map(\.manifest)
+        let ms = ManifestStore.shared.all
         let viaAgent = [p(7, 1, [
             "/Users/me/.local/bin/agent",
             "--use-system-ca",

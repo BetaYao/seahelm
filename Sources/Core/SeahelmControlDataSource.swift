@@ -104,7 +104,7 @@ final class SeahelmControlDataSource: ControlDataSource {
         guard !sessions.isEmpty else { return [:] }
         let procs = ProcessProbe.allProcesses()
         guard !procs.isEmpty else { return [:] }
-        let manifests = ManifestStore.shared.all.map(\.manifest)
+        let manifests = ManifestStore.shared.all
 
         var result: [String: ProcessProbe.SessionMemory] = [:]
         for session in sessions {

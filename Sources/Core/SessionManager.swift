@@ -180,7 +180,7 @@ enum SessionManager {
         guard sessions.contains(where: { $0.pid != nil }) else { return sessions }
         let procs = ProcessProbe.allProcesses()
         guard !procs.isEmpty else { return sessions }
-        let manifests = ManifestStore.shared.all.map(\.manifest)
+        let manifests = ManifestStore.shared.all
 
         return sessions.map { session in
             guard let pid = session.pid else { return session }

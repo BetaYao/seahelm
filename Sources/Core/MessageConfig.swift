@@ -15,7 +15,7 @@ struct MessageConfig: Equatable {
     /// manifest id or alias answers to.
     static func resolve(
         for agentType: AgentType,
-        manifest: (String) -> AgentManifest? = { ManifestStore.shared.manifest(for: $0)?.manifest }
+        manifest: (String) -> AgentManifest? = { ManifestStore.shared.manifest(for: $0) }
     ) -> MessageConfig {
         manifest(agentType.manifestId)?.message ?? .default
     }
