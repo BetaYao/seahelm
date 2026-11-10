@@ -1028,6 +1028,11 @@ class GhosttyNSView: NSView, NSTextInputClient {
 
         menu.addItem(.separator())
 
+        let renameItem = NSMenuItem(title: "Rename Pane…", action: #selector(contextRename), keyEquivalent: "")
+        renameItem.target = self
+        renameItem.isEnabled = station?.paneSessionKey != nil && CoreClient.shared.connected
+        menu.addItem(renameItem)
+
         let sleepItem = NSMenuItem(title: "Sleep Pane", action: #selector(contextSleep), keyEquivalent: "")
         sleepItem.target = self
         sleepItem.isEnabled = station?.canSleep == true
@@ -1433,6 +1438,33 @@ class GhosttyNSView: NSView, NSTextInputClient {
     @objc private func contextSplitHorizontal() { onRequestSplit?(.horizontal) }
     @objc private func contextSplitVertical() { onRequestSplit?(.vertical) }
     @objc private func contextSleep() { onRequestSleep?() }
+
+    /// Name this pane for every client (seahelm-core keeps it); empty gives it
+    /// back its own title.
+    @objc private func contextRename() {
+        guard let key = station?.paneSessionKey else { return }
+        let current = CoreClient.shared.customTitles[key]
+            ?? station.flatMap { Fleet.shared.pane(for: $0.id) }.map { PaneTitleResolver.title(for: $0) } ?? ""
+        let alert = NSAlert()
+        alert.messageText = "Rename Pane"
+        alert.informativeText = "Shown in Seahelm, the GPUI client and seahelm-web. Leave empty to go back to the pane's own title."
+        let field = NSTextField(string: current)
+        field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
+        field.placeholderString = "Pane name"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        let apply: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .alertFirstButtonReturn else { return }
+            CoreClient.shared.rename(paneSessionKey: key, title: field.stringValue) { error in
+                guard let error else { return }
+                NSLog("[Rename] pane.rename failed: \(error)")
+                NSSound.beep()
+            }
+        }
+        if let window { alert.beginSheetModal(for: window, completionHandler: apply) } else { apply(alert.runModal()) }
+    }
     @objc private func contextClose() { onRequestClose?() }
     @objc private func contextPaste() { paste(nil) }
 

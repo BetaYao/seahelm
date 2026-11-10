@@ -22,6 +22,17 @@ pub fn display_osc_title(raw: &str, worktree: &str, pwd: &str, home: &str) -> Op
     Some(title)
 }
 
+/// Longest name a pane may be given, in characters.
+pub const CUSTOM_TITLE_MAX: usize = 80;
+
+/// A name the user typed for a pane, as kept: one line, trimmed, capped.
+/// None when nothing is left (the pane goes back to its own title).
+pub fn custom_title(raw: &str) -> Option<String> {
+    let t: String = single_line(raw).chars().take(CUSTOM_TITLE_MAX).collect();
+    let t = t.trim().to_string();
+    (!t.is_empty()).then_some(t)
+}
+
 fn single_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -68,6 +79,13 @@ mod tests {
 
     fn t(raw: &str) -> Option<String> {
         display_osc_title(raw, WT, "", HOME)
+    }
+
+    #[test]
+    fn custom_titles_are_one_trimmed_capped_line() {
+        assert_eq!(custom_title("  修 登录\n bug  ").as_deref(), Some("修 登录 bug"));
+        assert_eq!(custom_title("   \n "), None);
+        assert_eq!(custom_title(&"x".repeat(200)).map(|t| t.chars().count()), Some(CUSTOM_TITLE_MAX));
     }
 
     #[test]

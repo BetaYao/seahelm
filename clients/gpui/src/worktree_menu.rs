@@ -219,6 +219,9 @@ impl Workspace {
 
     /// The sheet and the menu, over everything else.
     pub(super) fn overlays(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if let Some(sheet) = self.rename_sheet(cx) {
+            return Some(sheet);
+        }
         if self.new_worktree.is_some() {
             return Some(self.new_worktree_sheet(cx).into_any_element());
         }
@@ -419,7 +422,7 @@ fn menu_item(id: &'static str, label: &str, danger: bool) -> gpui::Stateful<gpui
         .child(label.to_string())
 }
 
-fn sheet_button(id: &'static str, label: &str, primary: bool, busy: bool) -> gpui::Stateful<gpui::Div> {
+pub(super) fn sheet_button(id: &'static str, label: &str, primary: bool, busy: bool) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .px(px(14.))

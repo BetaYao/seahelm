@@ -114,6 +114,10 @@ struct State {
     /// Agent session references (`config.json` `agent_sessions` shape), by pane.
     session_refs: HashMap<String, Value>,
     session_refs_path: PathBuf,
+    /// Names the user gave panes (`pane.rename`), by session name. Shown
+    /// before any title the terminal or agent gives, by every client.
+    custom_titles: HashMap<String, String>,
+    custom_titles_path: PathBuf,
     cycle: u64,
     /// Notices: what was announced, what is held by the stability gate.
     policy: NotificationPolicy,
@@ -235,6 +239,11 @@ impl Core {
             .ok()
             .and_then(|t| serde_json::from_str::<HashMap<String, Value>>(&t).ok())
             .unwrap_or_default();
+        let custom_titles_path = dir.join("core-pane-titles.json");
+        let custom_titles = std::fs::read_to_string(&custom_titles_path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<HashMap<String, String>>(&t).ok())
+            .unwrap_or_default();
         Arc::new(Self {
             state: Mutex::new(State {
                 cursor_workers: HashMap::new(),
@@ -251,6 +260,8 @@ impl Core {
                 worktree_titles: HashMap::new(),
                 session_refs,
                 session_refs_path,
+                custom_titles,
+                custom_titles_path,
                 cycle: 0,
                 policy: NotificationPolicy::new(),
                 signals: CompletionSignals::new(),
@@ -645,7 +656,39 @@ impl Core {
                 if forgot {
                     st.save_session_refs();
                 }
+                // Nor keep the name the user gave the pane it used to be.
+                if st.custom_titles.remove(&key).is_some() {
+                    st.save_custom_titles();
+                }
                 Ok(json!({"forgot": forgot}))
+            }
+            // The user names a pane; an empty title gives it back its own.
+            "pane.rename" => {
+                let hint = str_param(&p, "pane_id").or_else(|| str_param(&p, "pane_session_key"));
+                let mut st = self.lock();
+                let Some(id) = hint.and_then(|h| st.registry.resolve(Some(&h), "")) else {
+                    return Reply::Value(Err(RpcError::invalid_params("unknown pane")));
+                };
+                let title = crate::pane_title::custom_title(&str_param(&p, "title").unwrap_or_default());
+                let changed = match &title {
+                    Some(t) => st.custom_titles.insert(id.clone(), t.clone()).as_ref() != Some(t),
+                    None => st.custom_titles.remove(&id).is_some(),
+                };
+                if changed {
+                    st.save_custom_titles();
+                    let mut ev = json!({"type": "pane.renamed", "pane_session_key": id, "custom_title": title});
+                    if let Some(pane) = st.pane_json(&id) {
+                        ev["pane_id"] = pane["pane_id"].clone();
+                        ev["worktree_path"] = pane["worktree_path"].clone();
+                        if let Some(d) = pane.get("display_title") {
+                            ev["display_title"] = d.clone();
+                        }
+                    }
+                    st.registry.publish(ev);
+                    drop(st);
+                    self.changed.notify_all();
+                }
+                Ok(json!({"pane_session_key": id, "custom_title": title}))
             }
             "pane.wait_agent_status" | "wait.agent_status" => self.wait_status(&p),
             "pane.wait_for_output" | "wait.output" => crate::actions::wait_output(&self, &p),
@@ -2270,6 +2313,15 @@ impl State {
         }
     }
 
+    fn save_custom_titles(&self) {
+        if let Ok(text) = serde_json::to_string_pretty(&self.custom_titles) {
+            let tmp = self.custom_titles_path.with_extension("json.tmp");
+            if std::fs::write(&tmp, text).is_ok() {
+                let _ = std::fs::rename(&tmp, &self.custom_titles_path);
+            }
+        }
+    }
+
     fn save_session_refs(&self) {
         if let Ok(text) = serde_json::to_string_pretty(&self.session_refs) {
             let tmp = self.session_refs_path.with_extension("json.tmp");
@@ -2281,9 +2333,11 @@ impl State {
 
     /// pane.list's entry: the registry's, with what the screen says added —
     /// the terminal's title, and `display_title`, what the Mac's pane header
-    /// calls the pane (seahelm-web and Telegram name panes by it).
+    /// calls the pane (seahelm-web and Telegram name panes by it). A name the
+    /// user gave the pane is `custom_title`, and is the `display_title`.
     fn pane_json(&self, id: &str) -> Option<Value> {
         let mut v = self.registry.pane_json(id)?;
+        let custom = self.custom_titles.get(id);
         let worktree = self.registry.pane(id).map(|p| p.worktree_path.clone()).unwrap_or_default();
         if let (Some(obj), Some(snap)) = (v.as_object_mut(), self.panes.get(id).and_then(|s| s.snapshot.as_ref())) {
             if !snap.title.is_empty() {
@@ -2294,6 +2348,10 @@ impl State {
             if let Some(shown) = crate::pane_title::display_osc_title(&snap.title, &worktree, &snap.pwd, &home) {
                 obj.insert("display_title".into(), json!(shown));
             }
+        }
+        if let (Some(obj), Some(t)) = (v.as_object_mut(), custom) {
+            obj.insert("custom_title".into(), json!(t));
+            obj.insert("display_title".into(), json!(t));
         }
         Some(v)
     }
@@ -3345,5 +3403,53 @@ mod card_timeline_tests {
         let rows: Vec<_> = card_rows(&st).into_iter().filter(|row| row["card_id"] == id).collect();
         assert_eq!(rows.iter().map(|row| row["state"].as_str().unwrap()).collect::<Vec<_>>(), ["pending", "pending"]);
         assert_eq!(rows[1]["text"], "The tests are ready.");
+    }
+}
+
+#[cfg(test)]
+mod pane_rename_tests {
+    use super::*;
+    use crate::peer::{Client, Verdict};
+
+    fn call(core: &Arc<Core>, method: &str, p: Value) -> RpcResult {
+        match core.clone().call_checked(method, p, Some(1), || Verdict::Client { client: Client::MacApp, in_pane: None }) {
+            Reply::Value(v) => v,
+            Reply::Stream(_) => panic!("a stream"),
+        }
+    }
+
+    fn listed(core: &Arc<Core>) -> Value {
+        call(core, "pane.list", json!({})).unwrap()["panes"][0].clone()
+    }
+
+    #[test]
+    fn a_name_is_shown_kept_cleared_and_forgotten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        call(&core, "pane.register", json!({"pane": "seahelm-repo-a", "worktree_path": "/w/repo"})).unwrap();
+
+        let r = call(&core, "pane.rename", json!({"pane_id": "seahelm-repo-a", "title": "  修登录\n bug "})).unwrap();
+        assert_eq!(r["custom_title"], "修登录 bug");
+        let p = listed(&core);
+        assert_eq!(p["custom_title"], "修登录 bug");
+        assert_eq!(p["display_title"], "修登录 bug");
+        let seq = core.lock().registry.seq();
+        assert!(core.lock().registry.events().events_after(seq - 1).iter().any(|e| e["type"] == "pane.renamed" && e["custom_title"] == "修登录 bug"));
+
+        // A restarted core still knows it.
+        let core = Core::for_test(tmp.path());
+        call(&core, "pane.register", json!({"pane": "seahelm-repo-a", "worktree_path": "/w/repo"})).unwrap();
+        assert_eq!(listed(&core)["custom_title"], "修登录 bug");
+
+        // An empty title gives the pane its own back.
+        assert!(call(&core, "pane.rename", json!({"pane_id": "seahelm-repo-a", "title": ""})).unwrap()["custom_title"].is_null());
+        assert!(listed(&core).get("custom_title").is_none());
+
+        // A pane closed for good does not pass its name to the next one.
+        call(&core, "pane.rename", json!({"pane_id": "seahelm-repo-a", "title": "x"})).unwrap();
+        call(&core, "agent.forget", json!({"pane_session_key": "seahelm-repo-a"})).unwrap();
+        assert!(listed(&core).get("custom_title").is_none());
+
+        assert!(call(&core, "pane.rename", json!({"pane_id": "nope", "title": "x"})).is_err());
     }
 }

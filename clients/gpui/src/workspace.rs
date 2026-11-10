@@ -71,7 +71,10 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("ctrl-shift-enter", ZoomPane, None),
         ]);
     }
-    cx.bind_keys([KeyBinding::new("escape", CancelSheet, Some("NewWorktreeSheet"))]);
+    cx.bind_keys([
+        KeyBinding::new("escape", CancelSheet, Some("NewWorktreeSheet")),
+        KeyBinding::new("escape", CancelSheet, Some("RenamePaneSheet")),
+    ]);
 }
 
 /// A worktree's panes: the split tree, kept across launches, and a
@@ -148,6 +151,8 @@ pub struct Workspace {
     new_worktree: Option<NewWorktree>,
     /// A row's right-click menu, while open.
     row_menu: Option<RowMenu>,
+    /// The "Rename pane" sheet, while open.
+    rename_pane: Option<pane_extras::RenamePane>,
     /// Settings is in the main area.
     settings_open: bool,
     /// The Settings page on show, kept across closing and reopening.
@@ -209,6 +214,7 @@ impl Workspace {
             _side_closed: side_closed,
             new_worktree: None,
             row_menu: None,
+            rename_pane: None,
             settings_open: false,
             settings_section: SettingsSection::General,
             settings_page: cx.new(SettingsPage::new),

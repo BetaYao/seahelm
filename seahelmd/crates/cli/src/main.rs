@@ -317,6 +317,10 @@ impl Cli {
                 let p = pane.map(|p| json!({"pane_id": p})).unwrap_or_else(|| json!({"all": true}));
                 compact(&self.call(&format!("pane.{sub}"), p, 40.0, &[]));
             }
+            "rename" => {
+                need(1, "usage: seahelm pane rename <pane> [title...]   (no title: back to its own)");
+                compact(&self.call("pane.rename", json!({"pane_id": rest[0], "title": rest[1..].join(" ")}), 40.0, &[]));
+            }
             "explain" => {
                 need(1, "usage: seahelm pane explain <pane>");
                 pretty(&self.call("pane.explain", json!({"pane_id": rest[0]}), 40.0, &[]));
@@ -490,6 +494,7 @@ fn route(method: &str) -> &'static [Side] {
         // First Mate's habits live in the core alone.
         "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" | "schedule.add" | "schedule.list" | "schedule.remove" | "schedule.run_now" | "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
         "memory.note" | "memory.show" | "memory.undo" | "memory.confirm" => &[Side::Core],
+        "pane.rename" => &[Side::Core],
         _ => &[Side::App],
     }
 }
