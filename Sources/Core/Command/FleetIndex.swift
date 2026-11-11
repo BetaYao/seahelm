@@ -101,13 +101,19 @@ struct FleetIndex: Equatable {
         worktrees.first { $0.path == path }
     }
 
-    /// Source printed for a card in the shared timeline: a pane handle and
-    /// the worktree the card belongs to, rather than the containing repo.
+    /// Source printed for a card in the shared timeline: the pane's handle,
+    /// its title (the user's name for it, else its own), and the worktree the
+    /// card belongs to rather than the containing repo. Several panes share a
+    /// worktree, so the title is what tells their cards apart.
     func cardSourceLabel(for pane: PaneRef) -> String {
         let worktreeName = worktree(path: pane.worktreePath)?.name
             ?? WorktreeRef.name(branch: pane.branch, path: pane.worktreePath)
         let name = worktreeName.isEmpty ? pane.project : worktreeName
-        guard !name.isEmpty else { return pane.handle.map { "#\($0)" } ?? "" }
-        return pane.handle.map { "#\($0) · \(name)" } ?? name
+        let title = pane.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        var parts: [String] = []
+        if let handle = pane.handle { parts.append("#\(handle)") }
+        if !title.isEmpty, title.lowercased() != name.lowercased() { parts.append(title) }
+        if !name.isEmpty { parts.append(name) }
+        return parts.joined(separator: " · ")
     }
 }
