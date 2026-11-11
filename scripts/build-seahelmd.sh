@@ -7,10 +7,11 @@
 #
 # The architecture is the first of $ARCHS (Xcode's build setting), else $ARCH
 # (package_release.sh), else this machine's. libghostty-vt — the terminal state
-# seahelmd keeps — is built once per Ghostty commit and architecture with Zig
-# and cached under ~/.cache/seahelm/libghostty-vt (SEAHELMD_VT_CACHE to move it).
+# seahelmd keeps — is the release seahelmd/vendor/build-vt.sh pins, fetched
+# once per version and architecture (the official XCFramework: no Zig) and
+# cached under ~/.cache/seahelm/libghostty-vt (SEAHELMD_VT_CACHE to move it).
 #
-# Needs cargo (rustup) and, on a cache miss, zig 0.16 and network.
+# Needs cargo (rustup) and, on a cache miss, network.
 set -euo pipefail
 
 DEST="${1:?usage: build-seahelmd.sh <dest>}"
@@ -30,11 +31,11 @@ esac
 
 command -v cargo >/dev/null || { echo "build-seahelmd: cargo is required (https://rustup.rs)" >&2; exit 1; }
 
-COMMIT="$(sed -n 's/^COMMIT="\${GHOSTTY_COMMIT:-\([0-9a-f]*\)}"$/\1/p' "$CRATE/vendor/build-vt.sh")"
-[ -n "$COMMIT" ] || { echo "build-seahelmd: no pinned Ghostty commit in vendor/build-vt.sh" >&2; exit 1; }
-VT="${SEAHELMD_VT_CACHE:-$HOME/.cache/seahelm/libghostty-vt}/${COMMIT:0:12}-$ZIG_TARGET"
+VERSION="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "$CRATE/vendor/build-vt.sh")"
+[ -n "$VERSION" ] || { echo "build-seahelmd: no pinned libghostty-vt version in vendor/build-vt.sh" >&2; exit 1; }
+VT="${SEAHELMD_VT_CACHE:-$HOME/.cache/seahelm/libghostty-vt}/vt-$VERSION-$ZIG_TARGET"
 if [ ! -f "$VT/libghostty-vt.a" ]; then
-  echo "build-seahelmd: building libghostty-vt ${COMMIT:0:12} for $ZIG_TARGET (once)"
+  echo "build-seahelmd: fetching libghostty-vt $VERSION for $ZIG_TARGET (once)"
   "$CRATE/vendor/build-vt.sh" "$ZIG_TARGET" "$VT"
 fi
 export KEEP_GHOSTTY_VT_DIR="$VT"

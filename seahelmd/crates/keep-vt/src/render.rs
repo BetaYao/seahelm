@@ -12,7 +12,7 @@ use std::os::raw::c_int;
 
 use crate::{ffi, Error, Terminal};
 
-mod sys {
+pub(crate) mod sys {
     use std::ffi::c_void;
     use std::os::raw::c_int;
 
@@ -45,6 +45,15 @@ mod sys {
     pub const CELLS_DATA_BG_COLOR: c_int = 5;
     pub const CELLS_DATA_FG_COLOR: c_int = 6;
     pub const CELLS_DATA_HAS_STYLING: c_int = 8;
+
+    /// `GhosttyCodepointBuffer`: where `CELLS_DATA_GRAPHEMES_BUF` writes, up
+    /// to `cap`; `len` comes back as the cell's count.
+    #[repr(C)]
+    pub struct CodepointBuffer {
+        pub ptr: *mut u32,
+        pub cap: usize,
+        pub len: usize,
+    }
 
     #[repr(C)]
     pub struct Cursor {
@@ -360,14 +369,11 @@ impl View {
         cell.text.clear();
         if len > 0 {
             self.codepoints.resize(len as usize, 0);
-            unsafe {
-                sys::ghostty_render_state_row_cells_get(
-                    c,
-                    sys::CELLS_DATA_GRAPHEMES_BUF,
-                    self.codepoints.as_mut_ptr() as *mut c_void,
-                );
-            }
-            cell.text.extend(self.codepoints.iter().filter_map(|&cp| char::from_u32(cp)));
+            let mut buffer =
+                sys::CodepointBuffer { ptr: self.codepoints.as_mut_ptr(), cap: self.codepoints.len(), len: 0 };
+            unsafe { sys::ghostty_render_state_row_cells_get(c, sys::CELLS_DATA_GRAPHEMES_BUF, out(&mut buffer)) };
+            let written = buffer.len.min(self.codepoints.len());
+            cell.text.extend(self.codepoints[..written].iter().filter_map(|&cp| char::from_u32(cp)));
         }
 
         // The colours resolve palette indices and background-only cells
@@ -380,15 +386,15 @@ impl View {
             .then_some([bg.r, bg.g, bg.b]);
 
         if has_styling {
-            let mut style = blank_style();
+            let mut style = ffi::Style::blank();
             unsafe { sys::ghostty_render_state_row_cells_get(c, sys::CELLS_DATA_STYLE, out(&mut style)) };
-            cell.bold = style.bold;
-            cell.italic = style.italic;
-            cell.faint = style.faint;
-            cell.inverse = style.inverse;
-            cell.invisible = style.invisible;
-            cell.strikethrough = style.strikethrough;
-            cell.underline = style.underline.clamp(0, 5) as u8;
+            cell.bold = style.bold();
+            cell.italic = style.italic();
+            cell.faint = style.faint();
+            cell.inverse = style.inverse();
+            cell.invisible = style.invisible();
+            cell.strikethrough = style.strikethrough();
+            cell.underline = style.underline().clamp(0, 5) as u8;
         } else {
             cell.bold = false;
             cell.italic = false;
@@ -420,25 +426,6 @@ fn check(rc: c_int) -> Result<(), Error> {
         Ok(())
     } else {
         Err(Error(rc))
-    }
-}
-
-fn blank_style() -> ffi::Style {
-    let none = ffi::StyleColor { tag: 0, value: ffi::StyleColorValue { padding: 0 } };
-    ffi::Style {
-        size: std::mem::size_of::<ffi::Style>(),
-        fg: none,
-        bg: none,
-        underline_color: none,
-        bold: false,
-        italic: false,
-        faint: false,
-        blink: false,
-        inverse: false,
-        invisible: false,
-        strikethrough: false,
-        overline: false,
-        underline: 0,
     }
 }
 

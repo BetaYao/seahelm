@@ -10,6 +10,7 @@
 use std::ffi::c_void;
 use std::os::raw::c_int;
 
+mod abi;
 mod effects;
 mod handover;
 pub mod input;
@@ -41,8 +42,8 @@ pub mod ffi {
     pub const SUCCESS: c_int = 0;
 
     /// `GhosttyTerminalOption` values we set.
-    pub const OPT_USERDATA: c_int = 0;
-    pub const OPT_WRITE_PTY: c_int = 1;
+    pub const OPT_USERDATA: c_int = 1;
+    pub const OPT_WRITE_PTY: c_int = 2;
 
     /// What the terminal calls with the bytes it would write back to the
     /// PTY: the answers to the questions a program asks its terminal.
@@ -51,29 +52,29 @@ pub mod ffi {
 
     /// The other effects: what a terminal somebody is using does with what
     /// a program says to it, beyond drawing it (see `Terminal::act_as_terminal`).
-    pub const OPT_XTVERSION: c_int = 4;
-    pub const OPT_TITLE_CHANGED: c_int = 5;
-    pub const OPT_SIZE: c_int = 6;
-    pub const OPT_COLOR_SCHEME: c_int = 7;
-    pub const OPT_DEVICE_ATTRIBUTES: c_int = 8;
-    pub const OPT_COLOR_FOREGROUND: c_int = 11;
-    pub const OPT_COLOR_BACKGROUND: c_int = 12;
-    pub const OPT_COLOR_CURSOR: c_int = 13;
-    pub const OPT_COLOR_PALETTE: c_int = 14;
-    pub const OPT_PWD_CHANGED: c_int = 25;
-    pub const OPT_CLIPBOARD_WRITE: c_int = 26;
+    pub const OPT_XTVERSION: c_int = 5;
+    pub const OPT_TITLE_CHANGED: c_int = 6;
+    pub const OPT_SIZE: c_int = 7;
+    pub const OPT_COLOR_SCHEME: c_int = 8;
+    pub const OPT_DEVICE_ATTRIBUTES: c_int = 9;
+    pub const OPT_COLOR_FOREGROUND: c_int = 12;
+    pub const OPT_COLOR_BACKGROUND: c_int = 13;
+    pub const OPT_COLOR_CURSOR: c_int = 14;
+    pub const OPT_COLOR_PALETTE: c_int = 15;
+    pub const OPT_PWD_CHANGED: c_int = 26;
+    pub const OPT_CLIPBOARD_WRITE: c_int = 27;
     /// How much history the terminal keeps, in bytes; see `set_scrollback_limit`.
-    pub const OPT_SCROLLBACK_MAX_BYTES: c_int = 27;
+    pub const OPT_SCROLLBACK_MAX_BYTES: c_int = 28;
     /// How much of a sequence a write ended in the middle of the terminal
     /// keeps, to say it again; see `Terminal::continuation`.
-    pub const OPT_CONTINUATION_MAX_BYTES: c_int = 31;
+    pub const OPT_CONTINUATION_MAX_BYTES: c_int = 32;
     /// A program reading the clipboard (OSC 52 `?`); see
     /// `Terminal::read_clipboard_with`.
-    pub const OPT_CLIPBOARD_READ: c_int = 38;
+    pub const OPT_CLIPBOARD_READ: c_int = 39;
     /// The name of the terminfo entry XTGETTCAP `TN` reports.
-    pub const OPT_TERMINFO_NAME: c_int = 37;
+    pub const OPT_TERMINFO_NAME: c_int = 38;
     /// How much the Kitty graphics protocol may store; zero turns it off.
-    pub const OPT_KITTY_IMAGE_STORAGE_LIMIT: c_int = 15;
+    pub const OPT_KITTY_IMAGE_STORAGE_LIMIT: c_int = 16;
     pub const DATA_KITTY_IMAGE_STORAGE_LIMIT: c_int = 26;
 
     pub type TitleChangedFn = unsafe extern "C" fn(terminal: Terminal, userdata: *mut c_void);
@@ -86,15 +87,9 @@ pub mod ffi {
         unsafe extern "C" fn(terminal: Terminal, userdata: *mut c_void, out: *mut c_int) -> bool;
     pub type DeviceAttributesFn =
         unsafe extern "C" fn(terminal: Terminal, userdata: *mut c_void, out: *mut DeviceAttributes) -> bool;
-    /// Returns a `GhosttyClipboardWriteResult`. The libghostty-vt Keep is
-    /// pinned to (a53771a, the CI's) takes the write's result from what the
-    /// callback returns; later ones take it from `ClipboardWrite::reply` and
-    /// declare the callback void, which leaves the returned value unread.
-    pub type ClipboardWriteFn = unsafe extern "C" fn(
-        terminal: Terminal,
-        userdata: *mut c_void,
-        write: *const ClipboardWrite,
-    ) -> c_int;
+    /// Answered by calling `ClipboardWrite::reply` before returning.
+    pub type ClipboardWriteFn =
+        unsafe extern "C" fn(terminal: Terminal, userdata: *mut c_void, write: *const ClipboardWrite);
 
     /// `GhosttyColorRgb`.
     #[repr(C)]
@@ -175,7 +170,6 @@ pub mod ffi {
     /// before the callback returns.
     #[repr(C)]
     pub struct ClipboardRead {
-        pub size: usize,
         pub location: c_int,
         pub mimes: *const GhosttyString,
         pub mimes_len: usize,
@@ -206,15 +200,10 @@ pub mod ffi {
     pub type ClipboardReadFn =
         unsafe extern "C" fn(terminal: Terminal, userdata: *mut c_void, read: *const ClipboardRead);
 
-    /// `GhosttyClipboardWrite`: a program writing the clipboard (OSC 52).
-    ///
-    /// A sized struct, and sized differently by the libghostty-vt it comes
-    /// from: the pinned one (a53771a) ends at `contents_len`; `name` to
-    /// `reply` came later. Only what `size` covers is read
-    /// (`ClipboardWrite::reply_fn`).
+    /// `GhosttyClipboardWrite`: a program writing the clipboard (OSC 52),
+    /// answered through `reply` before the callback returns.
     #[repr(C)]
     pub struct ClipboardWrite {
-        pub size: usize,
         pub location: c_int,
         pub contents: *const ClipboardContent,
         pub contents_len: usize,
@@ -223,18 +212,6 @@ pub mod ffi {
         pub can_remember: bool,
         pub ctx: *const c_void,
         pub reply: Option<ClipboardWriteReplyFn>,
-    }
-
-    impl ClipboardWrite {
-        /// The reply function, when the struct the library handed over is
-        /// long enough to hold one: past `size` lies whatever the library
-        /// put after a shorter struct, and calling it crashes (SIGBUS on
-        /// macOS, an access violation on Windows: CI, 13/10/2026).
-        pub fn reply_fn(&self) -> Option<ClipboardWriteReplyFn> {
-            let end = std::mem::offset_of!(ClipboardWrite, reply)
-                + std::mem::size_of::<Option<ClipboardWriteReplyFn>>();
-            if self.size >= end { self.reply } else { None }
-        }
     }
 
     /// `GhosttyTerminalData` values we read.
@@ -268,7 +245,6 @@ pub mod ffi {
     #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct GridRef {
-        pub size: usize,
         pub node: *mut c_void,
         pub x: u16,
         pub y: u16,
@@ -305,7 +281,6 @@ pub mod ffi {
     #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct Selection {
-        pub size: usize,
         pub start: GridRef,
         pub end: GridRef,
         pub rectangle: bool,
@@ -344,34 +319,78 @@ pub mod ffi {
     pub union StyleColorValue {
         pub palette: u8,
         pub rgb: ColorRgb,
-        pub padding: u64,
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct StyleColor {
-        pub tag: c_int,
+        pub tag: u8,
         pub value: StyleColorValue,
     }
-    pub const STYLE_COLOR_PALETTE: c_int = 1;
-    pub const STYLE_COLOR_RGB: c_int = 2;
+    pub const STYLE_COLOR_PALETTE: u8 = 1;
+    pub const STYLE_COLOR_RGB: u8 = 2;
+
+    /// `GhosttyStyleFlags` bits, and where the underline style sits in them.
+    pub const STYLE_FLAG_BOLD: u16 = 1 << 0;
+    pub const STYLE_FLAG_ITALIC: u16 = 1 << 1;
+    pub const STYLE_FLAG_FAINT: u16 = 1 << 2;
+    pub const STYLE_FLAG_BLINK: u16 = 1 << 3;
+    pub const STYLE_FLAG_INVERSE: u16 = 1 << 4;
+    pub const STYLE_FLAG_INVISIBLE: u16 = 1 << 5;
+    pub const STYLE_FLAG_STRIKETHROUGH: u16 = 1 << 6;
+    pub const STYLE_FLAG_OVERLINE: u16 = 1 << 7;
+    pub const STYLE_UNDERLINE_SHIFT: u16 = 8;
+    pub const STYLE_UNDERLINE_MASK: u16 = 0x7 << 8;
 
     /// `GhosttyStyle`: what a cell is drawn with.
     #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct Style {
-        pub size: usize,
         pub fg: StyleColor,
         pub bg: StyleColor,
         pub underline_color: StyleColor,
-        pub bold: bool,
-        pub italic: bool,
-        pub faint: bool,
-        pub blink: bool,
-        pub inverse: bool,
-        pub invisible: bool,
-        pub strikethrough: bool,
-        pub overline: bool,
-        pub underline: c_int,
+        pub flags: u16,
+        pub reserved: u16,
+    }
+
+    impl Style {
+        /// The default style: no colours, no attributes (what
+        /// `ghostty_style_default` writes).
+        pub const fn blank() -> Style {
+            let none = StyleColor { tag: 0, value: StyleColorValue { palette: 0 } };
+            Style { fg: none, bg: none, underline_color: none, flags: 0, reserved: 0 }
+        }
+        fn has(&self, flag: u16) -> bool {
+            self.flags & flag != 0
+        }
+        pub fn bold(&self) -> bool {
+            self.has(STYLE_FLAG_BOLD)
+        }
+        pub fn italic(&self) -> bool {
+            self.has(STYLE_FLAG_ITALIC)
+        }
+        pub fn faint(&self) -> bool {
+            self.has(STYLE_FLAG_FAINT)
+        }
+        pub fn blink(&self) -> bool {
+            self.has(STYLE_FLAG_BLINK)
+        }
+        pub fn inverse(&self) -> bool {
+            self.has(STYLE_FLAG_INVERSE)
+        }
+        pub fn invisible(&self) -> bool {
+            self.has(STYLE_FLAG_INVISIBLE)
+        }
+        pub fn strikethrough(&self) -> bool {
+            self.has(STYLE_FLAG_STRIKETHROUGH)
+        }
+        pub fn overline(&self) -> bool {
+            self.has(STYLE_FLAG_OVERLINE)
+        }
+        /// A `GhosttySgrUnderline`: 0 none, 1 single, 2 double, 3 curly,
+        /// 4 dotted, 5 dashed.
+        pub fn underline(&self) -> c_int {
+            ((self.flags & STYLE_UNDERLINE_MASK) >> STYLE_UNDERLINE_SHIFT) as c_int
+        }
     }
 
     /// `GhosttyTerminalModeConfig`: a mode to ask about, and its answer.
@@ -397,44 +416,27 @@ pub mod ffi {
     pub const FORMAT_VT: c_int = 1;
     pub const FORMAT_HTML: c_int = 2;
 
-    /// Screen-level extras. `size` must be set to the struct size.
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    pub struct ScreenExtra {
-        pub size: usize,
-        pub cursor: bool,
-        pub style: bool,
-        pub hyperlink: bool,
-        pub protection: bool,
-        pub kitty_keyboard: bool,
-        pub charsets: bool,
-    }
+    /// `GhosttyFormatterOption`s, set one by one on a formatter.
+    pub const FORMATTER_OPT_EMIT: c_int = 1;
+    pub const FORMATTER_OPT_UNWRAP: c_int = 2;
+    pub const FORMATTER_OPT_TRIM: c_int = 3;
+    pub const FORMATTER_OPT_SELECTION: c_int = 4;
+    pub const FORMATTER_OPT_EXTRAS: c_int = 5;
 
-    /// Terminal-level extras. `size` must be set to the struct size.
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    pub struct TerminalExtra {
-        pub size: usize,
-        pub palette: bool,
-        pub modes: bool,
-        pub scrolling_region: bool,
-        pub tabstops: bool,
-        pub pwd: bool,
-        pub keyboard: bool,
-        pub screen: ScreenExtra,
-    }
-
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    pub struct FormatterOptions {
-        /// Must be set to the struct size; this is a versioned struct.
-        pub size: usize,
-        pub emit: c_int,
-        pub unwrap: bool,
-        pub trim: bool,
-        pub extra: TerminalExtra,
-        pub selection: *const c_void,
-    }
+    /// `GhosttyFormatterExtras`: what VT output says about the terminal
+    /// beyond the cells.
+    pub const FORMATTER_EXTRA_PALETTE: u32 = 1 << 0;
+    pub const FORMATTER_EXTRA_MODES: u32 = 1 << 1;
+    pub const FORMATTER_EXTRA_SCROLLING_REGION: u32 = 1 << 2;
+    pub const FORMATTER_EXTRA_TABSTOPS: u32 = 1 << 3;
+    pub const FORMATTER_EXTRA_PWD: u32 = 1 << 4;
+    pub const FORMATTER_EXTRA_KEYBOARD: u32 = 1 << 5;
+    pub const FORMATTER_EXTRA_CURSOR: u32 = 1 << 6;
+    pub const FORMATTER_EXTRA_STYLE: u32 = 1 << 7;
+    pub const FORMATTER_EXTRA_HYPERLINK: u32 = 1 << 8;
+    pub const FORMATTER_EXTRA_PROTECTION: u32 = 1 << 9;
+    pub const FORMATTER_EXTRA_KITTY_KEYBOARD: u32 = 1 << 10;
+    pub const FORMATTER_EXTRA_CHARSETS: u32 = 1 << 11;
 
     extern "C" {
         pub fn ghostty_terminal_new(
@@ -455,12 +457,8 @@ pub mod ffi {
             cell_height_px: u32,
         ) -> c_int;
 
-        pub fn ghostty_formatter_terminal_new(
-            allocator: *const c_void,
-            out: *mut Formatter,
-            terminal: Terminal,
-            options: FormatterOptions,
-        ) -> c_int;
+        pub fn ghostty_formatter_terminal_new(allocator: *const c_void, out: *mut Formatter, terminal: Terminal) -> c_int;
+        pub fn ghostty_formatter_set(formatter: Formatter, option: c_int, value: *const c_void) -> c_int;
         pub fn ghostty_formatter_format_alloc(
             formatter: Formatter,
             allocator: *const c_void,
@@ -485,7 +483,7 @@ pub mod ffi {
             grid_ref: *const GridRef,
             buf: *mut u8,
             buf_len: usize,
-            out_len: *mut usize,
+            out_written: *mut usize,
         ) -> c_int;
 
         pub fn ghostty_free(allocator: *const c_void, ptr: *mut u8, len: usize);
@@ -511,8 +509,8 @@ pub mod ffi {
     pub const CURSOR_STYLE_UNDERLINE: c_int = 2;
     pub const CURSOR_STYLE_BLOCK_HOLLOW: c_int = 3;
     /// The shape CSI 0 q goes back to, and the one before any CSI q.
-    pub const OPT_DEFAULT_CURSOR_STYLE: c_int = 22;
-    pub const OPT_DEFAULT_CURSOR_BLINK: c_int = 23;
+    pub const OPT_DEFAULT_CURSOR_STYLE: c_int = 23;
+    pub const OPT_DEFAULT_CURSOR_BLINK: c_int = 24;
 }
 
 /// What a formatted snapshot should look like.
@@ -537,6 +535,21 @@ impl Format {
             Format::Html => ffi::FORMAT_HTML,
         }
     }
+}
+
+/// What a formatter is asked for: `GhosttyFormatterOption`s, set one by one
+/// on a fresh formatter (`Terminal::format_with`).
+pub(crate) struct FormatOptions {
+    /// A `GhosttyFormatterFormat`.
+    pub emit: c_int,
+    /// Join soft-wrapped rows back into one line.
+    pub unwrap: bool,
+    /// Drop trailing blanks.
+    pub trim: bool,
+    /// `GhosttyFormatterExtras`, for VT output.
+    pub extras: u32,
+    /// Only these cells; None is the whole screen.
+    pub selection: Option<ffi::Selection>,
 }
 
 /// A libghostty-vt error code.
@@ -938,7 +951,6 @@ impl Terminal {
             value: ffi::PointValue { coordinate: ffi::PointCoordinate { x, y: y as u32 } },
         };
         let mut cell = ffi::GridRef {
-            size: std::mem::size_of::<ffi::GridRef>(),
             node: std::ptr::null_mut(),
             x: 0,
             y: 0,
@@ -1019,39 +1031,13 @@ impl Terminal {
     /// The cells from `start` to `end` as VT: their text and its styles,
     /// nothing about the terminal around them.
     fn formatted_run(&self, start: ffi::GridRef, end: ffi::GridRef) -> Result<Vec<u8>, Error> {
-        let selection = ffi::Selection {
-            size: std::mem::size_of::<ffi::Selection>(),
-            start,
-            end,
-            rectangle: false,
-        };
-        let none = ffi::ScreenExtra {
-            size: std::mem::size_of::<ffi::ScreenExtra>(),
-            cursor: false,
-            style: false,
-            hyperlink: false,
-            protection: false,
-            kitty_keyboard: false,
-            charsets: false,
-        };
-        let options = ffi::FormatterOptions {
-            size: std::mem::size_of::<ffi::FormatterOptions>(),
+        self.format_with(&FormatOptions {
             emit: ffi::FORMAT_VT,
             unwrap: false,
             trim: false,
-            extra: ffi::TerminalExtra {
-                size: std::mem::size_of::<ffi::TerminalExtra>(),
-                palette: false,
-                modes: false,
-                scrolling_region: false,
-                tabstops: false,
-                pwd: false,
-                keyboard: false,
-                screen: none,
-            },
-            selection: &selection as *const ffi::Selection as *const c_void,
-        };
-        self.format_with(options)
+            extras: 0,
+            selection: Some(ffi::Selection { start, end, rectangle: false }),
+        })
     }
 
     /// The visible screen as plain text, the way a terminal reads its
@@ -1067,34 +1053,13 @@ impl Terminal {
         let (Some(start), Some(end)) = (self.cell(0, 0), self.cell(cols - 1, rows - 1)) else {
             return Ok(String::new());
         };
-        let selection = ffi::Selection { size: std::mem::size_of::<ffi::Selection>(), start, end, rectangle: false };
-        let none = ffi::ScreenExtra {
-            size: std::mem::size_of::<ffi::ScreenExtra>(),
-            cursor: false,
-            style: false,
-            hyperlink: false,
-            protection: false,
-            kitty_keyboard: false,
-            charsets: false,
-        };
-        let options = ffi::FormatterOptions {
-            size: std::mem::size_of::<ffi::FormatterOptions>(),
+        let bytes = self.format_with(&FormatOptions {
             emit: ffi::FORMAT_PLAIN,
             unwrap: true,
             trim: false,
-            extra: ffi::TerminalExtra {
-                size: std::mem::size_of::<ffi::TerminalExtra>(),
-                palette: false,
-                modes: false,
-                scrolling_region: false,
-                tabstops: false,
-                pwd: false,
-                keyboard: false,
-                screen: none,
-            },
-            selection: &selection as *const ffi::Selection as *const c_void,
-        };
-        let bytes = self.format_with(options)?;
+            extras: 0,
+            selection: Some(ffi::Selection { start, end, rectangle: false }),
+        })?;
         Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
@@ -1104,78 +1069,66 @@ impl Terminal {
     const INPUT_MODES: [u16; 11] = [1, 9, 1000, 1002, 1003, 1005, 1006, 1015, 1016, 1004, 2004];
 
     fn formatted(&self, format: Format) -> Result<Vec<u8>, Error> {
-        let extra_screen = ffi::ScreenExtra {
-            size: std::mem::size_of::<ffi::ScreenExtra>(),
-            cursor: true,
-            style: true,
-            hyperlink: true,
-            protection: false,
-            // Written by `snapshot` itself, so that it is said even when it
-            // is zero.
-            kitty_keyboard: false,
-            charsets: false,
-        };
-        let options = ffi::FormatterOptions {
-            size: std::mem::size_of::<ffi::FormatterOptions>(),
+        self.format_with(&FormatOptions {
             emit: format.as_raw(),
             unwrap: false,
             trim: false,
-            extra: ffi::TerminalExtra {
-                size: std::mem::size_of::<ffi::TerminalExtra>(),
-                palette: false,
-                // Bracketed paste, mouse reporting, the alternate screen,
-                // application cursor keys: whatever the program switched on is
-                // switched on again for whoever attaches.
-                modes: true,
-                scrolling_region: false,
-                tabstops: false,
-                // The directory the shell announced. A client that attaches
-                // learns it from the snapshot rather than waiting for the next
-                // prompt, which is what decides where a new tab opens.
-                pwd: true,
-                // modifyOtherKeys, for the same reason as the Kitty flags.
-                keyboard: true,
-                screen: extra_screen,
-            },
-            selection: std::ptr::null(),
-        };
-        self.format_with(options)
+            // Bracketed paste, mouse reporting, the alternate screen,
+            // application cursor keys: whatever the program switched on is
+            // switched on again for whoever attaches (modes). The directory
+            // the shell announced: a client that attaches learns it from the
+            // snapshot rather than waiting for the next prompt, which is what
+            // decides where a new tab opens (pwd). modifyOtherKeys, for the
+            // same reason as the Kitty flags (keyboard). The Kitty flags
+            // themselves are written by `snapshot`, so that they are said
+            // even when they are zero.
+            extras: ffi::FORMATTER_EXTRA_MODES
+                | ffi::FORMATTER_EXTRA_PWD
+                | ffi::FORMATTER_EXTRA_KEYBOARD
+                | ffi::FORMATTER_EXTRA_CURSOR
+                | ffi::FORMATTER_EXTRA_STYLE
+                | ffi::FORMATTER_EXTRA_HYPERLINK,
+            selection: None,
+        })
     }
 
-    fn format_with(&self, options: ffi::FormatterOptions) -> Result<Vec<u8>, Error> {
+    pub(crate) fn format_with(&self, options: &FormatOptions) -> Result<Vec<u8>, Error> {
         let mut formatter: ffi::Formatter = std::ptr::null_mut();
-        let rc = unsafe {
-            ffi::ghostty_formatter_terminal_new(
-                std::ptr::null(),
-                &mut formatter,
-                self.raw,
-                options,
-            )
-        };
+        let rc = unsafe { ffi::ghostty_formatter_terminal_new(std::ptr::null(), &mut formatter, self.raw) };
         if rc != ffi::SUCCESS {
             return Err(Error(rc));
+        }
+        let out = Self::run_formatter(formatter, options);
+        unsafe { ffi::ghostty_formatter_free(formatter) };
+        out
+    }
+
+    fn run_formatter(formatter: ffi::Formatter, options: &FormatOptions) -> Result<Vec<u8>, Error> {
+        let set = |option: c_int, value: *const c_void| {
+            let rc = unsafe { ffi::ghostty_formatter_set(formatter, option, value) };
+            if rc == ffi::SUCCESS { Ok(()) } else { Err(Error(rc)) }
+        };
+        set(ffi::FORMATTER_OPT_EMIT, &options.emit as *const c_int as *const c_void)?;
+        set(ffi::FORMATTER_OPT_UNWRAP, &options.unwrap as *const bool as *const c_void)?;
+        set(ffi::FORMATTER_OPT_TRIM, &options.trim as *const bool as *const c_void)?;
+        set(ffi::FORMATTER_OPT_EXTRAS, &options.extras as *const u32 as *const c_void)?;
+        if let Some(selection) = options.selection.as_ref() {
+            set(ffi::FORMATTER_OPT_SELECTION, selection as *const ffi::Selection as *const c_void)?;
         }
 
         let mut ptr: *mut u8 = std::ptr::null_mut();
         let mut len: usize = 0;
-        let rc =
-            unsafe { ffi::ghostty_formatter_format_alloc(formatter, std::ptr::null(), &mut ptr, &mut len) };
+        let rc = unsafe { ffi::ghostty_formatter_format_alloc(formatter, std::ptr::null(), &mut ptr, &mut len) };
         if rc != ffi::SUCCESS {
-            unsafe { ffi::ghostty_formatter_free(formatter) };
             return Err(Error(rc));
         }
-
         // Nothing to say comes back as no allocation at all, and a slice may
         // not be made from a null pointer even when it is empty.
         if ptr.is_null() || len == 0 {
-            unsafe { ffi::ghostty_formatter_free(formatter) };
             return Ok(Vec::new());
         }
         let out = unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec();
-        unsafe {
-            ffi::ghostty_free(std::ptr::null(), ptr, len);
-            ffi::ghostty_formatter_free(formatter);
-        }
+        unsafe { ffi::ghostty_free(std::ptr::null(), ptr, len) };
         Ok(out)
     }
 
@@ -1374,46 +1327,6 @@ mod tests {
         }
 
         assert_eq!(whole.text().unwrap(), chunked.text().unwrap());
-    }
-}
-
-/// Layout guards.
-///
-/// These structs are passed to C **by value**, so a field added upstream
-/// silently corrupts every call. libghostty-vt has no stable ABI yet, so the
-/// sizes are pinned here on purpose: when you re-vendor the library and these
-/// fail, re-read the headers before touching the numbers.
-///
-/// Re-derive with:
-/// ```sh
-/// printf '#include <ghostty/vt.h>\n#include <stdio.h>\nint main(void){printf("%zu %zu %zu\\n",\
-/// sizeof(GhosttyFormatterScreenExtra),sizeof(GhosttyFormatterTerminalExtra),\
-/// sizeof(GhosttyFormatterTerminalOptions));}' > /tmp/s.c && \
-///   cc /tmp/s.c -Ivendor/libghostty-vt/include \
-///      vendor/libghostty-vt/libghostty-vt.a -o /tmp/s && /tmp/s
-/// ```
-#[cfg(test)]
-mod abi {
-    use super::ffi;
-
-    #[test]
-    fn struct_sizes_match_c_headers() {
-        assert_eq!(std::mem::size_of::<ffi::ScreenExtra>(), 16, "ScreenExtra");
-        assert_eq!(std::mem::size_of::<ffi::TerminalExtra>(), 32, "TerminalExtra");
-        assert_eq!(std::mem::size_of::<ffi::FormatterOptions>(), 56, "FormatterOptions");
-        assert_eq!(std::mem::size_of::<ffi::GridRef>(), 24, "GridRef");
-        assert_eq!(std::mem::size_of::<ffi::Point>(), 24, "Point");
-        assert_eq!(std::mem::size_of::<ffi::Selection>(), 64, "Selection");
-        assert_eq!(std::mem::size_of::<ffi::ColorRgb>(), 3, "ColorRgb");
-        assert_eq!(std::mem::size_of::<ffi::DeviceAttributes>(), 160, "DeviceAttributes");
-        assert_eq!(std::mem::size_of::<ffi::SizeReportSize>(), 12, "SizeReportSize");
-        assert_eq!(std::mem::size_of::<ffi::ClipboardContent>(), 32, "ClipboardContent");
-        assert_eq!(std::mem::size_of::<ffi::ClipboardWrite>(), 72, "ClipboardWrite");
-        assert_eq!(std::mem::size_of::<ffi::ClipboardRead>(), 80, "ClipboardRead");
-        assert_eq!(std::mem::size_of::<ffi::StyleColor>(), 16, "StyleColor");
-        assert_eq!(std::mem::size_of::<ffi::Style>(), 72, "Style");
-        assert_eq!(std::mem::size_of::<ffi::ClipboardReadReply>(), 56, "ClipboardReadReply");
-        assert_eq!(std::mem::size_of::<ffi::ClipboardWriteReply>(), 16, "ClipboardWriteReply");
     }
 }
 

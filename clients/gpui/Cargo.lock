@@ -2851,6 +2851,9 @@ dependencies = [
 [[package]]
 name = "keep-vt"
 version = "0.0.1"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "khronos-egl"

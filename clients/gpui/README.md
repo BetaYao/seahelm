@@ -15,7 +15,7 @@ column on the left, the selected worktree's terminal on the right.
 ## Run
 
 ```sh
-export KEEP_GHOSTTY_VT_DIR=~/.cache/seahelm/libghostty-vt/<commit>-aarch64-macos
+export KEEP_GHOSTTY_VT_DIR=~/.cache/seahelm/libghostty-vt/vt-<version>-aarch64-macos
 (cd ../../seahelmd && cargo build --release -p seahelmd)
 cargo build --release
 

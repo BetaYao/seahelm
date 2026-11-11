@@ -4,25 +4,25 @@
 //! mouse-reporting mode and format come out as Ghostty writes them.
 
 use std::ffi::c_void;
-use std::os::raw::{c_char, c_int};
+use std::os::raw::c_int;
 
 use crate::{ffi, Error, Terminal};
 
-mod raw {
+pub(crate) mod raw {
     use std::ffi::c_void;
-    use std::os::raw::{c_char, c_int};
+    use std::os::raw::c_int;
 
     pub type KeyEncoder = *mut c_void;
     pub type KeyEvent = *mut c_void;
     pub type MouseEncoder = *mut c_void;
     pub type MouseEvent = *mut c_void;
 
-    pub const KEY_OPT_MACOS_OPTION_AS_ALT: c_int = 6;
+    pub const KEY_OPT_MACOS_OPTION_AS_ALT: c_int = 7;
     pub const OPTION_AS_ALT_TRUE: c_int = 1;
 
-    pub const MOUSE_OPT_SIZE: c_int = 2;
-    pub const MOUSE_OPT_ANY_BUTTON_PRESSED: c_int = 3;
-    pub const MOUSE_OPT_TRACK_LAST_CELL: c_int = 4;
+    pub const MOUSE_OPT_SIZE: c_int = 3;
+    pub const MOUSE_OPT_ANY_BUTTON_PRESSED: c_int = 4;
+    pub const MOUSE_OPT_TRACK_LAST_CELL: c_int = 5;
 
     /// `GhosttyMouseEncoderSize` (40 bytes).
     #[repr(C)]
@@ -45,47 +45,50 @@ mod raw {
         pub y: f32,
     }
 
+    // The setters answer GHOSTTY_SUCCESS for every value passed here (an
+    // option or a value they do not know is the only failure), so their
+    // results are not read.
     extern "C" {
         pub fn ghostty_key_encoder_new(allocator: *const c_void, out: *mut KeyEncoder) -> c_int;
         pub fn ghostty_key_encoder_free(encoder: KeyEncoder);
-        pub fn ghostty_key_encoder_setopt(encoder: KeyEncoder, option: c_int, value: *const c_void);
-        pub fn ghostty_key_encoder_setopt_from_terminal(encoder: KeyEncoder, terminal: super::ffi::Terminal);
+        pub fn ghostty_key_encoder_set(encoder: KeyEncoder, option: c_int, value: *const c_void) -> c_int;
+        pub fn ghostty_key_encoder_set_from_terminal(encoder: KeyEncoder, terminal: super::ffi::Terminal) -> c_int;
         pub fn ghostty_key_encoder_encode(
             encoder: KeyEncoder,
             event: KeyEvent,
-            out: *mut c_char,
-            out_size: usize,
-            out_len: *mut usize,
+            buf: *mut u8,
+            buf_len: usize,
+            out_written: *mut usize,
         ) -> c_int;
 
         pub fn ghostty_key_event_new(allocator: *const c_void, out: *mut KeyEvent) -> c_int;
         pub fn ghostty_key_event_free(event: KeyEvent);
-        pub fn ghostty_key_event_set_action(event: KeyEvent, action: c_int);
-        pub fn ghostty_key_event_set_key(event: KeyEvent, key: c_int);
-        pub fn ghostty_key_event_set_mods(event: KeyEvent, mods: u16);
-        pub fn ghostty_key_event_set_consumed_mods(event: KeyEvent, mods: u16);
-        pub fn ghostty_key_event_set_utf8(event: KeyEvent, utf8: *const c_char, len: usize);
-        pub fn ghostty_key_event_set_unshifted_codepoint(event: KeyEvent, codepoint: u32);
+        pub fn ghostty_key_event_set_action(event: KeyEvent, action: c_int) -> c_int;
+        pub fn ghostty_key_event_set_key(event: KeyEvent, key: c_int) -> c_int;
+        pub fn ghostty_key_event_set_mods(event: KeyEvent, mods: u16) -> c_int;
+        pub fn ghostty_key_event_set_consumed_mods(event: KeyEvent, mods: u16) -> c_int;
+        pub fn ghostty_key_event_set_utf8(event: KeyEvent, utf8: super::ffi::GhosttyString) -> c_int;
+        pub fn ghostty_key_event_set_unshifted_codepoint(event: KeyEvent, codepoint: u32) -> c_int;
 
         pub fn ghostty_mouse_encoder_new(allocator: *const c_void, out: *mut MouseEncoder) -> c_int;
         pub fn ghostty_mouse_encoder_free(encoder: MouseEncoder);
-        pub fn ghostty_mouse_encoder_setopt(encoder: MouseEncoder, option: c_int, value: *const c_void);
-        pub fn ghostty_mouse_encoder_setopt_from_terminal(encoder: MouseEncoder, terminal: super::ffi::Terminal);
+        pub fn ghostty_mouse_encoder_set(encoder: MouseEncoder, option: c_int, value: *const c_void) -> c_int;
+        pub fn ghostty_mouse_encoder_set_from_terminal(encoder: MouseEncoder, terminal: super::ffi::Terminal) -> c_int;
         pub fn ghostty_mouse_encoder_encode(
             encoder: MouseEncoder,
             event: MouseEvent,
-            out: *mut c_char,
-            out_size: usize,
-            out_len: *mut usize,
+            buf: *mut u8,
+            buf_len: usize,
+            out_written: *mut usize,
         ) -> c_int;
 
         pub fn ghostty_mouse_event_new(allocator: *const c_void, out: *mut MouseEvent) -> c_int;
         pub fn ghostty_mouse_event_free(event: MouseEvent);
-        pub fn ghostty_mouse_event_set_action(event: MouseEvent, action: c_int);
-        pub fn ghostty_mouse_event_set_button(event: MouseEvent, button: c_int);
-        pub fn ghostty_mouse_event_clear_button(event: MouseEvent);
-        pub fn ghostty_mouse_event_set_mods(event: MouseEvent, mods: u16);
-        pub fn ghostty_mouse_event_set_position(event: MouseEvent, position: MousePosition);
+        pub fn ghostty_mouse_event_set_action(event: MouseEvent, action: c_int) -> c_int;
+        pub fn ghostty_mouse_event_set_button(event: MouseEvent, button: c_int) -> c_int;
+        pub fn ghostty_mouse_event_clear_button(event: MouseEvent) -> c_int;
+        pub fn ghostty_mouse_event_set_mods(event: MouseEvent, mods: u16) -> c_int;
+        pub fn ghostty_mouse_event_set_position(event: MouseEvent, position: MousePosition) -> c_int;
     }
 }
 
@@ -108,14 +111,29 @@ pub struct Mods {
 }
 
 impl Mods {
-    fn bits(self) -> u16 {
+    /// `GhosttyMods`.
+    pub(crate) const fn bits(self) -> u16 {
         (self.shift as u16) | (self.ctrl as u16) << 1 | (self.alt as u16) << 2 | (self.super_ as u16) << 3
+    }
+
+    const NONE: Mods = Mods { shift: false, ctrl: false, alt: false, super_: false };
+    pub(crate) const fn only_shift() -> Mods {
+        Mods { shift: true, ..Self::NONE }
+    }
+    pub(crate) const fn only_ctrl() -> Mods {
+        Mods { ctrl: true, ..Self::NONE }
+    }
+    pub(crate) const fn only_alt() -> Mods {
+        Mods { alt: true, ..Self::NONE }
+    }
+    pub(crate) const fn only_super_() -> Mods {
+        Mods { super_: true, ..Self::NONE }
     }
 }
 
 /// `GhosttyKey`: a physical key (W3C UI Events code), by value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Key(c_int);
+pub struct Key(pub(crate) c_int);
 
 impl Key {
     pub const UNIDENTIFIED: Key = Key(0);
@@ -235,11 +253,11 @@ impl KeyEncoder {
     /// modifier).
     pub fn encode(&mut self, terminal: &Terminal, input: &KeyInput) -> Vec<u8> {
         unsafe {
-            raw::ghostty_key_encoder_setopt_from_terminal(self.raw, terminal.raw);
+            raw::ghostty_key_encoder_set_from_terminal(self.raw, terminal.raw);
             // Option is alt, as the client has always treated it (and the
             // macOS app's `macos-option-as-alt`); reset by the call above.
             let as_alt: c_int = raw::OPTION_AS_ALT_TRUE;
-            raw::ghostty_key_encoder_setopt(
+            raw::ghostty_key_encoder_set(
                 self.raw,
                 raw::KEY_OPT_MACOS_OPTION_AS_ALT,
                 &as_alt as *const c_int as *const c_void,
@@ -250,12 +268,11 @@ impl KeyEncoder {
             // Shift is what turned the text into what it is.
             let consumed = if input.mods.shift && input.text.is_some() { 1 } else { 0 };
             raw::ghostty_key_event_set_consumed_mods(self.event, consumed);
-            match input.text {
-                Some(t) if !t.is_empty() => {
-                    raw::ghostty_key_event_set_utf8(self.event, t.as_ptr() as *const c_char, t.len())
-                }
-                _ => raw::ghostty_key_event_set_utf8(self.event, std::ptr::null(), 0),
-            }
+            let text = match input.text {
+                Some(t) if !t.is_empty() => ffi::GhosttyString { ptr: t.as_ptr(), len: t.len() },
+                _ => ffi::GhosttyString { ptr: std::ptr::null(), len: 0 },
+            };
+            raw::ghostty_key_event_set_utf8(self.event, text);
             raw::ghostty_key_event_set_unshifted_codepoint(self.event, input.unshifted.map_or(0, |c| c as u32));
         }
         encode_with(|buf, len, out| unsafe { raw::ghostty_key_encoder_encode(self.raw, self.event, buf, len, out) })
@@ -340,7 +357,7 @@ impl MouseEncoder {
         }
         let track = true;
         unsafe {
-            raw::ghostty_mouse_encoder_setopt(raw, raw::MOUSE_OPT_TRACK_LAST_CELL, &track as *const bool as *const c_void)
+            raw::ghostty_mouse_encoder_set(raw, raw::MOUSE_OPT_TRACK_LAST_CELL, &track as *const bool as *const c_void)
         };
         Ok(Self { raw, event })
     }
@@ -360,9 +377,9 @@ impl MouseEncoder {
             padding_left: geometry.padding,
         };
         unsafe {
-            raw::ghostty_mouse_encoder_setopt_from_terminal(self.raw, terminal.raw);
-            raw::ghostty_mouse_encoder_setopt(self.raw, raw::MOUSE_OPT_SIZE, &size as *const raw::MouseSize as *const c_void);
-            raw::ghostty_mouse_encoder_setopt(
+            raw::ghostty_mouse_encoder_set_from_terminal(self.raw, terminal.raw);
+            raw::ghostty_mouse_encoder_set(self.raw, raw::MOUSE_OPT_SIZE, &size as *const raw::MouseSize as *const c_void);
+            raw::ghostty_mouse_encoder_set(
                 self.raw,
                 raw::MOUSE_OPT_ANY_BUTTON_PRESSED,
                 &input.any_pressed as *const bool as *const c_void,
@@ -371,7 +388,7 @@ impl MouseEncoder {
             match input.button {
                 Some(b) => raw::ghostty_mouse_event_set_button(self.event, b as c_int),
                 None => raw::ghostty_mouse_event_clear_button(self.event),
-            }
+            };
             raw::ghostty_mouse_event_set_mods(self.event, input.mods.bits());
             raw::ghostty_mouse_event_set_position(self.event, raw::MousePosition { x: input.x, y: input.y });
         }
@@ -389,15 +406,15 @@ impl Drop for MouseEncoder {
 }
 
 /// Run an encoder into a stack buffer, retrying with the size it asks for.
-fn encode_with(mut f: impl FnMut(*mut c_char, usize, *mut usize) -> c_int) -> Vec<u8> {
+fn encode_with(mut f: impl FnMut(*mut u8, usize, *mut usize) -> c_int) -> Vec<u8> {
     let mut buf = [0u8; 128];
     let mut len = 0usize;
-    match f(buf.as_mut_ptr() as *mut c_char, buf.len(), &mut len) {
+    match f(buf.as_mut_ptr(), buf.len(), &mut len) {
         ffi::SUCCESS => buf[..len.min(buf.len())].to_vec(),
         ffi::OUT_OF_SPACE if len > 0 => {
             let mut big = vec![0u8; len];
             let mut got = 0usize;
-            if f(big.as_mut_ptr() as *mut c_char, big.len(), &mut got) == ffi::SUCCESS {
+            if f(big.as_mut_ptr(), big.len(), &mut got) == ffi::SUCCESS {
                 big.truncate(got);
                 big
             } else {

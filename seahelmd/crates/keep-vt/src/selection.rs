@@ -11,7 +11,7 @@ use std::os::raw::c_int;
 
 use crate::{ffi, Error, Terminal};
 
-mod raw {
+pub(crate) mod raw {
     use std::ffi::c_void;
     use std::os::raw::c_int;
 
@@ -38,7 +38,7 @@ mod raw {
     }
     pub const DATA_SCROLLBAR: c_int = 9;
     pub const DATA_SELECTION: c_int = 31;
-    pub const OPT_SELECTION: c_int = 21;
+    pub const OPT_SELECTION: c_int = 22;
 
     pub const POINT_TAG_VIEWPORT: c_int = 1;
 
@@ -63,29 +63,19 @@ mod raw {
     pub const EVENT_DRAG: c_int = 2;
     pub const EVENT_AUTOSCROLL_TICK: c_int = 3;
 
-    pub const EV_REF: c_int = 0;
-    pub const EV_POSITION: c_int = 1;
-    pub const EV_REPEAT_DISTANCE: c_int = 2;
-    pub const EV_TIME_NS: c_int = 3;
-    pub const EV_REPEAT_INTERVAL_NS: c_int = 4;
-    pub const EV_RECTANGLE: c_int = 7;
-    pub const EV_GEOMETRY: c_int = 8;
-    pub const EV_VIEWPORT: c_int = 9;
+    pub const EV_REF: c_int = 1;
+    pub const EV_POSITION: c_int = 2;
+    pub const EV_REPEAT_DISTANCE: c_int = 3;
+    pub const EV_TIME_NS: c_int = 4;
+    pub const EV_REPEAT_INTERVAL_NS: c_int = 5;
+    pub const EV_RECTANGLE: c_int = 8;
+    pub const EV_GEOMETRY: c_int = 9;
+    pub const EV_VIEWPORT: c_int = 10;
 
-    pub const GESTURE_DATA_AUTOSCROLL: c_int = 2;
-
-    /// `GhosttyTerminalSelectionFormatOptions`.
-    #[repr(C)]
-    pub struct FormatOptions {
-        pub size: usize,
-        pub emit: c_int,
-        pub unwrap: bool,
-        pub trim: bool,
-        pub selection: *const c_void,
-    }
+    pub const GESTURE_DATA_AUTOSCROLL: c_int = 3;
 
     extern "C" {
-        pub fn ghostty_terminal_scroll_viewport(terminal: super::ffi::Terminal, behavior: ScrollViewport);
+        pub fn ghostty_terminal_scroll_viewport(terminal: super::ffi::Terminal, behavior: ScrollViewport) -> c_int;
         pub fn ghostty_selection_gesture_new(allocator: *const c_void, out: *mut Gesture) -> c_int;
         pub fn ghostty_selection_gesture_free(gesture: Gesture, terminal: super::ffi::Terminal);
         pub fn ghostty_selection_gesture_reset(gesture: Gesture, terminal: super::ffi::Terminal);
@@ -103,13 +93,6 @@ mod raw {
             terminal: super::ffi::Terminal,
             event: Event,
             out: *mut super::ffi::Selection,
-        ) -> c_int;
-        pub fn ghostty_terminal_selection_format_alloc(
-            terminal: super::ffi::Terminal,
-            allocator: *const c_void,
-            options: FormatOptions,
-            out_ptr: *mut *mut u8,
-            out_len: *mut usize,
         ) -> c_int;
     }
 }
@@ -227,7 +210,7 @@ impl Terminal {
             tag: raw::POINT_TAG_VIEWPORT,
             value: ffi::PointValue { coordinate: ffi::PointCoordinate { x: col, y: row as u32 } },
         };
-        let mut r = ffi::GridRef { size: std::mem::size_of::<ffi::GridRef>(), node: std::ptr::null_mut(), x: 0, y: 0 };
+        let mut r = empty_ref();
         let rc = unsafe { ffi::ghostty_terminal_grid_ref(self.raw, point, &mut r) };
         (rc == ffi::SUCCESS && !r.node.is_null()).then_some(r)
     }
@@ -255,12 +238,7 @@ impl Terminal {
     /// terminal's.
     fn apply(&mut self, event: &Event) -> Result<(), Error> {
         let g = self.gesture()?;
-        let mut sel = ffi::Selection {
-            size: std::mem::size_of::<ffi::Selection>(),
-            start: empty_ref(),
-            end: empty_ref(),
-            rectangle: false,
-        };
+        let mut sel = ffi::Selection { start: empty_ref(), end: empty_ref(), rectangle: false };
         let rc = unsafe { raw::ghostty_selection_gesture_event(g, self.raw, event.0, &mut sel) };
         match rc {
             ffi::SUCCESS => {
@@ -340,38 +318,30 @@ impl Terminal {
     }
 
     pub fn has_selection(&self) -> bool {
-        let mut sel = ffi::Selection {
-            size: std::mem::size_of::<ffi::Selection>(),
-            start: empty_ref(),
-            end: empty_ref(),
-            rectangle: false,
-        };
+        self.selection().is_some()
+    }
+
+    /// The terminal's selection, if there is one.
+    fn selection(&self) -> Option<ffi::Selection> {
+        let mut sel = ffi::Selection { start: empty_ref(), end: empty_ref(), rectangle: false };
         let rc = unsafe { ffi::ghostty_terminal_get(self.raw, raw::DATA_SELECTION, &mut sel as *mut _ as *mut c_void) };
-        rc == ffi::SUCCESS
+        (rc == ffi::SUCCESS).then_some(sel)
     }
 
     /// The selection as text for the clipboard: soft wraps joined, trailing
     /// blanks trimmed (Ghostty's copy). None when nothing is selected.
     pub fn selection_text(&self) -> Option<String> {
-        let options = raw::FormatOptions {
-            size: std::mem::size_of::<raw::FormatOptions>(),
-            emit: ffi::FORMAT_PLAIN,
-            unwrap: true,
-            trim: true,
-            selection: std::ptr::null(),
-        };
-        let mut ptr: *mut u8 = std::ptr::null_mut();
-        let mut len = 0usize;
-        let rc = unsafe { raw::ghostty_terminal_selection_format_alloc(self.raw, std::ptr::null(), options, &mut ptr, &mut len) };
-        if rc != ffi::SUCCESS {
-            return None;
-        }
-        if ptr.is_null() || len == 0 {
-            return Some(String::new());
-        }
-        let text = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(ptr, len) }).into_owned();
-        unsafe { ffi::ghostty_free(std::ptr::null(), ptr, len) };
-        Some(text)
+        let selection = self.selection()?;
+        let bytes = self
+            .format_with(&crate::FormatOptions {
+                emit: ffi::FORMAT_PLAIN,
+                unwrap: true,
+                trim: true,
+                extras: 0,
+                selection: Some(selection),
+            })
+            .ok()?;
+        Some(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     /// Called from `Drop`: the gesture holds tracked references into the
@@ -383,10 +353,10 @@ impl Terminal {
     }
 }
 
-const NO_VALUE: c_int = -4;
+pub(crate) const NO_VALUE: c_int = -4;
 
 fn empty_ref() -> ffi::GridRef {
-    ffi::GridRef { size: std::mem::size_of::<ffi::GridRef>(), node: std::ptr::null_mut(), x: 0, y: 0 }
+    ffi::GridRef { node: std::ptr::null_mut(), x: 0, y: 0 }
 }
 
 fn raw_geometry(g: Geometry) -> raw::Geometry {

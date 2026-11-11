@@ -314,49 +314,60 @@ impl Terminal {
         out
     }
 
+    /// The formatter's words about the cursor, from its first CUP on, in
+    /// the shape everything here reads: the place counted from the screen's
+    /// top left, and a cursor waiting to wrap over an empty cell left to
+    /// `waiting_at_the_margin` and `saved_cursor`.
+    ///
+    /// With the modes and the margins in the words (`relative`) and origin
+    /// mode on, the formatter counts the place from the margins' top left,
+    /// as origin mode reads it, and cannot say one above or left of them;
+    /// the row is the terminal's, the column the formatter's moved back by
+    /// the left margin. Over an empty cell it makes the cursor wait by
+    /// writing a space, saving the cursor (ESC 7), erasing the space and
+    /// putting the cursor back — which would take the place of the cursor
+    /// the program saved, said before these words.
+    fn screen_cursor(&self, words: &[u8], relative: bool) -> Vec<u8> {
+        let Some(at) = first_cursor_position(words) else { return words.to_vec() };
+        let end = at + words[at..].iter().position(|&b| b == b'H').map_or(0, |i| i + 1);
+        let mut out = words[..at].to_vec();
+        let cup = &words[at..end];
+        match cup_place(cup) {
+            Some((_, column)) if relative && self.dec_mode(6) => {
+                let left = left_margin_in(&words[..at]);
+                let (x, y) = self.cursor();
+                let column = if x + 1 < left { x + 1 } else { column + left - 1 };
+                out.extend_from_slice(format!("\x1b[{};{}H", y + 1, column).as_bytes());
+            }
+            _ => out.extend_from_slice(cup),
+        }
+        let rest = &words[end..];
+        out.extend_from_slice(rest.strip_prefix(WAIT_OVER_NOTHING).unwrap_or(rest));
+        out
+    }
+
     /// The cursor in use as the formatter says it — its place, the pen it
     /// writes with, its protection, the character sets — without the screen:
     /// formatted from one cell, the bottom left.
     fn cursor_state(&self) -> Option<Vec<u8>> {
         let rows = self.size().1;
         let cell = self.cell(0, rows.saturating_sub(1))?;
-        let selection = ffi::Selection {
-            size: std::mem::size_of::<ffi::Selection>(),
-            start: cell,
-            end: cell,
-            rectangle: false,
-        };
-        let screen = ffi::ScreenExtra {
-            size: std::mem::size_of::<ffi::ScreenExtra>(),
-            cursor: true,
-            style: true,
-            hyperlink: false,
-            protection: true,
-            kitty_keyboard: false,
-            charsets: true,
-        };
-        let options = ffi::FormatterOptions {
-            size: std::mem::size_of::<ffi::FormatterOptions>(),
-            emit: ffi::FORMAT_VT,
-            unwrap: false,
-            trim: false,
-            extra: ffi::TerminalExtra {
-                size: std::mem::size_of::<ffi::TerminalExtra>(),
-                palette: false,
-                modes: false,
-                scrolling_region: false,
-                tabstops: false,
-                pwd: false,
-                keyboard: false,
-                screen,
-            },
-            selection: &selection as *const ffi::Selection as *const c_void,
-        };
-        let formatted = self.format_with(options).ok()?;
+        let formatted = self
+            .format_with(&crate::FormatOptions {
+                emit: ffi::FORMAT_VT,
+                unwrap: false,
+                trim: false,
+                extras: ffi::FORMATTER_EXTRA_CURSOR
+                    | ffi::FORMATTER_EXTRA_STYLE
+                    | ffi::FORMATTER_EXTRA_PROTECTION
+                    | ffi::FORMATTER_EXTRA_CHARSETS,
+                selection: Some(ffi::Selection { start: cell, end: cell, rectangle: false }),
+            })
+            .ok()?;
         // The cell's own text first, if it has any; the cursor from its
         // place on.
         let at = first_cursor_position(&formatted)?;
-        Some(formatted[at..].to_vec())
+        Some(self.screen_cursor(&formatted[at..], false))
     }
 
     /// Modes a Ghostty surface starts with set where this library starts with
@@ -377,15 +388,16 @@ impl Terminal {
     /// screen's part may, written before the alternate screen is anything;
     /// the alternate screen's may not, the main screen's being the program's.
     fn screen_handover(&self, scratch: bool) -> ScreenPart {
-        let extras = self.format_with(self.options(true)).unwrap_or_default();
-        let rows = self.format_with(self.options(false)).unwrap_or_default();
+        let extras = self.format_with(&self.options(true)).unwrap_or_default();
+        let rows = self.format_with(&self.options(false)).unwrap_or_default();
         let lead = leading_modes(&extras);
         let modes = without_screen_switches(&extras[..lead]);
-        // The formatter leaves out the blank rows at the bottom. Replayed
-        // without them, a screen with history ends one row short for each:
-        // its last line lands on the bottom row, where the cursor is put back
-        // — on that line, for the next output to overwrite, rather than on
-        // the blank row below it.
+        // Every row down to the bottom, blank ones included: replayed
+        // without the blank rows at the bottom, a screen with history ends
+        // one row short for each — its last line lands on the bottom row,
+        // where the cursor is put back, on that line, for the next output to
+        // overwrite. libghostty-vt 1.0 writes them; any it leaves out are
+        // added here.
         // A screen with nothing on it is written as no rows, and its first
         // row is there all the same.
         let trailing = self.total_rows().saturating_sub(split_rows(&rows).len().max(1));
@@ -400,7 +412,7 @@ impl Terminal {
                 written
             });
             let mut rest = modes;
-            let tail = self.waiting_at_the_margin(&extras[lead + rows.len()..]);
+            let tail = self.waiting_at_the_margin(&self.screen_cursor(&extras[lead + rows.len()..], true));
             let tail = tail.as_slice();
             let size = self.size();
             match placement(tail, size) {
@@ -427,32 +439,26 @@ impl Terminal {
     /// alone. The palette is left out (it would be all 256 colours, the
     /// unchanged ones overriding the theme of whoever replays it; see
     /// `colour_overrides`), and so are the Kitty flags, said with their stack.
-    fn options(&self, extras: bool) -> ffi::FormatterOptions {
-        let screen = ffi::ScreenExtra {
-            size: std::mem::size_of::<ffi::ScreenExtra>(),
-            cursor: extras,
-            style: extras,
-            hyperlink: extras,
-            protection: extras,
-            kitty_keyboard: false,
-            charsets: extras,
-        };
-        ffi::FormatterOptions {
-            size: std::mem::size_of::<ffi::FormatterOptions>(),
+    fn options(&self, extras: bool) -> crate::FormatOptions {
+        crate::FormatOptions {
             emit: ffi::FORMAT_VT,
             unwrap: false,
             trim: false,
-            extra: ffi::TerminalExtra {
-                size: std::mem::size_of::<ffi::TerminalExtra>(),
-                palette: false,
-                modes: extras,
-                scrolling_region: extras,
-                tabstops: extras,
-                pwd: extras,
-                keyboard: extras,
-                screen,
+            extras: if extras {
+                ffi::FORMATTER_EXTRA_CURSOR
+                    | ffi::FORMATTER_EXTRA_STYLE
+                    | ffi::FORMATTER_EXTRA_HYPERLINK
+                    | ffi::FORMATTER_EXTRA_PROTECTION
+                    | ffi::FORMATTER_EXTRA_CHARSETS
+                    | ffi::FORMATTER_EXTRA_MODES
+                    | ffi::FORMATTER_EXTRA_SCROLLING_REGION
+                    | ffi::FORMATTER_EXTRA_TABSTOPS
+                    | ffi::FORMATTER_EXTRA_PWD
+                    | ffi::FORMATTER_EXTRA_KEYBOARD
+            } else {
+                0
             },
-            selection: std::ptr::null(),
+            selection: None,
         }
     }
 
@@ -628,25 +634,11 @@ impl Terminal {
             return true;
         }
         let style = Self::style(cell);
-        style.bg.tag != 0 || style.inverse || style.underline != 0 || style.strikethrough || style.overline
+        style.bg.tag != 0 || style.inverse() || style.underline() != 0 || style.strikethrough() || style.overline()
     }
 
     fn style(cell: &ffi::GridRef) -> ffi::Style {
-        let mut style = ffi::Style {
-            size: std::mem::size_of::<ffi::Style>(),
-            fg: ffi::StyleColor { tag: 0, value: ffi::StyleColorValue { padding: 0 } },
-            bg: ffi::StyleColor { tag: 0, value: ffi::StyleColorValue { padding: 0 } },
-            underline_color: ffi::StyleColor { tag: 0, value: ffi::StyleColorValue { padding: 0 } },
-            bold: false,
-            italic: false,
-            faint: false,
-            blink: false,
-            inverse: false,
-            invisible: false,
-            strikethrough: false,
-            overline: false,
-            underline: 0,
-        };
+        let mut style = ffi::Style::blank();
         unsafe { ffi::ghostty_grid_ref_style(cell, &mut style) };
         style
     }
@@ -691,7 +683,6 @@ impl Terminal {
             value: ffi::PointValue { coordinate: ffi::PointCoordinate { x, y } },
         };
         let mut cell = ffi::GridRef {
-            size: std::mem::size_of::<ffi::GridRef>(),
             node: std::ptr::null_mut(),
             x: 0,
             y: 0,
@@ -998,6 +989,41 @@ fn without_screen_switches(modes: &[u8]) -> Vec<u8> {
     out
 }
 
+/// How the formatter makes the cursor wait to wrap over an empty cell, right
+/// after moving it there (`Terminal::screen_cursor`).
+const WAIT_OVER_NOTHING: &[u8] = b" \x1b7\x1b[X\x1b8";
+
+/// The row and column a CUP names, from 1.
+fn cup_place(cup: &[u8]) -> Option<(u16, u16)> {
+    let params = cup.strip_prefix(b"\x1b[")?.strip_suffix(b"H")?;
+    let (row, column) = std::str::from_utf8(params).ok()?.split_once(';')?;
+    Some((row.parse().ok()?, column.parse().ok()?))
+}
+
+/// The left margin (from 1) the last DECSLRM in `words` sets; 1 where none
+/// does.
+fn left_margin_in(words: &[u8]) -> u16 {
+    let first = |params: &[u8]| -> Option<u16> { std::str::from_utf8(params).ok()?.split_once(';')?.0.parse().ok() };
+    let mut left = 1u16;
+    let mut at = 0;
+    while at + 1 < words.len() {
+        if words[at] != 0x1b || words[at + 1] != b'[' {
+            at += 1;
+            continue;
+        }
+        let mut end = at + 2;
+        while end < words.len() && (0x20..=0x3f).contains(&words[end]) {
+            end += 1;
+        }
+        let params = &words[at + 2..end.min(words.len())];
+        if words.get(end) == Some(&b's') {
+            left = first(params).unwrap_or(left);
+        }
+        at = end + 1;
+    }
+    left
+}
+
 /// Where the first CUP (`CSI row ; column H`) in `bytes` starts.
 fn first_cursor_position(bytes: &[u8]) -> Option<usize> {
     let mut at = 0;
@@ -1131,9 +1157,9 @@ fn without_origin(modes: &[u8]) -> Vec<u8> {
 
 /// The formatter's last words about a screen — the margins, then where the
 /// cursor is — with the cursor's place counted from the top left of the
-/// margins, as origin mode reads it. The formatter counts it from the
-/// screen's, as if origin mode were off, and a program with its margins
-/// set and origin mode on got its cursor back that many rows and columns
+/// margins, as origin mode reads it. Here it is counted from the screen's
+/// (`Terminal::screen_cursor`), and a program with its margins set and
+/// origin mode on would get its cursor back that many rows and columns
 /// further down and along.
 fn within_margins(tail: &[u8]) -> Vec<u8> {
     let pair = |params: &[u8]| -> Option<(u16, u16)> {
@@ -1373,10 +1399,10 @@ mod tests {
                     "[{ch}{} fg{} bg{bg} u{}{}{}{} {uri}]",
                     facts.wide,
                     colour(style.fg),
-                    style.underline,
-                    style.inverse as u8,
-                    style.strikethrough as u8,
-                    style.overline as u8
+                    style.underline(),
+                    style.inverse() as u8,
+                    style.strikethrough() as u8,
+                    style.overline() as u8
                 ));
             }
             out.push(row);
@@ -1416,10 +1442,9 @@ mod tests {
         assert_eq!(link_at(&fresh, 14, linked), "https://x.y/");
         assert_eq!(link_at(&fresh, 10, linked), "", "the gap between them is no link");
         assert_eq!(fresh.cursor(), t.cursor());
-        let red = |t: &Terminal| {
-            String::from_utf8_lossy(&t.snapshot(Format::Vt).unwrap()).contains("\x1b[38;5;1mred")
-        };
-        assert!(red(&fresh), "the colours come back");
+        // Every cell as drawn, its colours included: the red line in the
+        // history among them.
+        assert_eq!(cells(&fresh), cells(&t), "the colours come back");
     }
 
     /// A program on the alternate screen, over a shell with history: its

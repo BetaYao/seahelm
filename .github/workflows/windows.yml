@@ -1,7 +1,7 @@
 name: Windows
 
 # The Rust workspace (seahelmd and seahelm-core) on Windows: libghostty-vt
-# built with Zig against MSVC (it cannot be cross-compiled from macOS), then
+# (the release build-vt.sh pins) built with Zig against MSVC (it cannot be cross-compiled from macOS), then
 # the whole workspace's tests, including seahelmd's end-to-end Windows tests
 # (named pipes, ConPTY) and the pipe / process code ported from Keep. Then
 # the GPUI client (clients/gpui, a workspace of its own) built and tested
@@ -33,27 +33,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # The Ghostty commit libghostty-vt is built from is pinned in
-      # build-vt.sh; it is the cache key, so a bump rebuilds.
-      - name: Resolve Ghostty commit
+      # The libghostty-vt release is pinned in build-vt.sh; it is the cache
+      # key, so a bump rebuilds.
+      - name: Resolve libghostty-vt version
         id: vt
         run: |
-          c=$(sed -n 's/^COMMIT="\${GHOSTTY_COMMIT:-\([0-9a-f]*\)}"$/\1/p' seahelmd/vendor/build-vt.sh)
-          [ -n "$c" ] || { echo "no pinned commit in build-vt.sh" >&2; exit 1; }
-          echo "commit=$c" >> "$GITHUB_OUTPUT"
+          v=$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' seahelmd/vendor/build-vt.sh)
+          [ -n "$v" ] || { echo "no pinned version in build-vt.sh" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Cache libghostty-vt
         id: cache
         uses: actions/cache@v5
         with:
           path: seahelmd/vendor/libghostty-vt-windows-x86_64
-          key: libghostty-vt-windows-x86_64-${{ steps.vt.outputs.commit }}
+          key: libghostty-vt-windows-x86_64-${{ steps.vt.outputs.version }}
 
       - name: Install Zig
         if: steps.cache.outputs.cache-hit != 'true'
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          # libghostty-vt's minimum_zig_version.
+          version: 0.17.0
 
       - name: Build libghostty-vt
         if: steps.cache.outputs.cache-hit != 'true'
