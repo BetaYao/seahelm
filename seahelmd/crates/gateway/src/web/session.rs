@@ -322,6 +322,8 @@ impl Session {
                     refuse()
                 }
             }
+            // A guest does not get to reshape the owner's terminal.
+            "pane.vt_size" => refuse(),
             "pane.vt_open" | "pane.vt_close" | "pane.vt_keepalive" | "pane.send_keys" | "pane.send_text" | "pane.seen" | "message.history" => {
                 let refs: Vec<&str> = ["pane_session_key", "pane_id"].iter().filter_map(|k| str_of(p, k)).collect();
                 if !refs.is_empty() && refs.iter().all(|r| s.names(r)) {
@@ -360,6 +362,13 @@ impl Session {
                 let key = pane_ref(&p).unwrap_or_default();
                 let vt = &mut self.vt;
                 Ok(tokio::task::block_in_place(|| vt.open(&key)))
+            }
+            "pane.vt_size" => {
+                let key = pane_ref(&p).unwrap_or_default();
+                let n = |k: &str| p.get(k).and_then(Value::as_u64).unwrap_or(0).min(u16::MAX as u64) as u16;
+                let (cols, rows) = (n("cols"), n("rows"));
+                let vt = &mut self.vt;
+                Ok(tokio::task::block_in_place(|| vt.resize(&key, cols, rows)))
             }
             "pane.vt_close" => {
                 self.vt.close(&pane_ref(&p).unwrap_or_default());
