@@ -110,7 +110,7 @@ pub async fn run(gw: Arc<Gateway>, socket: WebSocket, meta: Meta) {
             }
             Some(m) = out_rx.recv() => vec![m],
             Some(e) = vt_rx.recv() => {
-                if authed && s.vt.is_open(&e.pane) { vec![s.encode_vt(&e)] } else { Vec::new() }
+                if authed && s.vt.is_current(&e) { vec![s.encode_vt(&e)] } else { Vec::new() }
             }
             ev = events.recv() => match ev {
                 Ok(ev) if authed => s.core_event(&ev),

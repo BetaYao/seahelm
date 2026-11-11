@@ -14,7 +14,6 @@
 use std::collections::HashMap;
 use std::net::Shutdown;
 use std::sync::mpsc as std_mpsc;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use seahelmd::proto::{self, Msg};
@@ -35,36 +34,38 @@ struct Stream {
     input: std_mpsc::Sender<Vec<u8>>,
     socket: seahelmd::platform::Stream,
     last_seen: Instant,
-    /// Whether this attachment still speaks for the pane. Its reader checks
-    /// it, under the lock, before every frame it hands on, so once a
-    /// replacement has cleared it nothing from the old attachment follows.
-    live: Arc<Mutex<bool>>,
+    /// Stamped on every frame this attachment's reader hands on. The page
+    /// gets only frames from the pane's current attachment, so once a
+    /// replacement is in, nothing the old one still had in flight follows.
+    /// (Filtered where frames are taken, not by the reader under a lock: the
+    /// reader can be blocked handing a frame to a full channel, and the
+    /// channel is drained by the task that would be waiting on that lock.)
+    id: u64,
     /// The size this attachment asked for; (0, 0) is passive.
     size: (u16, u16),
     /// Attached with `TakeOver`.
     takes_over: bool,
 }
 
-impl Stream {
-    fn retire(&self) {
-        if let Ok(mut live) = self.live.lock() {
-            *live = false;
-        }
-    }
-}
 
 pub struct VtStreams {
     streams: HashMap<String, Stream>,
     tx: mpsc::Sender<VtEvent>,
+    next_id: u64,
 }
 
 impl VtStreams {
     pub fn new(tx: mpsc::Sender<VtEvent>) -> VtStreams {
-        VtStreams { streams: HashMap::new(), tx }
+        VtStreams { streams: HashMap::new(), tx, next_id: 0 }
     }
 
     pub fn is_open(&self, pane: &str) -> bool {
         self.streams.contains_key(pane)
+    }
+
+    /// Whether a frame comes from the pane's current attachment.
+    pub fn is_current(&self, e: &VtEvent) -> bool {
+        self.streams.get(&e.pane).is_some_and(|s| s.id == e.stream)
     }
 
     /// Attach to `pane` as a passive viewer; `{ok, cols, rows}` or
@@ -106,7 +107,6 @@ impl VtStreams {
             self.streams.insert(pane.to_string(), old);
             return json!({"ok": true, "take_over": take_over});
         }
-        old.retire();
         let mut r = self.attach(pane, size, take_over, Some(old.socket));
         r["take_over"] = json!(take_over);
         r
@@ -150,8 +150,8 @@ impl VtStreams {
         });
         let tx = self.tx.clone();
         let key = pane.to_string();
-        let live = Arc::new(Mutex::new(true));
-        let still_live = Arc::clone(&live);
+        let id = self.next_id;
+        self.next_id += 1;
         let _ = std::thread::Builder::new().name("gateway-vt-out".into()).spawn(move || {
             let mut first = true;
             let mut replacing = replacing;
@@ -164,16 +164,13 @@ impl VtStreams {
                         first = false;
                         let mut payload = b"\x1b[H\x1b[2J".to_vec();
                         payload.extend_from_slice(&data);
-                        VtEvent { kind: KIND_SNAPSHOT, pane: key.clone(), payload, cols, rows }
+                        VtEvent { kind: KIND_SNAPSHOT, pane: key.clone(), payload, cols, rows, stream: id }
                     }
-                    Ok(Some(Msg::Output(data))) => VtEvent { kind: KIND_DATA, pane: key.clone(), payload: data, cols: 0, rows: 0 },
+                    Ok(Some(Msg::Output(data))) => VtEvent { kind: KIND_DATA, pane: key.clone(), payload: data, cols: 0, rows: 0, stream: id },
                     Ok(Some(Msg::Ended | Msg::Error(_))) | Ok(None) | Err(_) => break,
                     Ok(Some(_)) => continue,
                 };
-                let sent = match still_live.lock() {
-                    Ok(live) if *live => tx.blocking_send(event).is_ok(),
-                    _ => false,
-                };
+                let sent = tx.blocking_send(event).is_ok();
                 // The daemon has taken this attach: the one it replaces can go.
                 drop_old(&replacing.take());
                 if !sent {
@@ -182,7 +179,7 @@ impl VtStreams {
             }
             drop_old(&replacing);
         });
-        self.streams.insert(pane.to_string(), Stream { input, socket: closer, last_seen: Instant::now(), live, size, takes_over });
+        self.streams.insert(pane.to_string(), Stream { input, socket: closer, last_seen: Instant::now(), id, size, takes_over });
         if passive {
             json!({"ok": true, "cols": cols, "rows": rows})
         } else {
@@ -193,7 +190,6 @@ impl VtStreams {
     pub fn close(&mut self, pane: &str) {
         if let Some(s) = self.streams.remove(pane) {
             // Ends both threads: the reader sees EOF, the writer's sender drops.
-            s.retire();
             let _ = s.socket.shutdown(Shutdown::Both);
         }
     }
@@ -258,12 +254,14 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn next_snapshot(rx: &mut mpsc::Receiver<VtEvent>) -> (u16, u16) {
+    /// The next snapshot the page would get (frames from a replaced
+    /// attachment are dropped, as the session does).
+    fn next_snapshot(vt: &VtStreams, rx: &mut mpsc::Receiver<VtEvent>) -> (u16, u16) {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             assert!(Instant::now() < deadline, "no snapshot frame");
             match rx.try_recv() {
-                Ok(e) if e.kind == KIND_SNAPSHOT => return (e.cols, e.rows),
+                Ok(e) if e.kind == KIND_SNAPSHOT && vt.is_current(&e) => return (e.cols, e.rows),
                 Ok(_) => {}
                 Err(_) => std::thread::sleep(Duration::from_millis(20)),
             }
@@ -272,9 +270,9 @@ mod tests {
 
     /// Growing goes through the old size: the old attachment holds it until
     /// the new one has its screen, then lets go, and the page is repainted.
-    fn snapshot_until(rx: &mut mpsc::Receiver<VtEvent>, want: (u16, u16)) {
+    fn snapshot_until(vt: &VtStreams, rx: &mut mpsc::Receiver<VtEvent>, want: (u16, u16)) {
         let deadline = Instant::now() + Duration::from_secs(10);
-        while next_snapshot(rx) != want {
+        while next_snapshot(vt, rx) != want {
             assert!(Instant::now() < deadline, "the page never got a {want:?} screen");
         }
     }
@@ -287,21 +285,58 @@ mod tests {
         }
     }
 
+    fn serve(name: &'static str, script: &str) {
+        let socket = seahelmd::client::socket_path(name).unwrap();
+        let argv = vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()];
+        std::thread::spawn(move || {
+            let _ = seahelmd::daemon::serve(&socket, name, &argv, None);
+        });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while seahelmd::client::connect(name).is_err() {
+            assert!(Instant::now() < deadline, "daemon {name} never came up");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn scratch_dir() -> PathBuf {
+        let dir = PathBuf::from(format!("/tmp/shgw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // The only tests in this crate that talk to a daemon; both set the same.
+        std::env::set_var("SEAHELMD_DIR", &dir);
+        dir
+    }
+
+    /// A chatty pane fills the channel while the session is busy with a
+    /// request; switching panes then must not wait on the reader it is
+    /// starving (the page froze on exactly this).
+    #[test]
+    fn switching_away_from_a_chatty_pane_does_not_wait_on_its_reader() {
+        let _dir = scratch_dir();
+        let name = "vt-chatty";
+        serve(name, "while :; do echo chatter chatter chatter; done");
+        // Room for one frame, and nobody draining it.
+        let (tx, rx) = mpsc::channel(1);
+        let mut vt = VtStreams::new(tx);
+        assert_eq!(vt.open(name)["ok"], true);
+        std::thread::sleep(Duration::from_millis(300));
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = vt.resize(name, 60, 20, false);
+            vt.close(name);
+            let _ = done_tx.send(());
+            drop(rx);
+        });
+        assert!(done_rx.recv_timeout(Duration::from_secs(5)).is_ok(), "resize/close blocked behind a full channel");
+        let _ = seahelmd::client::request(name, &Msg::Kill);
+    }
+
     /// A page that asks for its own size shrinks the session while it looks,
     /// gets a whole screen at that size, and hands the size back when it stops.
     #[test]
     fn a_sized_page_fits_the_session_and_gives_it_back() {
-        let dir = PathBuf::from(format!("/tmp/shgw-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        // The only test in this crate that talks to a daemon.
-        std::env::set_var("SEAHELMD_DIR", &dir);
+        let _dir = scratch_dir();
         let name = "vt-size";
-        let socket = seahelmd::client::socket_path(name).unwrap();
-        std::thread::spawn(move || {
-            let argv = vec!["/bin/sh".to_string(), "-c".to_string(), "sleep 60".to_string()];
-            let _ = seahelmd::daemon::serve(&socket, name, &argv, None);
-        });
+        serve(name, "sleep 60");
 
         // The desktop pane, attached at its size.
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -321,33 +356,32 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(64);
         let mut vt = VtStreams::new(tx);
         assert_eq!(vt.open(name)["ok"], true);
-        assert_eq!(next_snapshot(&mut rx), (100, 30), "passive: the desktop's size");
+        assert_eq!(next_snapshot(&vt, &mut rx), (100, 30), "passive: the desktop's size");
 
         assert_eq!(vt.resize(name, 60, 20, false)["ok"], true);
-        assert_eq!(next_snapshot(&mut rx), (60, 20), "sized: a screen at the page's size");
+        assert_eq!(next_snapshot(&vt, &mut rx), (60, 20), "sized: a screen at the page's size");
         wait_size(name, (60, 20));
 
         // Wider than the desktop: the smaller of each wins.
         assert_eq!(vt.resize(name, 160, 24, false)["ok"], true);
-        snapshot_until(&mut rx, (100, 24));
+        snapshot_until(&vt, &mut rx, (100, 24));
         wait_size(name, (100, 24));
 
         assert_eq!(vt.resize(name, 0, 0, false)["ok"], true);
-        snapshot_until(&mut rx, (100, 30));
+        snapshot_until(&vt, &mut rx, (100, 30));
         wait_size(name, (100, 30));
 
         // Taking over: the page's size, wider than the desktop or not.
         let r = vt.resize(name, 160, 24, true);
         assert_eq!((r["ok"].as_bool(), r["take_over"].as_bool()), (Some(true), Some(true)), "{r}");
-        snapshot_until(&mut rx, (160, 24));
+        snapshot_until(&vt, &mut rx, (160, 24));
         wait_size(name, (160, 24));
         assert_eq!(vt.resize(name, 0, 0, true)["take_over"], false, "passive never takes over");
-        snapshot_until(&mut rx, (100, 30));
+        snapshot_until(&vt, &mut rx, (100, 30));
         wait_size(name, (100, 30));
 
         assert_eq!(vt.resize("no-such-pane", 60, 20, false)["ok"], false);
         drop(vt);
         let _ = seahelmd::client::request(name, &Msg::Kill);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
