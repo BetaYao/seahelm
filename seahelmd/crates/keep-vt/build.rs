@@ -94,6 +94,10 @@ fn check_abi(include: &Path) {
     assert!(checks > 0, "src/abi.rs: no abi checks found");
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR")).join("abi_check.c");
     std::fs::write(&out, c).expect("write abi_check.c");
+    // `canonicalize` gives Windows' verbatim form (`\\?\D:\...`), which
+    // rustc takes and cl.exe's -I does not.
+    let include = include.to_string_lossy();
+    let include = include.strip_prefix(r"\\?\").unwrap_or(&include);
     cc::Build::new()
         .file(&out)
         .include(include)
