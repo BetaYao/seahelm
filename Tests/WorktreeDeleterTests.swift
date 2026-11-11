@@ -160,6 +160,32 @@ final class WorktreeDeleterTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: worktreePath))
     }
 
+    /// git refuses any worktree with an initialised submodule unless forced
+    /// (seahelm's own `ghostty` after scripts/setup.sh). A clean one goes; one
+    /// with work inside the submodule still needs the user's force.
+    func testCleanWorktreeWithAnInitialisedSubmoduleIsDeleted() throws {
+        let subPath = tempDir.appendingPathComponent("sub").path
+        try FileManager.default.createDirectory(atPath: subPath, withIntermediateDirectories: true)
+        git(["init", "-b", "main"], in: subPath)
+        git(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "--allow-empty", "-m", "sub"], in: subPath)
+        git(["-c", "protocol.file.allow=always", "submodule", "add", subPath, "sub"], in: repoPath)
+        git(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "-m", "submodule"], in: repoPath)
+
+        let clean = createWorktree(branch: "feature-sub-clean")
+        let dirty = createWorktree(branch: "feature-sub-dirty")
+        for path in [clean, dirty] {
+            git(["-c", "protocol.file.allow=always", "submodule", "update", "--init"], in: path)
+        }
+        try "x".write(toFile: dirty + "/sub/scratch.txt", atomically: true, encoding: .utf8)
+
+        try WorktreeDeleter.deleteWorktree(worktreePath: clean, repoPath: repoPath, branchName: "feature-sub-clean")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: clean))
+        XCTAssertThrowsError(
+            try WorktreeDeleter.deleteWorktree(worktreePath: dirty, repoPath: repoPath, branchName: "feature-sub-dirty")
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dirty + "/sub/scratch.txt"))
+    }
+
     // MARK: - delete assessment
 
     /// Nothing of its own: clean, and every commit already on trunk. That is

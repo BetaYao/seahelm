@@ -116,7 +116,14 @@ enum WorktreeDeleter {
         var args = ["worktree", "remove", worktreePath]
         if force { args.append("--force") }
 
-        let (success, stderr) = runGitWithStderr(args: args, in: repoPath)
+        var (success, stderr) = runGitWithStderr(args: args, in: repoPath)
+        // git refuses any worktree with an initialised submodule unless forced,
+        // clean or not. `git status` covers the submodules too (their changes,
+        // new commits and untracked content), so a clean tree is safe to force.
+        if !success, !force, stderr.contains("containing submodules cannot be moved or removed"),
+           !hasUncommittedChanges(worktreePath: worktreePath) {
+            (success, stderr) = runGitWithStderr(args: args + ["--force"], in: repoPath)
+        }
         if !success {
             throw WorktreeDeleterError.gitFailed(classifyWorktreeRemoveError(stderr, path: worktreePath))
         }
