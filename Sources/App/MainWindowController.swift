@@ -2219,8 +2219,11 @@ extension MainWindowController {
     func refreshIslandFirstMate() {
         guard config.islandEnabled else { return }
         let model = islandController.model
-        if model.language != configuredIslandLanguage { model.language = configuredIslandLanguage }
         let firstMate = tabCoordinator.firstMate
+        // The core's reading first: it follows the user when config.json sets
+        // no language. Its absence (no core) falls back to the file.
+        let language = firstMate.language.map { IslandLanguage.fromCode($0) } ?? configuredIslandLanguage
+        if model.language != language { model.language = language }
         let (word, _) = FirstMateStateText.describe(firstMate.state.activity, isChinese: model.language.isChinese)
         let tone = FirstMateStateText.tone(firstMate.state)
         if model.mateActivity != word { model.mateActivity = word }

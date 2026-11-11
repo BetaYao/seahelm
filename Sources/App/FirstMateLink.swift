@@ -33,6 +33,10 @@ final class FirstMateLink {
     /// The core says First Mate is running.
     private(set) var isRunning = false
     private(set) var agent: AgentType = .claudeCode
+    /// The language the core writes First Mate's lines in (`autopilot.state`
+    /// `language`): `first_mate_language`, or, unset, the user's own. Nil
+    /// while the core does not answer.
+    private(set) var language: String?
 
     private var timer: Timer?
 
@@ -82,12 +86,14 @@ final class FirstMateLink {
 
     private func apply(_ r: [String: Any]?) {
         guard let r else {
+            language = nil
             isRunning = false
             state = State()
             return
         }
         isRunning = r["enabled"] as? Bool ?? false
         if let a = r["agent"] as? String, let t = AgentType(rawValue: a) { agent = t }
+        language = r["language"] as? String
         if let c = r["configured"] as? [String: Any], let on = c["enabled"] as? Bool, let a = c["agent"] as? String {
             onConfigured?(on, a)
         }

@@ -1,6 +1,7 @@
 //! The language of what the core writes to the user itself: the daily brief
 //! and the `note` rows in First Mate's timeline (`config.json`
-//! `first_mate_language`: `"en"`, the default, or `"zh"`). The audit log stays
+//! `first_mate_language`: `"en"` or `"zh"`; unset, the language most of the
+//! user's recent prompts are in, `detect`, else English). The audit log stays
 //! English (it is read by tools as much as by people). Built-in card options
 //! are localized here too; First Mate answers in whatever language it is spoken to.
 
@@ -24,12 +25,34 @@ impl Lang {
         }
     }
 
+    /// The language the user writes in: Chinese when most of the last
+    /// `DETECT_WINDOW` prompts hold a Chinese character, English when most do
+    /// not; nothing before there are `DETECT_MIN` to go by.
+    pub fn detect<'a>(prompts: impl DoubleEndedIterator<Item = &'a str>) -> Option<Lang> {
+        let recent: Vec<&str> = prompts.rev().filter(|t| t.chars().any(char::is_alphabetic)).take(DETECT_WINDOW).collect();
+        if recent.len() < DETECT_MIN {
+            return None;
+        }
+        let chinese = recent.iter().filter(|t| t.chars().any(is_han)).count();
+        Some(if chinese * 2 > recent.len() { Lang::Zh } else { Lang::En })
+    }
+
     pub fn pick<'a>(self, en: &'a str, zh: &'a str) -> &'a str {
         match self {
             Lang::En => en,
             Lang::Zh => zh,
         }
     }
+}
+
+/// How many of the user's latest prompts `Lang::detect` reads.
+pub const DETECT_WINDOW: usize = 20;
+/// How many it needs before it says anything.
+pub const DETECT_MIN: usize = 5;
+
+/// A CJK unified ideograph (the basic block and extension A).
+fn is_han(c: char) -> bool {
+    matches!(c, '\u{4e00}'..='\u{9fff}' | '\u{3400}'..='\u{4dbf}')
 }
 
 /// One line in both languages. Reads as its English text (`Deref`), which
@@ -75,6 +98,21 @@ pub fn plural_en(n: usize, one: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detect_reads_the_latest_prompts_by_majority() {
+        assert_eq!(Lang::detect(["好", "行", "可以", "嗯"].into_iter()), None);
+        let mixed = ["fix it", "ok", "修一下", "合并 PR", "看看 #12", "继续"];
+        assert_eq!(Lang::detect(mixed.into_iter()), Some(Lang::Zh));
+        let english = ["fix it", "run the tests", "ship it", "看看", "merge"];
+        assert_eq!(Lang::detect(english.into_iter()), Some(Lang::En));
+        // Only the latest DETECT_WINDOW count, and prompts with no letters
+        // (a bare "1", "/") are skipped.
+        let old_chinese = std::iter::repeat_n("中文", 30);
+        let new_english = std::iter::repeat_n("english", DETECT_WINDOW);
+        let all: Vec<&str> = old_chinese.chain(["1", "/"]).chain(new_english).collect();
+        assert_eq!(Lang::detect(all.into_iter()), Some(Lang::En));
+    }
 
     #[test]
     fn parses_and_falls_back() {

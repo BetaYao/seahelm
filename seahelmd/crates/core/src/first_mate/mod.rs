@@ -70,8 +70,11 @@ pub struct UserConfig {
     pub defaults: Autonomy,
     pub agent_yolo: bool,
     /// `first_mate_language`: what the brief and the core's note rows are
-    /// written in (`lang`).
+    /// written in (`lang`). Unset, the language of the user's own recent
+    /// prompts (`language_auto`).
     pub language: lang::Lang,
+    /// `first_mate_language` is unset: `language` follows the user.
+    pub language_auto: bool,
     /// `first_mate_quiet_hours` (`"23:00-08:00"`): the user's own, laid over
     /// every repo's `quiet_hours` (either one holds things back).
     pub quiet_hours: Option<rules::QuietHours>,
@@ -83,7 +86,14 @@ impl UserConfig {
     }
 
     pub fn load_from(path: &Path) -> Self {
-        Self::parse(&std::fs::read_to_string(path).unwrap_or_default())
+        let mut c = Self::parse(&std::fs::read_to_string(path).unwrap_or_default());
+        if c.language_auto {
+            let activity = path.parent().unwrap_or(Path::new(".")).join("first-mate").join("activity.json");
+            if let Some(l) = observed_language(&activity) {
+                c.language = l;
+            }
+        }
+        c
     }
 
     pub fn parse(text: &str) -> Self {
@@ -101,9 +111,18 @@ impl UserConfig {
             defaults: rules::defaults_overriding(&autonomy),
             agent_yolo: b("agent_yolo"),
             language: lang::Lang::parse(v.get("first_mate_language").and_then(Value::as_str)),
+            language_auto: v.get("first_mate_language").and_then(Value::as_str).is_none_or(|s| s.trim().is_empty()),
             quiet_hours: v.get("first_mate_quiet_hours").and_then(Value::as_str).and_then(rules::QuietHours::parse),
         }
     }
+}
+
+/// The language of the user's recent prompts, as `presence` keeps them in
+/// `activity.json` (`prompts`: `[at, project, text]`).
+fn observed_language(activity: &Path) -> Option<lang::Lang> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(activity).ok()?).ok()?;
+    let prompts = v.get("prompts")?.as_array()?;
+    lang::Lang::detect(prompts.iter().filter_map(|p| p.get(2).and_then(Value::as_str)))
 }
 
 /// The policy's answer for one gated call.
@@ -1278,6 +1297,8 @@ impl FirstMate {
             "queued": self.queue.len(),
             "agent": self.config.agent.raw(),
             "language": self.config.language.pick("en", "zh"),
+            // Unset in config.json: the language above follows the user's prompts.
+            "language_auto": self.config.language_auto,
             "cards": cards,
             "held": self.held.len(),
             // What config.json says now, read for this answer (the tick's copy
@@ -1353,6 +1374,27 @@ fn usage_percent() -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unset_language_follows_the_users_prompts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"autopilot_enabled": true}"#).unwrap();
+        // Nothing to go by yet: English.
+        let c = UserConfig::load_from(&path);
+        assert_eq!((c.language, c.language_auto), (lang::Lang::En, true));
+
+        std::fs::create_dir(dir.path().join("first-mate")).unwrap();
+        let prompts: Vec<Value> = ["修一下登录", "看看 CI", "合并 PR", "fix the test", "发个版本", "继续"]
+            .iter().map(|t| json!([1.0, "repo", t])).collect();
+        std::fs::write(dir.path().join("first-mate/activity.json"), json!({"prompts": prompts}).to_string()).unwrap();
+        assert_eq!(UserConfig::load_from(&path).language, lang::Lang::Zh);
+
+        // A language set in config.json wins.
+        std::fs::write(&path, r#"{"first_mate_language": "en"}"#).unwrap();
+        let c = UserConfig::load_from(&path);
+        assert_eq!((c.language, c.language_auto), (lang::Lang::En, false));
+    }
 
     #[test]
     fn configure_changes_only_its_keys() {

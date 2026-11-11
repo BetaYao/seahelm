@@ -1024,6 +1024,11 @@ enum IslandLanguage: String, Equatable {
         fromConfigData(try? Data(contentsOf: url))
     }
 
+    /// `"zh"`, `"zh-CN"` … are Chinese; anything else English (the core's `Lang::parse`).
+    static func fromCode(_ code: String) -> IslandLanguage {
+        code.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("zh") ? .chinese : .english
+    }
+
     static func fromConfigData(_ data: Data?) -> IslandLanguage {
         guard let data,
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
