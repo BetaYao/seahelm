@@ -21,6 +21,9 @@ pub struct VtEvent {
     pub payload: Vec<u8>,
     pub cols: u16,
     pub rows: u16,
+    /// Which attachment of the pane sent it (`VtStreams::is_current`); not
+    /// sent to the page.
+    pub stream: u64,
 }
 
 pub fn encode_vt(e: &VtEvent, allow_deflate: bool) -> Option<Vec<u8>> {
@@ -87,13 +90,13 @@ mod tests {
 
     #[test]
     fn snapshot_frame_layout() {
-        let e = VtEvent { kind: KIND_SNAPSHOT, pane: "p".into(), payload: b"hi".to_vec(), cols: 80, rows: 24 };
+        let e = VtEvent { kind: KIND_SNAPSHOT, pane: "p".into(), payload: b"hi".to_vec(), cols: 80, rows: 24, stream: 0 };
         assert_eq!(encode_vt(&e, true).unwrap(), vec![1, 0, 2, 1, b'p', 0, 80, 0, 24, b'h', b'i']);
     }
 
     #[test]
     fn big_data_is_deflated() {
-        let e = VtEvent { kind: KIND_DATA, pane: "k".into(), payload: vec![b'a'; 4000], cols: 0, rows: 0 };
+        let e = VtEvent { kind: KIND_DATA, pane: "k".into(), payload: vec![b'a'; 4000], cols: 0, rows: 0, stream: 0 };
         let f = encode_vt(&e, true).unwrap();
         assert_eq!(f[1], 1);
         // Raw deflate, as `DecompressionStream('deflate-raw')` takes it: a

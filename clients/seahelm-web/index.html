@@ -148,7 +148,8 @@
   body[data-share="pane"] #splitBtn,
   body[data-share="pane"] #closePaneBtn,
   body[data-share="pane"] #renamePaneBtn,
-  body[data-share="pane"] #vtModeBadge{display:none}
+  body[data-share="pane"] #vtModeBadge,
+  body[data-share="pane"] #vtFitBadge{display:none}
   /* No ‹ on the left to balance against, so the name starts at the edge. */
   @media (max-width:760px){
     body[data-share="pane"] .detail-head{padding-left:16px}
@@ -718,6 +719,7 @@
   <div class="menu" id="paneMenu" role="menu" hidden>
     <div class="seg" id="surfaceBadge" role="tablist" aria-label="View"></div>
     <button id="vtModeBadge" type="button" role="menuitem">Terminal layout <span class="val"></span></button>
+    <button id="vtFitBadge" type="button" role="menuitem">Terminal size <span class="val"></span></button>
     <button id="rendererBadge" class="renderer-badge" type="button" role="menuitem">Renderer <span class="val"></span></button>
     <hr />
     <button id="copyBtn" type="button" role="menuitem">Copy selection</button>
@@ -882,19 +884,21 @@ function setSelectedPane(key){
   S.selPane = key;
   renderMateTodoToggle();
 }
-// Opening size only. The relay reports no geometry and has no resize verb, so the
-// bridge reads the session's real grid from outside (pid → tty → `stty size`)
-// and ships it with the snapshot; we resize to that before replaying. These
-// numbers just give the terminal a sane box for the moment before it lands.
-// Sizing stays one-way — we mirror the Mac's split tree and scale each pane's
-// font to its slot (fitPaneFont); we cannot reshape a Mac-side pane.
+// Opening size only. Every snapshot frame carries the session's real grid and
+// we resize to that before replaying; these numbers just give the terminal a
+// sane box for the moment before it lands.
+//
+// By default the grid is the desktop's: the gateway attaches as a passive
+// viewer, and we scale each pane's font to its slot (fitPaneFont). With
+// "Terminal size: This screen" (vtFit) the page asks for the grid its slot
+// holds at VT_FONT_BASE (`pane.vt_size`), and seahelmd fits the session to its
+// smallest viewer — the desktop pane included, for as long as we look.
 const VT_COLS = 120, VT_ROWS = 32;
-// The size a pane renders at when its grid fits. fitPaneFont only ever scales
-// DOWN from here: mirroring the Mac's layout already gives each slot roughly the
-// shape of the grid inside it, so the base size is the intended size rather than
-// a floor to grow off. VT_FONT_MIN is where shrinking stops being worth it —
-// below this you cannot read the pane anyway, so we pan instead.
-const VT_FONT_BASE = 12, VT_FONT_MIN = 9;
+// The size a pane is laid out for. fitPaneFont scales from it in both
+// directions: down to VT_FONT_MIN, below which you cannot read the pane anyway
+// and panning is the honest answer; up to VT_FONT_MAX, so a desktop grid in a
+// big browser window fills it instead of sitting in a corner.
+const VT_FONT_BASE = 12, VT_FONT_MIN = 9, VT_FONT_MAX = 22;
 
 // Status colours — the same roles as SailorStatus on the Mac, in the page's
 // palette. `waiting` is amber ("needs you"), and the four differ in lightness as
@@ -3597,6 +3601,7 @@ function handleViewportResize(){
     }
   }
   fitAllPanes();
+  scheduleViewerSizes();
 }
 
 /** Retick the elapsed labels in place — no re-render, no scroll jump. */
@@ -3737,6 +3742,93 @@ function renderVtModeBadge(){
   el.onclick = () => setVtMode(mode === 'mirror' ? 'single' : 'mirror');
 }
 renderVtModeBadge();
+
+// ── Terminal size ─────────────────────────────────────────────────────────
+// 'desktop': the desktop's grid, drawn as large as the slot allows.
+// 'fit': the grid this screen's slot holds, asked of seahelmd for every pane
+//   on screen. The session takes the smallest of its viewers, so it follows
+//   this screen only where this screen is the smaller one.
+// 'take': the same grid, and the session is sized for this page alone; a
+//   desktop pane it no longer fits shows a notice until the page lets go.
+// Leaving the page, or going back to 'desktop', gives the size back.
+const VT_FIT_KEY = 'seahelm_vt_fit';
+const VT_FIT_MODES = ['desktop', 'fit', 'take'];
+const VT_FIT_LABELS = { desktop: 'Desktop', fit: 'This screen', take: 'Take over' };
+function loadVtFit(){
+  const v = localStorage.getItem(VT_FIT_KEY);
+  return v === '1' ? 'fit' : (VT_FIT_MODES.includes(v) ? v : 'desktop');
+}
+function setVtFit(mode){
+  localStorage.setItem(VT_FIT_KEY, mode);
+  renderVtFitBadge();
+  sendViewerSizes();
+}
+function renderVtFitBadge(){
+  const el = $('vtFitBadge');
+  if (!el) return;
+  const mode = loadVtFit();
+  el.innerHTML = `Terminal size <span class="val">${VT_FIT_LABELS[mode]}</span>`;
+  el.title = {
+    desktop: 'The desktop pane\'s size, scaled to fit — click to lay it out for this screen',
+    fit: 'Laid out for this screen where it is smaller than the desktop pane — click to take over',
+    take: 'Laid out for this screen alone; the desktop pane shows a notice while you look — click for the desktop size',
+  }[mode];
+  el.onclick = () => setVtFit(VT_FIT_MODES[(VT_FIT_MODES.indexOf(mode) + 1) % VT_FIT_MODES.length]);
+}
+renderVtFitBadge();
+
+// One cell at VT_FONT_BASE, in CSS pixels. Measured once, from the first
+// terminal while it still has its opening grid and base font: measuring later,
+// after fitPaneFont rescaled it, would make the grid we ask for depend on the
+// font the last grid left behind, and two passes could disagree by a column.
+let baseCell = null;
+function measureBaseCell(t, host){
+  if (baseCell) return;
+  const screen = host.querySelector('.xterm-screen');
+  const r = screen && screen.getBoundingClientRect();
+  if (r && r.width && r.height && t.cols && t.rows && t.options.fontSize === VT_FONT_BASE){
+    baseCell = { w: r.width / t.cols, h: r.height / t.rows };
+  }
+}
+
+/** The grid a pane's slot holds at VT_FONT_BASE; null when it cannot tell. */
+function slotGrid(entry){
+  const cell = baseCell || { w: VT_FONT_BASE * CELL_RATIO, h: VT_FONT_BASE * 1.2 };
+  const w = entry.host.clientWidth - 4, h = entry.host.clientHeight - 4;
+  if (w <= 0 || h <= 0) return null;
+  return { cols: Math.max(20, Math.floor(w / cell.w)), rows: Math.max(5, Math.floor(h / cell.h)) };
+}
+
+/** Tell the gateway the size this pane wants: its slot's grid, or none. */
+function sendViewerSize(key, entry){
+  if (!isLinked() || SHARE_TOKEN) return;
+  const mode = loadVtFit();
+  const grid = mode === 'desktop' ? null : slotGrid(entry);
+  const want = grid && { cols: grid.cols, rows: grid.rows, take: mode === 'take' };
+  const was = entry.sentSize;
+  if (!want && !was) return;
+  if (want && was && want.cols === was.cols && want.rows === was.rows && want.take === was.take) return;
+  entry.sentSize = want;
+  const size = want || { cols: 0, rows: 0, take: false };
+  sendCommand('pane.vt_size', { pane_session_key: key, cols: size.cols, rows: size.rows, take_over: size.take }, (r) => {
+    if (r && r.ok === false){ log('sys','(vt size failed)', JSON.stringify(r.error||r)); return; }
+    // Session daemons outlive upgrades; one started before take-over existed
+    // got a plain sized attach instead.
+    if (size.take && r && r.take_over === false){
+      showActionToast('This pane started before take-over existed — restart it to use it. Sized to fit instead.', true);
+    }
+  });
+}
+function sendViewerSizes(){
+  for (const [key, entry] of S.vt.panes) sendViewerSize(key, entry);
+}
+// A window drag or a phone turning fires resize in bursts; each new size is a
+// fresh attach and a redraw for the program, so ask once it settles.
+let viewerSizeTimer = 0;
+function scheduleViewerSizes(){
+  clearTimeout(viewerSizeTimer);
+  viewerSizeTimer = setTimeout(sendViewerSizes, 300);
+}
 
 // ── Key bar ────────────────────────────────────────────────────────────────
 // Terminal mode is typed into directly: tap the screen and the system keyboard
@@ -4063,7 +4155,12 @@ function mountPanes(tree, focusKey, path){
 function openMountedPanes(){
   for (const key of S.vt.panes.keys()){
     sendCommand('pane.vt_open', { pane_session_key: key, cols: VT_COLS, rows: VT_ROWS }, (r) => {
-      if (r && r.ok === false) log('sys','(vt open failed)', JSON.stringify(r.error||r));
+      if (r && r.ok === false){ log('sys','(vt open failed)', JSON.stringify(r.error||r)); return; }
+      // A fresh attach is passive, whatever the last one asked for.
+      const entry = S.vt.panes.get(key);
+      if (!entry) return;
+      entry.sentSize = null;
+      sendViewerSize(key, entry);
     });
   }
 }
@@ -4161,7 +4258,8 @@ function buildLayoutLeaf(node){
   });
   t.open(host);
   attachWebglRenderer(t);
-  const entry = { term:t, el, host, keys:null };
+  measureBaseCell(t, host);
+  const entry = { term:t, el, host, keys:null, sentSize:null };
   entry.keys = SeahelmInput.createKeystrokeCoalescer({
     windowMs: VT_INPUT_WINDOW_MS,
     send: (buf) => {
@@ -4275,8 +4373,8 @@ function fitAllPanes(){
 
 /**
  * Scale one pane's font so its grid fills its slot.
- * The grid is dictated by the Mac side and cannot be renegotiated, so the only
- * free variable is how big we draw it — down from VT_FONT_BASE, never past it.
+ * The grid is the session's (the desktop's, or the smallest viewer's), so the
+ * free variable is how big we draw it, between VT_FONT_MIN and VT_FONT_MAX.
  * Constrains on BOTH axes and takes the tighter one: width alone lets a tall
  * session run off the bottom, height alone lets a wide one spill out the side.
  */
@@ -4289,7 +4387,7 @@ function fitPaneFont(entry){
   if (!box.width || !box.height || availW <= 0 || availH <= 0) return;
 
   const scale = Math.min(availW / box.width, availH / box.height);
-  let size = Math.max(VT_FONT_MIN, Math.min(VT_FONT_BASE, Math.floor(t.options.fontSize * scale)));
+  let size = Math.max(VT_FONT_MIN, Math.min(VT_FONT_MAX, Math.floor(t.options.fontSize * scale)));
   if (size !== t.options.fontSize) t.options.fontSize = size;
 
   // xterm rounds cell metrics to whole pixels, so cell size is a step function of

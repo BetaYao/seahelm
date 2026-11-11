@@ -1,8 +1,10 @@
 //! A page's live terminals: one seahelmd attachment per pane it opened.
 //!
-//! The gateway attaches straight to the pane's seahelmd socket as a passive
-//! viewer (size 0×0, so it never resizes the session the desktop sized) and
-//! relays what the daemon sends: a `Repaint` becomes a snapshot frame (the
+//! The gateway attaches straight to the pane's seahelmd socket, by default as
+//! a passive viewer (size 0×0, so it never resizes the session the desktop
+//! sized). A page that asks to be sized (`pane.vt_size`) becomes a viewer of
+//! its own size instead, and the daemon fits the session to its smallest
+//! viewer, as it does for any client. The gateway relays what the daemon sends: a `Repaint` becomes a snapshot frame (the
 //! whole screen, which the page resets to), `Output` becomes data. A reader
 //! thread per stream hands frames over a bounded channel, so a page that
 //! cannot keep up holds the reader, the daemon's queue for this viewer fills,
@@ -23,43 +25,119 @@ use super::frames::{VtEvent, KIND_DATA, KIND_SNAPSHOT};
 /// A stream nobody kept alive for this long is dropped.
 pub const LEASE: Duration = Duration::from_secs(60);
 const DEFAULT_SIZE: (u16, u16) = (120, 32);
+/// The smallest grid a page may ask for; below it nothing is readable anyway.
+pub const MIN_SIZE: (u16, u16) = (20, 5);
+/// And the largest, so a bad request cannot ask the program for a huge grid.
+pub const MAX_SIZE: (u16, u16) = (500, 200);
 
 struct Stream {
     input: std_mpsc::Sender<Vec<u8>>,
     socket: seahelmd::platform::Stream,
     last_seen: Instant,
+    /// Stamped on every frame this attachment's reader hands on. The page
+    /// gets only frames from the pane's current attachment, so once a
+    /// replacement is in, nothing the old one still had in flight follows.
+    /// (Filtered where frames are taken, not by the reader under a lock: the
+    /// reader can be blocked handing a frame to a full channel, and the
+    /// channel is drained by the task that would be waiting on that lock.)
+    id: u64,
+    /// The size this attachment asked for; (0, 0) is passive.
+    size: (u16, u16),
+    /// Attached with `TakeOver`.
+    takes_over: bool,
 }
+
 
 pub struct VtStreams {
     streams: HashMap<String, Stream>,
     tx: mpsc::Sender<VtEvent>,
+    next_id: u64,
 }
 
 impl VtStreams {
     pub fn new(tx: mpsc::Sender<VtEvent>) -> VtStreams {
-        VtStreams { streams: HashMap::new(), tx }
+        VtStreams { streams: HashMap::new(), tx, next_id: 0 }
     }
 
     pub fn is_open(&self, pane: &str) -> bool {
         self.streams.contains_key(pane)
     }
 
-    /// Attach to `pane`; `{ok, cols, rows}` or `{ok: false, error}`.
-    /// Blocking (two local socket round trips).
+    /// Whether a frame comes from the pane's current attachment.
+    pub fn is_current(&self, e: &VtEvent) -> bool {
+        self.streams.get(&e.pane).is_some_and(|s| s.id == e.stream)
+    }
+
+    /// Attach to `pane` as a passive viewer; `{ok, cols, rows}` or
+    /// `{ok: false, error}`. Blocking (two local socket round trips).
     pub fn open(&mut self, pane: &str) -> Value {
         if pane.is_empty() {
             return json!({"ok": false, "error": "missing pane_session_key"});
         }
         self.close(pane);
-        let (cols, rows) = size_of(pane);
+        self.attach(pane, (0, 0), false, None)
+    }
+
+    /// Give an open pane's attachment a size of its own, or (0, 0) to go back
+    /// to passive. `{ok}` or `{ok: false, error}`; the new size reaches the
+    /// page as the next snapshot frame.
+    ///
+    /// The daemon takes a viewer's size from its attach, and only repaints a
+    /// viewer for a resize somebody else caused. So the size is changed by
+    /// attaching afresh at it and dropping the old attachment once the new one
+    /// has its screen: the page gets a whole screen at the new size, and the
+    /// session is never left without this viewer in between (which would let
+    /// it spring back to the desktop's size, and the program redraw twice).
+    ///
+    /// `take_over` sizes the session for this page alone, whatever the
+    /// desktop pane's size; the daemon shows a pane the grid no longer fits a
+    /// notice until the page lets go. A daemon from before `TakeOver` gets a
+    /// plain sized attach, and the answer says `take_over: false`.
+    pub fn resize(&mut self, pane: &str, cols: u16, rows: u16, take_over: bool) -> Value {
+        let size = if cols == 0 || rows == 0 {
+            (0, 0)
+        } else {
+            (cols.clamp(MIN_SIZE.0, MAX_SIZE.0), rows.clamp(MIN_SIZE.1, MAX_SIZE.1))
+        };
+        let Some(old) = self.streams.remove(pane) else {
+            return json!({"ok": false, "error": "pane is not open"});
+        };
+        let take_over = take_over && size != (0, 0) && knows_take_over(pane);
+        if old.size == size && old.takes_over == take_over {
+            self.streams.insert(pane.to_string(), old);
+            return json!({"ok": true, "take_over": take_over});
+        }
+        let mut r = self.attach(pane, size, take_over, Some(old.socket));
+        r["take_over"] = json!(take_over);
+        r
+    }
+
+    /// One attachment at `size`. `replacing` is the socket of the attachment
+    /// this one takes over from: shut once this one has its first screen.
+    fn attach(&mut self, pane: &str, size: (u16, u16), takes_over: bool, replacing: Option<seahelmd::platform::Stream>) -> Value {
+        let drop_old = |old: &Option<seahelmd::platform::Stream>| {
+            if let Some(o) = old {
+                let _ = o.shutdown(Shutdown::Both);
+            }
+        };
+        // Passive, the session keeps its size: read it now. Sized, the daemon
+        // fits the session before its first repaint: read it then.
+        let passive = size == (0, 0);
+        let (cols, rows) = if passive { size_of(pane) } else { (0, 0) };
         let socket = match seahelmd::client::connect(pane) {
             Ok(s) => s,
-            Err(e) => return json!({"ok": false, "error": e.to_string()}),
+            Err(e) => {
+                drop_old(&replacing);
+                return json!({"ok": false, "error": e.to_string()});
+            }
         };
         let (Ok(mut reader), Ok(mut writer), Ok(closer)) = (socket.try_clone(), socket.try_clone(), socket.try_clone()) else {
+            drop_old(&replacing);
             return json!({"ok": false, "error": "socket clone failed"});
         };
-        if let Err(e) = proto::write(&mut writer, &Msg::Attach { cols: 0, rows: 0 }) {
+        let hello = if takes_over { Msg::TakeOver { cols: size.0, rows: size.1 } } else { Msg::Attach { cols: size.0, rows: size.1 } };
+        if let Err(e) = proto::write(&mut writer, &hello) {
+            drop_old(&replacing);
             return json!({"ok": false, "error": e.to_string()});
         }
         let (input, keys) = std_mpsc::channel::<Vec<u8>>();
@@ -72,30 +150,41 @@ impl VtStreams {
         });
         let tx = self.tx.clone();
         let key = pane.to_string();
+        let id = self.next_id;
+        self.next_id += 1;
         let _ = std::thread::Builder::new().name("gateway-vt-out".into()).spawn(move || {
             let mut first = true;
+            let mut replacing = replacing;
             loop {
                 let event = match proto::read(&mut reader) {
                     Ok(Some(Msg::Repaint(data))) => {
-                        // The first repaint answers the attach at the size read
-                        // above; a later one may follow a resize.
-                        let (cols, rows) = if first { (cols, rows) } else { size_of(&key) };
+                        // The first repaint answers the attach at the size it
+                        // asked for; a later one may follow a resize.
+                        let (cols, rows) = if first && passive { (cols, rows) } else { size_of(&key) };
                         first = false;
                         let mut payload = b"\x1b[H\x1b[2J".to_vec();
                         payload.extend_from_slice(&data);
-                        VtEvent { kind: KIND_SNAPSHOT, pane: key.clone(), payload, cols, rows }
+                        VtEvent { kind: KIND_SNAPSHOT, pane: key.clone(), payload, cols, rows, stream: id }
                     }
-                    Ok(Some(Msg::Output(data))) => VtEvent { kind: KIND_DATA, pane: key.clone(), payload: data, cols: 0, rows: 0 },
+                    Ok(Some(Msg::Output(data))) => VtEvent { kind: KIND_DATA, pane: key.clone(), payload: data, cols: 0, rows: 0, stream: id },
                     Ok(Some(Msg::Ended | Msg::Error(_))) | Ok(None) | Err(_) => break,
                     Ok(Some(_)) => continue,
                 };
-                if tx.blocking_send(event).is_err() {
+                let sent = tx.blocking_send(event).is_ok();
+                // The daemon has taken this attach: the one it replaces can go.
+                drop_old(&replacing.take());
+                if !sent {
                     break;
                 }
             }
+            drop_old(&replacing);
         });
-        self.streams.insert(pane.to_string(), Stream { input, socket: closer, last_seen: Instant::now() });
-        json!({"ok": true, "cols": cols, "rows": rows})
+        self.streams.insert(pane.to_string(), Stream { input, socket: closer, last_seen: Instant::now(), id, size, takes_over });
+        if passive {
+            json!({"ok": true, "cols": cols, "rows": rows})
+        } else {
+            json!({"ok": true})
+        }
     }
 
     pub fn close(&mut self, pane: &str) {
@@ -142,6 +231,13 @@ impl Drop for VtStreams {
     }
 }
 
+/// Whether the pane's daemon knows `Msg::TakeOver` (one that does not
+/// would drop the connection). Daemons outlive upgrades, so old ones linger.
+fn knows_take_over(pane: &str) -> bool {
+    let Ok(Msg::Text(json)) = seahelmd::client::request(pane, &Msg::Snapshot) else { return false };
+    serde_json::from_str::<Value>(&json).ok().and_then(|v| v.get("take_over").and_then(Value::as_bool)).unwrap_or(false)
+}
+
 /// The session's size as its daemon reports it.
 fn size_of(pane: &str) -> (u16, u16) {
     let Ok(Msg::Text(json)) = seahelmd::client::request(pane, &Msg::Snapshot) else { return DEFAULT_SIZE };
@@ -150,5 +246,142 @@ fn size_of(pane: &str) -> (u16, u16) {
     match (n("cols"), n("rows")) {
         (Some(c), Some(r)) => (c, r),
         _ => DEFAULT_SIZE,
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// The next snapshot the page would get (frames from a replaced
+    /// attachment are dropped, as the session does).
+    fn next_snapshot(vt: &VtStreams, rx: &mut mpsc::Receiver<VtEvent>) -> (u16, u16) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(Instant::now() < deadline, "no snapshot frame");
+            match rx.try_recv() {
+                Ok(e) if e.kind == KIND_SNAPSHOT && vt.is_current(&e) => return (e.cols, e.rows),
+                Ok(_) => {}
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+    }
+
+    /// Growing goes through the old size: the old attachment holds it until
+    /// the new one has its screen, then lets go, and the page is repainted.
+    fn snapshot_until(vt: &VtStreams, rx: &mut mpsc::Receiver<VtEvent>, want: (u16, u16)) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while next_snapshot(vt, rx) != want {
+            assert!(Instant::now() < deadline, "the page never got a {want:?} screen");
+        }
+    }
+
+    fn wait_size(pane: &str, want: (u16, u16)) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while size_of(pane) != want {
+            assert!(Instant::now() < deadline, "session never became {want:?}, is {:?}", size_of(pane));
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn serve(name: &'static str, script: &str) {
+        let socket = seahelmd::client::socket_path(name).unwrap();
+        let argv = vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()];
+        std::thread::spawn(move || {
+            let _ = seahelmd::daemon::serve(&socket, name, &argv, None);
+        });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while seahelmd::client::connect(name).is_err() {
+            assert!(Instant::now() < deadline, "daemon {name} never came up");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn scratch_dir() -> PathBuf {
+        let dir = PathBuf::from(format!("/tmp/shgw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // The only tests in this crate that talk to a daemon; both set the same.
+        std::env::set_var("SEAHELMD_DIR", &dir);
+        dir
+    }
+
+    /// A chatty pane fills the channel while the session is busy with a
+    /// request; switching panes then must not wait on the reader it is
+    /// starving (the page froze on exactly this).
+    #[test]
+    fn switching_away_from_a_chatty_pane_does_not_wait_on_its_reader() {
+        let _dir = scratch_dir();
+        let name = "vt-chatty";
+        serve(name, "while :; do echo chatter chatter chatter; done");
+        // Room for one frame, and nobody draining it.
+        let (tx, rx) = mpsc::channel(1);
+        let mut vt = VtStreams::new(tx);
+        assert_eq!(vt.open(name)["ok"], true);
+        std::thread::sleep(Duration::from_millis(300));
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = vt.resize(name, 60, 20, false);
+            vt.close(name);
+            let _ = done_tx.send(());
+            drop(rx);
+        });
+        assert!(done_rx.recv_timeout(Duration::from_secs(5)).is_ok(), "resize/close blocked behind a full channel");
+        let _ = seahelmd::client::request(name, &Msg::Kill);
+    }
+
+    /// A page that asks for its own size shrinks the session while it looks,
+    /// gets a whole screen at that size, and hands the size back when it stops.
+    #[test]
+    fn a_sized_page_fits_the_session_and_gives_it_back() {
+        let _dir = scratch_dir();
+        let name = "vt-size";
+        serve(name, "sleep 60");
+
+        // The desktop pane, attached at its size.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut desk = loop {
+            match seahelmd::client::connect(name) {
+                Ok(s) => break s,
+                Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+                Err(e) => panic!("{e}"),
+            }
+        };
+        proto::write(&mut desk, &Msg::Attach { cols: 100, rows: 30 }).unwrap();
+        wait_size(name, (100, 30));
+        // Keep the desktop's queue drained so the daemon never drops it.
+        let mut desk_reader = desk.try_clone().unwrap();
+        std::thread::spawn(move || while let Ok(Some(_)) = proto::read(&mut desk_reader) {});
+
+        let (tx, mut rx) = mpsc::channel(64);
+        let mut vt = VtStreams::new(tx);
+        assert_eq!(vt.open(name)["ok"], true);
+        assert_eq!(next_snapshot(&vt, &mut rx), (100, 30), "passive: the desktop's size");
+
+        assert_eq!(vt.resize(name, 60, 20, false)["ok"], true);
+        assert_eq!(next_snapshot(&vt, &mut rx), (60, 20), "sized: a screen at the page's size");
+        wait_size(name, (60, 20));
+
+        // Wider than the desktop: the smaller of each wins.
+        assert_eq!(vt.resize(name, 160, 24, false)["ok"], true);
+        snapshot_until(&vt, &mut rx, (100, 24));
+        wait_size(name, (100, 24));
+
+        assert_eq!(vt.resize(name, 0, 0, false)["ok"], true);
+        snapshot_until(&vt, &mut rx, (100, 30));
+        wait_size(name, (100, 30));
+
+        // Taking over: the page's size, wider than the desktop or not.
+        let r = vt.resize(name, 160, 24, true);
+        assert_eq!((r["ok"].as_bool(), r["take_over"].as_bool()), (Some(true), Some(true)), "{r}");
+        snapshot_until(&vt, &mut rx, (160, 24));
+        wait_size(name, (160, 24));
+        assert_eq!(vt.resize(name, 0, 0, true)["take_over"], false, "passive never takes over");
+        snapshot_until(&vt, &mut rx, (100, 30));
+        wait_size(name, (100, 30));
+
+        assert_eq!(vt.resize("no-such-pane", 60, 20, false)["ok"], false);
+        drop(vt);
+        let _ = seahelmd::client::request(name, &Msg::Kill);
     }
 }

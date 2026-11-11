@@ -110,7 +110,7 @@ pub async fn run(gw: Arc<Gateway>, socket: WebSocket, meta: Meta) {
             }
             Some(m) = out_rx.recv() => vec![m],
             Some(e) = vt_rx.recv() => {
-                if authed && s.vt.is_open(&e.pane) { vec![s.encode_vt(&e)] } else { Vec::new() }
+                if authed && s.vt.is_current(&e) { vec![s.encode_vt(&e)] } else { Vec::new() }
             }
             ev = events.recv() => match ev {
                 Ok(ev) if authed => s.core_event(&ev),
@@ -322,6 +322,8 @@ impl Session {
                     refuse()
                 }
             }
+            // A guest does not get to reshape the owner's terminal.
+            "pane.vt_size" => refuse(),
             "pane.vt_open" | "pane.vt_close" | "pane.vt_keepalive" | "pane.send_keys" | "pane.send_text" | "pane.seen" | "message.history" => {
                 let refs: Vec<&str> = ["pane_session_key", "pane_id"].iter().filter_map(|k| str_of(p, k)).collect();
                 if !refs.is_empty() && refs.iter().all(|r| s.names(r)) {
@@ -360,6 +362,14 @@ impl Session {
                 let key = pane_ref(&p).unwrap_or_default();
                 let vt = &mut self.vt;
                 Ok(tokio::task::block_in_place(|| vt.open(&key)))
+            }
+            "pane.vt_size" => {
+                let key = pane_ref(&p).unwrap_or_default();
+                let n = |k: &str| p.get(k).and_then(Value::as_u64).unwrap_or(0).min(u16::MAX as u64) as u16;
+                let (cols, rows) = (n("cols"), n("rows"));
+                let take_over = p.get("take_over").and_then(Value::as_bool).unwrap_or(false);
+                let vt = &mut self.vt;
+                Ok(tokio::task::block_in_place(|| vt.resize(&key, cols, rows, take_over)))
             }
             "pane.vt_close" => {
                 self.vt.close(&pane_ref(&p).unwrap_or_default());

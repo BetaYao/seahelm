@@ -136,6 +136,7 @@ Commands (Gateway JSON-RPC):
 | method | What it does |
 |---|---|
 | `pane.vt_open` | attach; `vt.snapshot` first, `vt.data` after |
+| `pane.vt_size` | `{cols, rows, take_over}` the page's own grid (0×0: back to passive); sent only under ⋯ ▸ Terminal size ▸ This screen (follows where the page is smaller) or Take over (the page's size alone; the desktop pane shows a notice meanwhile) |
 | `pane.vt_keepalive` | 20s heartbeat |
 | `pane.vt_close` | detach this client |
 | `pane.send_keys` | `{b64}` UTF-8 key sequence; can go as binary frames once `keys_binary` is negotiated |

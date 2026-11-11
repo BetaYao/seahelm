@@ -15,6 +15,12 @@ pub enum Msg {
     /// Watch the session at this size: answered with `Repaint`, then `Output`
     /// for as long as the connection lasts.
     Attach { cols: u16, rows: u16 },
+    /// Attach as the viewer the session is sized for, whatever size the
+    /// others are: the session takes the smallest of such viewers only, and a
+    /// viewer it no longer fits is shown a notice instead of a garbled screen
+    /// until the last one leaves. Daemons that know it say `"take_over":
+    /// true` in their snapshot; one that does not drops the connection.
+    TakeOver { cols: u16, rows: u16 },
     /// Keystrokes from an attached client.
     Input(Vec<u8>),
     /// The attached client's window changed size.
@@ -57,6 +63,7 @@ impl Msg {
             Msg::Send(b) => (6, b.clone()),
             Msg::Kill => (7, vec![]),
             Msg::Snapshot => (8, vec![]),
+            Msg::TakeOver { cols, rows } => (9, size(*cols, *rows)),
             Msg::Repaint(b) => (64, b.clone()),
             Msg::Output(b) => (65, b.clone()),
             Msg::Text(s) => (66, s.as_bytes().to_vec()),
@@ -89,6 +96,10 @@ impl Msg {
             6 => Msg::Send(payload),
             7 => Msg::Kill,
             8 => Msg::Snapshot,
+            9 => {
+                let (cols, rows) = size(&payload)?;
+                Msg::TakeOver { cols, rows }
+            }
             64 => Msg::Repaint(payload),
             65 => Msg::Output(payload),
             66 => Msg::Text(text(payload)),
@@ -142,6 +153,7 @@ mod tests {
             Msg::Send(b"\x1b[A".to_vec()),
             Msg::Kill,
             Msg::Snapshot,
+            Msg::TakeOver { cols: 90, rows: 30 },
             Msg::Repaint(b"\x1b[2J".to_vec()),
             Msg::Output(vec![0, 255, 7]),
             Msg::Text("name=x".into()),

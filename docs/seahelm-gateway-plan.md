@@ -158,6 +158,7 @@ Then notifies follow, in order: `cards {cards}`, then `pane.message` for each ti
 | `session.snapshot` / `pane.list` | `{panes}` |
 | `fleet.groups {mode: repository\|status\|activity}` | `{mode, groups: [{id, title, status?, unseen?, items: [{id, worktree_path, repository, status, is_main_worktree, last_activity_at?, running_since?, unseen?, title?, pr?}]}]}`, computed in the gateway from core `worktree.list` + `pane.list` |
 | `pane.vt_open {pane_session_key}` | `{ok, cols, rows}` |
+| `pane.vt_size {pane_session_key, cols, rows}` | `{ok}`; re-attaches the open stream as a viewer of that size (clamped to 20×5–500×200; 0×0 = passive again), dropping the old attachment once the new one has its screen. seahelmd fits the session to its smallest viewer, so the desktop pane shrinks while the page looks; the new grid arrives as the next snapshot. `take_over: true` attaches with seahelmd's `TakeOver` instead: the session is sized for the page alone, and a desktop pane the grid no longer fits shows a notice until the page lets go. The answer's `take_over` says whether it did (a daemon started before `TakeOver` gets a plain sized attach). Refused on a share link |
 | `pane.vt_close` | local to the gateway |
 | `pane.vt_keepalive` | local to the gateway; a stream is reaped after 60 s without one |
 | `pane.send_keys` | `{pane_session_key, b64\|text}` on an open VT → the stream (`{sent}`); otherwise core `pane.send_keys {pane_id, keys}` |
