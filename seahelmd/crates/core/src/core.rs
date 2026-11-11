@@ -2196,7 +2196,8 @@ impl State {
             let worktree = self.registry.pane(&id).map(|p| p.worktree_path.as_str()).unwrap_or(&card.worktree_path);
             let name = std::path::Path::new(worktree).file_name().and_then(|n| n.to_str()).unwrap_or(worktree);
             let handle = self.handles.lock().unwrap_or_else(|e| e.into_inner()).handle(&id);
-            return seahelm_core_messages::event::CardSource { pane: id, label: format!("#{handle} · {name}") };
+            let label = self.card_source_label(&id, handle, name);
+            return seahelm_core_messages::event::CardSource { pane: id, label };
         }
 
         // Worktree-level client cards can outlive their pane.
@@ -2205,7 +2206,7 @@ impl State {
             return seahelm_core_messages::event::CardSource { pane: String::new(), label: name.into() };
         }
         let handle = self.handles.lock().unwrap_or_else(|e| e.into_inner()).handle(&card.pane);
-        seahelm_core_messages::event::CardSource { pane: card.pane.clone(), label: format!("#{handle} · {name}") }
+        seahelm_core_messages::event::CardSource { pane: card.pane.clone(), label: self.card_source_label(&card.pane, handle, name) }
     }
 
     fn publish_notice(&mut self, notice: Notice) {
@@ -2338,22 +2339,42 @@ impl State {
     fn pane_json(&self, id: &str) -> Option<Value> {
         let mut v = self.registry.pane_json(id)?;
         let custom = self.custom_titles.get(id);
-        let worktree = self.registry.pane(id).map(|p| p.worktree_path.clone()).unwrap_or_default();
         if let (Some(obj), Some(snap)) = (v.as_object_mut(), self.panes.get(id).and_then(|s| s.snapshot.as_ref())) {
             if !snap.title.is_empty() {
                 obj.insert("title".into(), json!(snap.title));
             }
             obj.insert("pwd".into(), json!(snap.pwd));
-            let home = std::env::var("HOME").unwrap_or_default();
-            if let Some(shown) = crate::pane_title::display_osc_title(&snap.title, &worktree, &snap.pwd, &home) {
-                obj.insert("display_title".into(), json!(shown));
-            }
+        }
+        if let (Some(obj), Some(shown)) = (v.as_object_mut(), self.pane_display_title(id)) {
+            obj.insert("display_title".into(), json!(shown));
         }
         if let (Some(obj), Some(t)) = (v.as_object_mut(), custom) {
             obj.insert("custom_title".into(), json!(t));
-            obj.insert("display_title".into(), json!(t));
         }
         Some(v)
+    }
+
+    /// What a pane is called on every surface: the user's name for it, else
+    /// the terminal's own title when it says more than the path.
+    fn pane_display_title(&self, id: &str) -> Option<String> {
+        if let Some(t) = self.custom_titles.get(id) {
+            return Some(t.clone());
+        }
+        let worktree = self.registry.pane(id).map(|p| p.worktree_path.clone()).unwrap_or_default();
+        let snap = self.panes.get(id).and_then(|s| s.snapshot.as_ref())?;
+        let home = std::env::var("HOME").unwrap_or_default();
+        crate::pane_title::display_osc_title(&snap.title, &worktree, &snap.pwd, &home)
+    }
+
+    /// `#n · title · worktree` — the title left out when there is none or it
+    /// only repeats the worktree's name.
+    fn card_source_label(&self, id: &str, handle: impl std::fmt::Display, worktree: &str) -> String {
+        let title = self.pane_display_title(id).map(|t| t.trim().to_string()).unwrap_or_default();
+        if title.is_empty() || title.eq_ignore_ascii_case(worktree) {
+            format!("#{handle} · {worktree}")
+        } else {
+            format!("#{handle} · {title} · {worktree}")
+        }
     }
 
     fn explain(&self, id: &str, now: Timestamp) -> Value {
@@ -3129,6 +3150,26 @@ mod card_timeline_tests {
             .filter(|m| m.kind == seahelm_core_messages::Kind::Card)
             .map(|m| m.to_json())
             .collect()
+    }
+
+    #[test]
+    fn card_rows_name_the_pane_by_its_title() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let mut st = core.lock();
+        st.register(registration());
+        st.register(first_mate_registration());
+        st.custom_titles.insert("seahelm-pane-1".into(), "修登录".into());
+
+        st.cards.raise(card(CardKind::Report, "Check these files"), 1.0).unwrap();
+        st.publish_cards();
+        assert_eq!(card_rows(&st)[0]["source"]["label"], "#1 · 修登录 · saas-mono");
+
+        // A title that only repeats the worktree is not said twice.
+        st.custom_titles.insert("seahelm-pane-1".into(), "saas-mono".into());
+        st.cards.raise(card(CardKind::Report, "Another"), 2.0).unwrap();
+        st.publish_cards();
+        assert_eq!(card_rows(&st).last().unwrap()["source"]["label"], "#1 · saas-mono");
     }
 
     #[test]

@@ -511,12 +511,14 @@ struct OpenedSurfaceView: View {
             WaitingCardView(
                 order: liveCard,
                 language: model.language,
-                sourceLabel: entry.sourceLabel.isEmpty
-                    ? (model.liveCardSourceLabels[entry.id]
-                        ?? (liveCard.paneSessionKey == FirstMatePane.sessionName
+                // The live label first: the row's was written when the card
+                // was raised, before a rename or the agent's title arrived.
+                sourceLabel: model.liveCardSourceLabels[entry.id]
+                    ?? (entry.sourceLabel.isEmpty
+                        ? (liveCard.paneSessionKey == FirstMatePane.sessionName
                             || liveCard.isFirstMates ? "First Mate"
-                            : (worktreeName.isEmpty ? liveCard.project : worktreeName)))
-                    : entry.sourceLabel,
+                            : (worktreeName.isEmpty ? liveCard.project : worktreeName))
+                        : entry.sourceLabel),
                 onOption: { optionText in model.answerCard(liveCard, optionText: optionText) },
                 onDismiss: { model.dismissCard(liveCard) },
                 onReveal: { model.revealCard(liveCard) }

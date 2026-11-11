@@ -326,18 +326,22 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(IslandCardOptionStyle.forKind(.approval), .fullWidthRows)
     }
 
-    func testFleetCardSourceLabelUsesWorktreeNameInsteadOfProject() {
+    func testFleetCardSourceLabelNamesPaneTitleAndWorktree() {
         let path = "/repo/worktrees/island-timeline"
         let pane = PaneRef(handle: 7, id: "pane-id", sessionKey: "pane-session",
                            project: "seahelm", branch: "feature/island-timeline", worktreePath: path,
                            type: "Claude", title: "Timeline")
         let worktree = WorktreeRef(repo: "seahelm", branch: pane.branch, path: path)
         let index = FleetIndex(panes: [pane], worktrees: [worktree])
-        XCTAssertEqual(index.cardSourceLabel(for: pane), "#7 · feature/island-timeline")
+        XCTAssertEqual(index.cardSourceLabel(for: pane), "#7 · Timeline · feature/island-timeline")
 
         let detached = PaneRef(handle: nil, id: "detached", project: "seahelm", branch: "",
                                worktreePath: "/repo/worktrees/review", type: "Claude", title: "Review")
         XCTAssertEqual(FleetIndex(panes: [detached]).cardSourceLabel(for: detached), "review")
+
+        let untitled = PaneRef(handle: 3, id: "untitled", project: "seahelm", branch: "main",
+                               worktreePath: "/repo", type: "Claude", title: "  ")
+        XCTAssertEqual(FleetIndex(panes: [untitled]).cardSourceLabel(for: untitled), "#3 · main")
     }
 
     func testCardStatesRenderAsAnsweredOrQuietHistory() throws {

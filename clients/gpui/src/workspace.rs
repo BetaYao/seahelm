@@ -575,6 +575,10 @@ impl Workspace {
             .items_center()
             .gap(px(8.))
             .child(div().flex_none().text_size(px(10.5)).line_height(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(tint).child(what));
+        // Which pane raised it: a worktree can hold several.
+        if let Some(tag) = card_pane_tag(self.pane_facts.get(&card.pane_session_key)) {
+            head = head.child(div().flex_none().text_size(px(10.5)).line_height(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink_faint()).child(tag));
+        }
         // First Mate's own asks name no worktree: their kind says whose they are.
         let own = card.project == "First Mate";
         if place && !own {
@@ -1857,6 +1861,19 @@ enum Submit {
 
 /// What a card says under its kind label, without repeating the label
 /// ("First Mate asks: …" under "First Mate asks").
+/// `#n · name` for the pane a card came from — the user's name for it,
+/// else the agent's title; just the name before the core has numbered it.
+fn card_pane_tag(facts: Option<&core_client::PaneFacts>) -> Option<String> {
+    let facts = facts?;
+    let title = facts.custom_title.as_deref().or(facts.display_title.as_deref()).map(str::trim).filter(|t| !t.is_empty());
+    match (facts.handle, title) {
+        (Some(n), Some(t)) => Some(format!("#{n} · {t}")),
+        (Some(n), None) => Some(format!("#{n}")),
+        (None, Some(t)) => Some(t.to_string()),
+        (None, None) => None,
+    }
+}
+
 fn card_body(card: &core_client::Card) -> String {
     let text = card.message.trim();
     ["First Mate asks: ", "First Mate suggests: "]
@@ -2112,5 +2129,24 @@ mod pr_badge_tests {
         assert_eq!(text("draft", Some("failing"), None, 3), "#3 draft \u{2715}");
         assert_eq!(text("merged", None, None, 4), "#4 merged");
         assert_eq!(text("open", None, Some("review_required"), 5), "#5");
+    }
+}
+
+#[cfg(test)]
+mod card_pane_tag_tests {
+    use super::*;
+
+    #[test]
+    fn names_the_pane_by_handle_and_title() {
+        let mut f = core_client::PaneFacts { handle: Some(10), display_title: Some("Fix login".into()), ..Default::default() };
+        assert_eq!(card_pane_tag(Some(&f)).as_deref(), Some("#10 · Fix login"));
+        f.custom_title = Some("改名测试".into());
+        assert_eq!(card_pane_tag(Some(&f)).as_deref(), Some("#10 · 改名测试"));
+        f.custom_title = None;
+        f.display_title = Some("  ".into());
+        assert_eq!(card_pane_tag(Some(&f)).as_deref(), Some("#10"));
+        f.handle = None;
+        assert_eq!(card_pane_tag(Some(&f)), None);
+        assert_eq!(card_pane_tag(None), None);
     }
 }
