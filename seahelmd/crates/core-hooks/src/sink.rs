@@ -42,6 +42,10 @@ pub fn expand(mut ev: WebhookEvent) -> Vec<WebhookEvent> {
     if let Some(options) = &options {
         let mut data = crate::Map::new();
         data.insert("options".into(), Value::from(options.clone()));
+        // The reply the options follow. The suggestion is handled before the
+        // Stop that carries it, so without this its card would be summed up
+        // by the turn before.
+        data.insert("last_assistant_message".into(), Value::String(suggest::strip_sentinel(&prose)));
         out.push(WebhookEvent {
             source: SUGGEST_SOURCE.into(),
             session_id: ev.session_id.clone(),
@@ -119,6 +123,8 @@ mod tests {
         ));
         assert_eq!(out.iter().map(|e| e.event).collect::<Vec<_>>(), vec![WebhookEventType::Suggest, WebhookEventType::AgentStop]);
         assert_eq!(out[1].data_str("last_assistant_message"), Some("Fixed."));
+        // The suggestion carries the reply it ends: it is handled first.
+        assert_eq!(out[0].data_str("last_assistant_message"), Some("Fixed."));
     }
 
     #[test]

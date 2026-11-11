@@ -191,7 +191,8 @@ pub struct HookInput {
     /// (cwd_changed, subagent_stop, assistant_response). They still resolve
     /// and type the pane.
     pub kind: Option<EventKind>,
-    /// A Stop's `last_assistant_message`, sentinel already stripped.
+    /// A Stop's `last_assistant_message` (also on the suggestion split off
+    /// it), sentinel already stripped.
     pub last_assistant_message: Option<String>,
 }
 
@@ -775,7 +776,9 @@ impl Registry {
                 outcome: None,
             };
         };
-        if matches!(kind, EventKind::AgentStopped { success: true }) {
+        // A suggestion carries the reply it ends, and comes just before that
+        // reply's Stop: its card is summed up by this turn, not the last.
+        if matches!(kind, EventKind::AgentStopped { success: true } | EventKind::Suggest { .. }) {
             if let Some(text) = input
                 .last_assistant_message
                 .as_deref()
