@@ -12,7 +12,9 @@ import Foundation
 ///   While it is silent the island says so (`IslandWarning.core`).
 /// - **The fleet**: every 2 s, the panes as `pane.list` answers them
 ///   (`pane.sync`) and every worktree (`worktrees.set`), so the core watches
-///   exactly what the app shows.
+///   exactly what the app shows; and every split tree (`layouts.set`), which
+///   the core only keeps, so the web (through seahelm-gateway) can lay a
+///   worktree's panes out as the window does (`layout.get`).
 /// - **Handles**: the core numbers every pane (`#n`, in `pane.list`) and the
 ///   app shows its numbers (`handles`), so a chat and the desktop name a
 ///   pane the same way. A pane the core has not listed yet has none.
@@ -25,6 +27,8 @@ final class CoreLink {
     /// What `pane.list` would answer, and every worktree path. Set by the owner.
     var panes: () -> [[String: Any]] = { [] }
     var worktrees: () -> [String] = { [] }
+    /// Every live split tree by worktree path (`TerminalCoordinator.liveLayouts`).
+    var layouts: () -> [String: [String: Any]] = { [:] }
 
     /// Whether the core answered the last sync. Main thread.
     private(set) var reachable = false
@@ -95,8 +99,10 @@ final class CoreLink {
         syncing = true
         let panes = self.panes()
         let worktrees = self.worktrees()
+        let layouts = self.layouts()
         DispatchQueue.global(qos: .utility).async { [weak self] in
             _ = CoreSocketClient.call("worktrees.set", ["paths": worktrees])
+            _ = CoreSocketClient.call("layouts.set", ["client": "macos", "layouts": layouts])
             let synced = CoreSocketClient.call("pane.sync", ["panes": panes])
             let listed = CoreSocketClient.call("pane.list")
             DispatchQueue.main.async {

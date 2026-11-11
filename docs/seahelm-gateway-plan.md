@@ -9,7 +9,8 @@ Decided 2026-11-04:
 1. The Gmail mail channel is deleted, not moved.
 2. Per-device tokens ship in this change.
 3. The web's split button becomes "new pane": the core starts a session in that worktree,
-   and the desktop places it. `layout.live` mirroring is gone.
+   and the desktop places it. `layout.live` mirroring went with the app link; the
+   page mirrors the desktop again through the core instead (`layout.get`, below).
 4. tokio / axum / reqwest live in the gateway crate only.
 
 ## Components
@@ -159,6 +160,7 @@ Then notifies follow, in order: `cards {cards}`, then `pane.message` for each ti
 | `fleet.groups {mode: repository\|status\|activity}` | `{mode, groups: [{id, title, status?, unseen?, items: [{id, worktree_path, repository, status, is_main_worktree, last_activity_at?, running_since?, unseen?, title?, pr?}]}]}`, computed in the gateway from core `worktree.list` + `pane.list` |
 | `pane.vt_open {pane_session_key}` | `{ok, cols, rows}` |
 | `pane.vt_size {pane_session_key, cols, rows}` | `{ok}`; re-attaches the open stream as a viewer of that size (clamped to 20×5–500×200; 0×0 = passive again), dropping the old attachment once the new one has its screen. seahelmd fits the session to its smallest viewer, so the desktop pane shrinks while the page looks; the new grid arrives as the next snapshot. `take_over: true` attaches with seahelmd's `TakeOver` instead: the session is sized for the page alone, and a desktop pane the grid no longer fits shows a notice until the page lets go. The answer's `take_over` says whether it did (a daemon started before `TakeOver` gets a plain sized attach). Refused on a share link |
+| `layout.get {worktree_path}` | core: `{root, focused_pane_session_key}`, the split tree a desktop client shows for the worktree (the macOS app hands the core all of them every 2 s, `layouts.set`), or `{root: null}`; the page stacks the panes then |
 | `pane.vt_close` | local to the gateway |
 | `pane.vt_keepalive` | local to the gateway; a stream is reaped after 60 s without one |
 | `pane.send_keys` | `{pane_session_key, b64\|text}` on an open VT → the stream (`{sent}`); otherwise core `pane.send_keys {pane_id, keys}` |
@@ -176,7 +178,7 @@ Then notifies follow, in order: `cards {cards}`, then `pane.message` for each ti
 Every call to the core carries `_meta: {via: "web:<device label>"}`.
 
 **Removed:** `pane.event` notifies and `question.answer` / `suggest.pick` / `decision.dismiss` /
-`autopilot.answer` (use cards); `layout.live`; `pane.split`.
+`autopilot.answer` (use cards); `layout.live` (now `layout.get`, from the core); `pane.split`.
 
 **Share connections may call:** `ping`, `session.snapshot`, `pane.list`, `fleet.groups`,
 `pane.vt_*`, `pane.send_keys`, `pane.send_text`, `pane.seen`, `message.history`, and

@@ -738,6 +738,7 @@ class TabCoordinator {
                         controlDataSource?.snapshotPanes().map(\.dict) ?? []
                     }
                     CoreLink.shared.worktrees = { [weak self] in self?.allWorktrees.map(\.info.path) ?? [] }
+                    CoreLink.shared.layouts = { [weak self] in self?.terminalCoordinator.liveLayouts() ?? [:] }
                     CoreLink.shared.start()
                     // What every pane is doing comes from the core, and so do
                     // the notices and unseen completions.

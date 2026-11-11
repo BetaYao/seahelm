@@ -106,6 +106,10 @@ struct State {
     /// in front. `visible` / `app_active` are their union: a pane is on
     /// screen when any client in front shows it.
     clients: HashMap<String, (HashSet<String>, bool)>,
+    /// Each desktop client's split layouts (`layouts.set {client}`), by
+    /// worktree path: kept as the client sent them, for remote clients to
+    /// mirror (`layout.get`). The core reads nothing in them.
+    layouts: HashMap<String, serde_json::Map<String, Value>>,
     /// The newest location each pane's agent reported (`pane.location`).
     locations: HashMap<String, Value>,
     /// Each worktree's title as the app's rows read it (session summary,
@@ -256,6 +260,7 @@ impl Core {
                 visible: HashSet::new(),
                 app_active: false,
                 clients: HashMap::new(),
+                layouts: HashMap::new(),
                 locations: HashMap::new(),
                 worktree_titles: HashMap::new(),
                 session_refs,
@@ -528,6 +533,30 @@ impl Core {
                 st.provider.set_worktrees(&paths, now);
                 st.registry.reorder(&paths);
                 Ok(json!({"worktrees": paths.len()}))
+            }
+            // A desktop client's split trees, all of them each time, by
+            // worktree path: `{root, focused_pane_session_key}`, the root a
+            // SplitNode (`{type: leaf, pane_session_key}` or `{type: split,
+            // axis, ratio, first, second}`).
+            "layouts.set" => {
+                let client = str_param(&p, "client").unwrap_or_else(|| "default".into());
+                let layouts = p.get("layouts").and_then(Value::as_object).cloned().unwrap_or_default();
+                let n = layouts.len();
+                self.lock().layouts.insert(client, layouts);
+                Ok(json!({"layouts": n}))
+            }
+            // The split tree a desktop client shows for a worktree, for a
+            // remote client to mirror; `{root: null}` when none shows it.
+            "layout.get" => {
+                let Some(path) = str_param(&p, "worktree_path") else {
+                    return Reply::Value(Err(RpcError::invalid_params("worktree_path required")));
+                };
+                let st = self.lock();
+                // The macOS app's first: it is the desktop most users look at.
+                let mut clients: Vec<&String> = st.layouts.keys().collect();
+                clients.sort_by_key(|c| (c.as_str() != "macos", c.as_str()));
+                let found = clients.into_iter().find_map(|c| st.layouts[c].get(&path)).cloned();
+                Ok(found.unwrap_or_else(|| json!({"root": null})))
             }
             "pane.register" => {
                 let Some(r) = registration(&p) else {
@@ -3539,5 +3568,37 @@ mod pane_rename_tests {
         assert!(listed(&core).get("custom_title").is_none());
 
         assert!(call(&core, "pane.rename", json!({"pane_id": "nope", "title": "x"})).is_err());
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use crate::peer::{Client, Verdict};
+
+    fn call(core: &Arc<Core>, method: &str, p: Value) -> RpcResult {
+        match core.clone().call_checked(method, p, Some(1), || Verdict::Client { client: Client::MacApp, in_pane: None }) {
+            Reply::Value(v) => v,
+            Reply::Stream(_) => panic!("a stream"),
+        }
+    }
+
+    /// A remote client mirrors the split tree a desktop client shows; the
+    /// macOS app's comes first, and a worktree nobody shows has none.
+    #[test]
+    fn a_desktop_layout_is_kept_for_remote_clients() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let tree = json!({"root": {"type": "split", "axis": "horizontal", "ratio": 0.5,
+            "first": {"type": "leaf", "pane_session_key": "a"}, "second": {"type": "leaf", "pane_session_key": "b"}},
+            "focused_pane_session_key": "b"});
+        call(&core, "layouts.set", json!({"client": "gpui", "layouts": {"/w/repo": {"root": {"type": "leaf", "pane_session_key": "g"}}}})).unwrap();
+        call(&core, "layouts.set", json!({"client": "macos", "layouts": {"/w/repo": tree.clone()}})).unwrap();
+        assert_eq!(call(&core, "layout.get", json!({"worktree_path": "/w/repo"})).unwrap(), tree);
+        assert_eq!(call(&core, "layout.get", json!({"worktree_path": "/w/other"})).unwrap(), json!({"root": null}));
+        // Each set is the whole picture: a worktree the app no longer shows goes.
+        call(&core, "layouts.set", json!({"client": "macos", "layouts": {}})).unwrap();
+        assert_eq!(call(&core, "layout.get", json!({"worktree_path": "/w/repo"})).unwrap()["root"]["pane_session_key"], "g");
+        assert!(call(&core, "layout.get", json!({})).is_err());
     }
 }

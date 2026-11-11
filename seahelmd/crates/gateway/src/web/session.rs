@@ -205,7 +205,7 @@ fn pane_ref(p: &Value) -> Option<String> {
 
 /// Methods a paired page may not call: the core's client-side plumbing.
 const NOT_FOR_PAGES: &[&str] = &[
-    "pane.register", "pane.unregister", "pane.sync", "worktrees.set", "client.visible", "events.subscribe",
+    "pane.register", "pane.unregister", "pane.sync", "worktrees.set", "layouts.set", "client.visible", "events.subscribe",
     "message.subscribe", "hook", "suggest", "cards.raise", "cards.clear", "autopilot.propose", "agent.forget",
 ];
 
