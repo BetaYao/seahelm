@@ -3488,6 +3488,29 @@ mod pane_rename_tests {
     }
 
     #[test]
+    fn a_suggestion_card_sums_up_the_reply_it_ends() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        call(&core, "pane.register", json!({"pane": "seahelm-repo-a", "worktree_path": "/w/repo"})).unwrap();
+        let turn = |prompt: &str, reply: &str| {
+            for p in [
+                json!({"hook_event_name": "UserPromptSubmit", "prompt": prompt, "seahelm_pane_id": "seahelm-repo-a", "seahelm_source": "claude-code", "session_id": "s1", "cwd": "/w/repo"}),
+                json!({"hook_event_name": "Stop", "last_assistant_message": reply, "seahelm_pane_id": "seahelm-repo-a", "seahelm_source": "claude-code", "session_id": "s1", "cwd": "/w/repo"}),
+            ] {
+                let Reply::Value(r) = core.clone().dispatch("hook", p, now()) else { panic!() };
+                r.unwrap();
+            }
+        };
+        turn("one", "First turn.\n::seahelm-suggest:: a | b");
+        turn("two", "Second turn.\n::seahelm-suggest:: c | d");
+        let cards = call(&core, "cards.list", json!({})).unwrap();
+        let cards = cards["cards"].as_array().cloned().unwrap_or_default();
+        let suggestion = cards.iter().find(|c| c["kind"] == "suggestion").expect("a suggestion card");
+        assert_eq!(suggestion["message"], "Second turn.");
+        assert_eq!(suggestion["options"], json!(["c", "d"]));
+    }
+
+    #[test]
     fn a_name_is_shown_kept_cleared_and_forgotten() {
         let tmp = tempfile::tempdir().unwrap();
         let core = Core::for_test(tmp.path());
