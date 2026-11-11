@@ -424,18 +424,37 @@ pub fn worktree_delete(core: &Core, p: &Value) -> RpcResult {
         let _ = seahelmd::client::request(session, &Msg::Kill);
         core.unregister_pane(session);
     }
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&main)
-        .args(["worktree", "remove"])
-        .arg(dir)
-        .output()
-        .map_err(|e| RpcError::internal(e.to_string()))?;
+    let remove = |force: bool| {
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("-C").arg(&main).args(["worktree", "remove"]);
+        if force {
+            cmd.arg("--force");
+        }
+        cmd.arg(dir).output().map_err(|e| RpcError::internal(e.to_string()))
+    };
+    let mut out = remove(false)?;
+    // git refuses any worktree with an initialised submodule unless forced,
+    // clean or not. `git status` above already covers the submodules (their
+    // changes, new commits and untracked content), so a clean tree is safe
+    // to force; ask again in case something was written since.
+    if !out.status.success() && refuses_for_submodules(&String::from_utf8_lossy(&out.stderr)) && is_clean(dir) {
+        out = remove(true)?;
+    }
     if !out.status.success() {
         return Err(RpcError::internal(format!("git worktree remove: {}", String::from_utf8_lossy(&out.stderr).trim())));
     }
     core.clear_worktree_cards(&path);
     Ok(json!({"worktree_path": path, "deleted": true}))
+}
+
+/// `git worktree remove`'s refusal of a worktree that has initialised
+/// submodules, which it gives whether or not the tree is clean.
+fn refuses_for_submodules(stderr: &str) -> bool {
+    stderr.contains("containing submodules cannot be moved or removed")
+}
+
+fn is_clean(dir: &Path) -> bool {
+    git(dir, &["status", "--porcelain"]).is_some_and(|s| s.trim().is_empty())
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -632,6 +651,39 @@ mod issue_branch_tests {
         let result=worktree_create(&core,&json!({"repo_path":repo,"prompt":"https://github.com/o/r/issues/42 login"})).unwrap();
         assert_eq!(result["created"],false); assert_eq!(result["existing"],"bug/42-login");
         assert!(core.live_worktrees().is_empty());
+    }
+
+    #[test]
+    fn a_clean_worktree_with_an_initialised_submodule_is_deleted_and_a_dirty_one_is_not() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git").arg("-C").arg(dir)
+                .args(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "protocol.file.allow=always"])
+                .args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        let (sub, repo) = (tmp.path().join("sub"), tmp.path().join("repo"));
+        for d in [&sub, &repo] {
+            std::fs::create_dir(d).unwrap();
+            run(d, &["init", "-q", "-b", "main"]);
+            run(d, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        }
+        run(&repo, &["submodule", "add", "-q", sub.to_str().unwrap(), "sub"]);
+        run(&repo, &["commit", "-q", "-m", "submodule"]);
+        let core = Core::for_test(tmp.path());
+        for name in ["clean", "dirty"] {
+            let wt = tmp.path().join(name);
+            run(&repo, &["worktree", "add", "-q", "-b", name, wt.to_str().unwrap()]);
+            run(&wt, &["submodule", "update", "-q", "--init"]);
+        }
+        std::fs::write(tmp.path().join("dirty/sub/scratch.txt"), "x").unwrap();
+
+        let clean = tmp.path().join("clean");
+        assert_eq!(worktree_delete(&core, &json!({"worktree_path": clean})).unwrap()["deleted"], true);
+        assert!(!clean.exists());
+        let dirty = tmp.path().join("dirty");
+        assert!(worktree_delete(&core, &json!({"worktree_path": dirty})).is_err(), "untracked content in a submodule is work");
+        assert!(dirty.join("sub/scratch.txt").exists());
     }
 
     #[test] fn issue_branch_uses_the_learned_template_or_default() {
