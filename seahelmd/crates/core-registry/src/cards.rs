@@ -305,6 +305,14 @@ impl Cards {
     pub fn observe(&mut self, o: &Outcome, now: Timestamp) -> bool {
         let mut changed = self.sweep_absent(now);
         let pane = o.info.id.as_str();
+        // Some clients report turn start only through OSC/screen status,
+        // without a UserPrompt hook. Only the edge starts a new turn; repeated
+        // working frames must not withdraw suggestions emitted by this turn.
+        if o.status_changed && o.new_status == AgentStatus::Running
+            && !matches!(o.event.kind, EventKind::Suggest { .. })
+        {
+            changed |= self.clear_suggestions(pane, now);
+        }
         changed |= match &o.event.kind {
             EventKind::UserPrompt { .. } => {
                 let stale = |c: &Card| (c.kind == CardKind::Suggestion || c.kind.is_question()) && c.pane == pane;
@@ -363,6 +371,13 @@ impl Cards {
             changed |= self.drop_pane(pane, now);
         }
         changed
+    }
+
+    /// Withdraw every prior suggestion for this pane, across all clients.
+    fn clear_suggestions(&mut self, pane: &str, now: Timestamp) -> bool {
+        let stale = |c: &Card| c.kind == CardKind::Suggestion && c.pane == pane;
+        let active = self.remove_where(&stale, CardState::Gone, None, None, now);
+        self.finish_absent_where(&stale, now) || active
     }
 
     /// Late assistant prose for a pane's suggestion whose summary is tool
@@ -481,6 +496,7 @@ impl Cards {
             }
             CardKind::Suggestion => {
                 self.resolve(id, CardState::Answered, Some(label.to_string()), via, now);
+                self.clear_suggestions(&card.pane, now);
                 Ok(Answer::Keys { pane: card.pane, inputs: vec![Input::Bytes(label.to_string()), Input::Submit], confirm_review: false })
             }
             CardKind::Choice => {
@@ -812,6 +828,49 @@ mod tests {
         let changes = q.take_changes();
         assert_eq!(changes.len(), 1);
         assert_eq!((changes[0].state, changes[0].card.kind), (CardState::Gone, CardKind::Suggestion));
+    }
+
+    #[test]
+    fn starting_a_turn_without_a_prompt_hook_clears_only_that_panes_suggestions() {
+        let mut q = Cards::new();
+        q.observe(&suggest("p1", &["old"]), 1.0);
+        q.observe(&suggest("p2", &["other pane"]), 1.0);
+        q.take_changes();
+        let mut started = outcome("p1", EventSource::Osc7501,
+            EventKind::ProgramStatus { record: Some(seahelm_core_types::ProgramStatus {
+                state: seahelm_core_types::ProgramState::Working, kind: None, progress: None,
+                app: "codex".into(), title: String::new(), msg: String::new(),
+            }) }, AgentStatus::Running);
+        started.old_status = AgentStatus::Idle;
+        started.status_changed = true;
+        assert!(q.observe(&started, 2.0));
+        assert_eq!(q.list().len(), 1);
+        assert_eq!(q.list()[0].pane, "p2");
+        assert_eq!(q.take_changes()[0].state, CardState::Gone);
+
+        q.observe(&suggest("p1", &["new turn"]), 3.0);
+        q.take_changes();
+        started.old_status = AgentStatus::Running;
+        started.status_changed = false;
+        assert!(!q.observe(&started, 4.0));
+        assert_eq!(q.list().len(), 2, "repeated working frames preserve the new suggestions");
+    }
+
+    #[test]
+    fn answering_a_suggestion_clears_all_older_suggestions_for_the_same_pane() {
+        let mut q = Cards::new();
+        q.observe(&suggest("p1", &["old"]), 1.0);
+        let mut older = q.list()[0].clone();
+        older.id = "older-card".into();
+        q.cards.push(older);
+        q.observe(&suggest("p2", &["other pane"]), 1.0);
+        q.take_changes();
+        q.answer("c-1", "old", None, 2.0).unwrap();
+        assert_eq!(q.list().len(), 1);
+        assert_eq!(q.list()[0].pane, "p2");
+        let changes = q.take_changes();
+        assert_eq!(changes.iter().map(|c| c.state).collect::<Vec<_>>(), [CardState::Answered, CardState::Gone]);
+        assert!(q.answer("older-card", "old", None, 3.0).is_err());
     }
 
     #[test]

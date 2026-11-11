@@ -3359,6 +3359,30 @@ mod card_timeline_tests {
     }
 
     #[test]
+    fn running_edge_withdraws_previous_suggestions_from_all_clients_and_history() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let mut st = core.lock();
+        st.register(registration());
+        st.register(first_mate_registration());
+        let info = st.registry.pane("seahelm-pane-1").unwrap().clone();
+        st.settle(&outcome(info.clone(), EventKind::Suggest { options: vec!["Next".into()] }, AgentStatus::Idle), 1.0);
+        let id = st.cards.list()[0].id.clone();
+        let mut start = outcome(info, EventKind::ProgramStatus { record: Some(seahelm_core_types::ProgramStatus {
+                state: seahelm_core_types::ProgramState::Working, kind: None, progress: None,
+                app: "codex".into(), title: String::new(), msg: String::new(),
+            }) }, AgentStatus::Running);
+        start.event.source = EventSource::Osc7501;
+        start.old_status = AgentStatus::Idle;
+        start.status_changed = true;
+        st.settle(&start, 2.0);
+        assert!(st.cards.list().is_empty());
+        assert!(!st.pending_card_rows.contains_key(&id));
+        let rows = card_rows(&st);
+        assert_eq!(rows.iter().filter(|r| r["card_id"] == id).map(|r| r["state"].as_str().unwrap()).collect::<Vec<_>>(), ["pending", "gone"]);
+    }
+
+    #[test]
     fn scanned_choice_text_update_keeps_id_and_appends_pending_update_row() {
         let tmp = tempfile::tempdir().unwrap();
         let core = Core::for_test(tmp.path());

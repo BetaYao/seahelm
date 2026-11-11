@@ -26,11 +26,14 @@ struct OpenedSurfaceView: View {
                 Color.clear.frame(height: 6)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    titleRow(using: proxy)
-                        .background(GeometryReader { geo in
-                            Color.clear.preference(key: TimelineChromeKey.self,
-                                                   value: TimelineChromeValue(titleHeight: geo.size.height))
-                        })
+                    VStack(alignment: .leading, spacing: 8) {
+                        header
+                        titleRow(using: proxy)
+                    }
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(key: TimelineChromeKey.self,
+                                               value: TimelineChromeValue(titleHeight: geo.size.height))
+                    })
                     if let warning = model.warning {
                         warningBanner(warning.message)
                             .background(GeometryReader { geo in
@@ -117,22 +120,23 @@ struct OpenedSurfaceView: View {
             if model.mateBusy {
                 pill(model.language.stop, systemImage: "stop.fill", tint: .white.opacity(0.75)) { model.stopFirstMate() }
             }
-            if model.shouldShowTimelineFilter {
-                filterPill {
-                    let turningOn = !model.isFilteringTimeline
-                    let anchor = nearestCardID(in: cachedItems, filtering: turningOn)
-                        ?? nearestCardID(in: cachedItems, filtering: model.isFilteringTimeline)
-                    let viewportHeight = layoutTracker.viewportHeight
-                    let oldCenter = anchor.flatMap { layoutTracker.cardCenters[$0] } ?? viewportHeight / 2
-                    let anchorY = min(max(oldCenter / max(viewportHeight, 1), 0.08), 0.92)
-                    model.toggleTimelineFilter()
-                    if let anchor {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            proxy.scrollTo("card:\(anchor)", anchor: UnitPoint(x: 0.5, y: anchorY))
-                        }
+            // Keep the count visible even when no decisions are waiting.
+            filterPill {
+                let turningOn = !model.isFilteringTimeline
+                let anchor = nearestCardID(in: cachedItems, filtering: turningOn)
+                    ?? nearestCardID(in: cachedItems, filtering: model.isFilteringTimeline)
+                let viewportHeight = layoutTracker.viewportHeight
+                let oldCenter = anchor.flatMap { layoutTracker.cardCenters[$0] } ?? viewportHeight / 2
+                let anchorY = min(max(oldCenter / max(viewportHeight, 1), 0.08), 0.92)
+                model.toggleTimelineFilter()
+                if let anchor {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        proxy.scrollTo("card:\(anchor)", anchor: UnitPoint(x: 0.5, y: anchorY))
                     }
                 }
             }
+            .opacity(model.shouldShowTimelineFilter ? 1 : 0.45)
+            .allowsHitTesting(model.shouldShowTimelineFilter)
         }
     }
 
@@ -331,7 +335,9 @@ struct OpenedSurfaceView: View {
                 }
             }
             .overlay {
-                if case let .card(entry) = item.kind, highlightedCardID == entry.id {
+                if case let .card(entry) = item.kind,
+                   entry.cardKind == Card.Kind.suggestion.rawValue,
+                   entry.effectiveState(liveCard: model.orders.first { $0.id == entry.id }) == .pending {
                     RoundedRectangle(cornerRadius: 11, style: .continuous)
                         .stroke(IslandStyle.accent.opacity(0.8), lineWidth: 1.5)
                 }
@@ -371,6 +377,9 @@ struct OpenedSurfaceView: View {
             if case let .card(entry) = $0.kind { return entry.cardKind == Card.Kind.suggestion.rawValue }
             return false
         }
+        if filtering {
+            return suggestions.map { TimelineDisplayRow(id: $0.scrollID, kind: .item($0)) }
+        }
         let recentSuggestionIDs = Set(suggestions.suffix(3).compactMap { item -> String? in
             guard case let .card(entry) = item.kind else { return nil }
             return entry.id
@@ -382,19 +391,9 @@ struct OpenedSurfaceView: View {
         let olderIDs = Set(olderSuggestions.map(\.scrollID))
 
         var result: [TimelineDisplayRow] = []
-        var hidden: [ConversationItem] = []
         var didInsertMoreSuggestions = false
-        func flushHidden() {
-            guard !hidden.isEmpty else { return }
-            let rows = hidden
-            let id = "messages:\(rows.first!.scrollID)"
-            result.append(TimelineDisplayRow(id: id, kind: .collapsedMessages(rows)))
-            hidden.removeAll()
-        }
-
         for item in active {
             if olderIDs.contains(item.scrollID) {
-                flushHidden()
                 if !didInsertMoreSuggestions {
                     let id = "suggestions:\(olderSuggestions.first?.scrollID ?? item.scrollID)"
                     result.append(TimelineDisplayRow(id: id, kind: .moreSuggestions(olderSuggestions)))
@@ -403,23 +402,8 @@ struct OpenedSurfaceView: View {
                 continue
             }
 
-            let visible: Bool
-            if !filtering {
-                visible = true
-            } else if case let .card(entry) = item.kind {
-                visible = entry.effectiveState(liveCard: liveByID[entry.id]) == .pending
-            } else {
-                visible = false
-            }
-
-            if visible {
-                flushHidden()
-                result.append(TimelineDisplayRow(id: item.scrollID, kind: .item(item)))
-            } else {
-                hidden.append(item)
-            }
+            result.append(TimelineDisplayRow(id: item.scrollID, kind: .item(item)))
         }
-        flushHidden()
         return result
     }
 
@@ -941,10 +925,12 @@ struct OpenedSurfaceView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.55))
             Spacer(minLength: 8)
-            // Quota rides the title row: every provider's windows at once,
-            // rather than the closed pill's one-at-a-time rotation.
             ForEach(model.usageReadouts) { readout in
-                UsageReadoutView(logoName: readout.logoName, segments: readout.segments)
+                UsageReadoutView(logoName: readout.logoName, segments: readout.segments, showsReset: false)
+                    .help(readout.segments.map { segment in
+                        [segment.label, segment.percentText, segment.resetText]
+                            .compactMap { $0 }.joined(separator: " ")
+                    }.joined(separator: " · "))
             }
         }
         .animation(.easeInOut(duration: 0.25), value: model.usageReadouts)

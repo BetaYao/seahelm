@@ -101,9 +101,9 @@ final class IslandModel {
         }
     }
 
-    /// Waiting cards that need a decision. Suggestions appear in the filtered
-    /// timeline, but are not part of its `待办 N` count.
-    var pendingCardCount: Int { orders.filter { $0.kind != .suggestion }.count }
+    /// Todos are pending suggestion cards; questions and approvals stay in
+    /// the conversation but are not part of this count or its filter.
+    var pendingCardCount: Int { orders.filter { $0.kind == .suggestion }.count }
     var shouldShowTimelineFilter: Bool { pendingCardCount > 0 || isFilteringTimeline }
 
     // MARK: First Mate's conversation

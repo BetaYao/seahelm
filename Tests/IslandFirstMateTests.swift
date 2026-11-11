@@ -9,7 +9,7 @@ final class IslandFirstMateTests: XCTestCase {
 
     func testUserOpenStartsUnfilteredAtTheBottom() {
         let model = IslandModel()
-        model.orders = [order("a", kind: .question)]
+        model.orders = [order("a")]
         model.open(reason: .click)
         XCTAssertFalse(model.isFilteringTimeline)
         XCTAssertNil(model.timelineScrollTarget)
@@ -19,7 +19,7 @@ final class IslandFirstMateTests: XCTestCase {
     func testTheLastWaitingCardTurnsOffTheFilterWithoutChangingTheTimeline() {
         let model = IslandModel()
         model.open(reason: .click)
-        model.orders = [order("a", kind: .question)]
+        model.orders = [order("a")]
         model.toggleTimelineFilter()
         XCTAssertTrue(model.isFilteringTimeline)
         model.orders = []
@@ -30,7 +30,7 @@ final class IslandFirstMateTests: XCTestCase {
 
     func testEscapeClearsTheFilterThenCloses() {
         let model = IslandModel()
-        model.orders = [order("a", kind: .question)]
+        model.orders = [order("a")]
         model.open(reason: .click)
         model.toggleTimelineFilter()
         XCTAssertTrue(model.escape())
@@ -43,7 +43,7 @@ final class IslandFirstMateTests: XCTestCase {
 
     func testSendingTurnsOffFilterAndReturnsToTimelineBottom() {
         let model = IslandModel()
-        model.orders = [order("a", kind: .question)]
+        model.orders = [order("a")]
         model.open(reason: .click)
         model.toggleTimelineFilter()
         model.didSendMessage()
@@ -81,7 +81,7 @@ final class IslandFirstMateTests: XCTestCase {
 
     func testAnsweringCardLeavesIslandOpenAndShowsOtherWaitingCards() {
         let answered = order("answered", kind: .question)
-        let next = order("next", kind: .approval)
+        let next = order("next")
         let model = IslandModel()
         model.orders = [answered, next]
         model.open(reason: .click)
@@ -104,7 +104,7 @@ final class IslandFirstMateTests: XCTestCase {
 
     func testStoppingFirstMateKeepsIslandOpenAndFocusesComposer() {
         let model = IslandModel()
-        model.orders = [order("pending", kind: .question)]
+        model.orders = [order("pending")]
         model.open(reason: .click)
         model.toggleTimelineFilter()
         var interrupted = false
@@ -152,15 +152,24 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(IslandLanguage.english.composerPlaceholder, "Ask First Mate — / for a command")
     }
 
-    func testFilterVisibilityFollowsWaitingCountAndSuggestionsDoNotCount() {
+    func testFilterCountsOnlyPendingSuggestions() {
         let model = IslandModel()
         XCTAssertFalse(model.shouldShowTimelineFilter)
         model.orders = [order("suggestion")]
-        XCTAssertEqual(model.pendingCardCount, 0)
-        XCTAssertFalse(model.shouldShowTimelineFilter)
+        XCTAssertEqual(model.pendingCardCount, 1)
+        XCTAssertTrue(model.shouldShowTimelineFilter)
+        model.toggleTimelineFilter()
+        XCTAssertTrue(model.isFilteringTimeline)
+        model.orders = [order("suggestion"), order("second-suggestion")]
+        XCTAssertEqual(model.pendingCardCount, 2)
+        XCTAssertTrue(model.isFilteringTimeline)
         model.orders = [order("suggestion"), order("question", kind: .question)]
         XCTAssertEqual(model.pendingCardCount, 1)
         XCTAssertTrue(model.shouldShowTimelineFilter)
+        model.orders = [order("question", kind: .question)]
+        XCTAssertEqual(model.pendingCardCount, 0)
+        XCTAssertFalse(model.isFilteringTimeline)
+        XCTAssertFalse(model.shouldShowTimelineFilter)
     }
 
     func testCmdJFocusKeepsTheOpenIslandAndReturnsToTheBottom() {
@@ -293,7 +302,7 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(revealed.map(\.id), [worktreeCard.id])
         XCTAssertFalse(model.isOpened, "A worktree card returns to its pane in the dashboard")
 
-        model.orders = [order("pending", kind: .question)]
+        model.orders = [order("pending")]
         model.open(reason: .click)
         model.toggleTimelineFilter()
         let requestBeforeReveal = model.timelineScrollRequest
@@ -362,7 +371,7 @@ final class IslandFirstMateTests: XCTestCase {
         XCTAssertEqual(pending.effectiveState(liveCard: nil), .gone)
     }
 
-    func testFilterKeepsWaitingCardsAndCollapsesHiddenRuns() {
+    func testFilterShowsOnlySuggestionCardsWithoutMessagePlaceholders() {
         func message(_ seq: UInt64, _ kind: MessageKind, text: String? = nil) -> MessageEvent {
             MessageEvent(seq: seq, paneId: "fm", paneSessionKey: "k", kind: kind,
                          ts: Date(timeIntervalSince1970: Double(seq)), text: text)
@@ -387,12 +396,13 @@ final class IslandFirstMateTests: XCTestCase {
             guard case let .item(item) = row.kind, case let .card(card) = item.kind else { return nil }
             return card.id
         }
-        XCTAssertEqual(shownCardIDs, ["todo-1", "suggestion", "todo-2"])
+        XCTAssertEqual(shownCardIDs, ["suggestion"])
         let collapsed = rows.compactMap { row -> [ConversationItem]? in
             guard case let .collapsedMessages(items) = row.kind else { return nil }
             return items
         }
-        XCTAssertEqual(collapsed.map { $0.map(\.messageCount) }, [[1], [1], [1]])
+        XCTAssertTrue(collapsed.isEmpty)
+        XCTAssertEqual(rows.count, 1)
 
         let afterPaneTyping = OpenedSurfaceView.timelineRows(
             from: items, filtering: false, liveCards: live.filter { $0.id != "suggestion" }
@@ -403,7 +413,7 @@ final class IslandFirstMateTests: XCTestCase {
         })
     }
 
-    func testCollapsedMessageRunKeepsItsIdentityWhenMoreMessagesArrive() throws {
+    func testFilteredCardKeepsItsIdentityWhenMoreMessagesArrive() throws {
         func user(_ seq: UInt64, _ text: String) -> MessageEvent {
             MessageEvent(seq: seq, paneId: "fm", paneSessionKey: "k", kind: .user,
                          ts: Date(timeIntervalSince1970: Double(seq)), text: text)
@@ -412,20 +422,20 @@ final class IslandFirstMateTests: XCTestCase {
             var event = MessageEvent(seq: seq, paneId: "fm", paneSessionKey: "k", kind: .card,
                                      ts: Date(timeIntervalSince1970: Double(seq)), text: "Wait")
             event.cardId = "wait"
-            event.cardKind = "question"
+            event.cardKind = "suggestion"
             event.cardState = .pending
             return event
         }
-        let live = [order("wait", kind: .question)]
+        let live = [order("wait")]
         let before = ConversationItem.items(from: [user(1, "one"), user(2, "two"), waitingCard(3)], liveCards: live)
         let after = ConversationItem.items(from: [user(1, "one"), user(2, "two"), user(3, "three"), waitingCard(4)], liveCards: live)
         let beforeRun = try XCTUnwrap(OpenedSurfaceView.timelineRows(from: before, filtering: true, liveCards: live).first)
         let afterRun = try XCTUnwrap(OpenedSurfaceView.timelineRows(from: after, filtering: true, liveCards: live).first)
-        XCTAssertEqual(beforeRun.id, "messages:event:1")
+        XCTAssertEqual(beforeRun.id, before.first { if case .card = $0.kind { return true }; return false }?.scrollID)
         XCTAssertEqual(afterRun.id, beforeRun.id)
     }
 
-    func testTodoCountExcludesSuggestionsAndFourSuggestionsFoldBehindMore() {
+    func testTodoCountIncludesSuggestionsAndFourSuggestionsFoldBehindMore() {
         let model = IslandModel()
         model.orders = [order("s1"), order("q1", kind: .question), order("s2"), order("q2", kind: .approval)]
         XCTAssertEqual(model.pendingCardCount, 2)
@@ -442,6 +452,9 @@ final class IslandFirstMateTests: XCTestCase {
         }
         let items = ConversationItem.items(from: rows, liveCards: suggestions)
         let display = OpenedSurfaceView.timelineRows(from: items, filtering: false, liveCards: suggestions)
+        let filtered = OpenedSurfaceView.timelineRows(from: items, filtering: true, liveCards: suggestions)
+        XCTAssertEqual(filtered.count, 4)
+        XCTAssertTrue(filtered.allSatisfy { if case .item = $0.kind { return true }; return false })
         XCTAssertEqual(display.filter { if case .moreSuggestions = $0.kind { return true }; return false }.count, 1)
         XCTAssertEqual(display.compactMap { row -> String? in
             guard case let .item(item) = row.kind, case let .card(card) = item.kind else { return nil }
