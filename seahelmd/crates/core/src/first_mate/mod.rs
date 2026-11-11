@@ -405,9 +405,11 @@ impl FirstMate {
             tasks_running: false,
             task_cards: HashMap::new(),
             task_in_flight: std::collections::BTreeSet::new(),
-            source_offers: source_offer::State::load(&dir),
+            // An offer whose card was up when the core stopped has no card
+            // now (cards live in memory): it may be made again.
+            source_offers: { let mut s = source_offer::State::load(&dir); s.asked.retain(|_, v| v != "offered"); s },
             source_offer_cards: HashMap::new(),
-            goal_offers: goal_offer::State::load(&dir),
+            goal_offers: { let mut s = goal_offer::State::load(&dir); s.asked.retain(|_, a| a.status != "offered"); s },
             goal_cards: HashMap::new(),
             core: core.clone(),
             tx,
@@ -903,7 +905,9 @@ impl FirstMate {
         }
         self.awaiting_since = Some(Instant::now());
         let send = |b: &[u8]| seahelmd::client::request(policy::SESSION, &seahelmd::proto::Msg::Send(b.to_vec()));
-        if send(text.as_bytes()).is_ok() {
+        // As a paste: its session always runs an agent's TUI, and bare keys
+        // lost all but the tail of a long message (the user's words first).
+        if send(&crate::actions::typed(text, true)).is_ok() {
             std::thread::sleep(Duration::from_millis(80));
             let _ = send(b"\r");
         }
