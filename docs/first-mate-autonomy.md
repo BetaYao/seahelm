@@ -61,6 +61,7 @@ up**, so that is the first vertical slice.
 | D32 | Global schedule mutations are user-only, peer-checked RPCs; schedule.list is read-only and available to panes. Only the exact job created through `schedule.add` has standing approval; hand edits do not grant starts. Cron fires once per matching minute, without catch-up, only while running, unpaused and outside quiet hours. `run-now` uses the same gates. | 2026-11-05 |
 | D33 | Creating a schedule is the user's standing approval for that job's `start_agent`: otherwise every recurrence would ask again for an action the user explicitly scheduled. The core applies this approval only to its own exact job start, preserving deny and concurrency/usage budgets. Runtime expiry plus 30 seconds of grace or a vanished session ends the run independently of interrupt delivery. Research has a global concurrency cap of one (`MAX_RESEARCH_RUNS`); overflow is skipped and audited. Scheduled starts use `research.started` / `schedule` audit entries, collected into the brief rather than individually sent to Telegram. | 2026-11-05 |
 | D34 | After three consecutive committed reports without a visible worktree visit or a follow-up to First Mate, propose stopping the job through a proactive card. Only the user's answer disables it. First Mate writes a capped change summary on `research.done`; the core stores it for the next brief. A committed report waits for an idle pane or the deadline before closing its session. Cleanup first verifies a linked worktree of the research repo (never main); integration is `--ff-only`. On failure any merge is aborted, the user gets one note and automatic cleanup stops, retaining the branch/worktree. Successful removals use `first_mate`, `how: research:<job>`. Failed runs are reported once; only reports/ and tracked changes are committed as leftovers. Untracked/ignored data is never force-added or deleted: its worktree is retained and the user is told. Launch reservations expire after 120 seconds; timeout/failure notes go to the timeline. Stop-job edits preserve unrelated schedule entries and their formatting. Finished runs retain only bounded report metadata; main is never removed. | 2026-11-05 |
+| D35 | An unset `first_mate_language` follows the user rather than defaulting to English: Chinese when most of the last 20 prompts `presence` keeps in `activity.json` hold a Chinese character, English when most do not, English with fewer than 5 to go by. Field use showed why: the user asked First Mate in Chinese to answer in Chinese, it wrote that into its standing orders, and the core's own brief, notes and card labels stayed English because they read only `config.json`. A set key always wins; `autopilot.state` reports `language` and `language_auto`, and the macOS island follows that reading. No card and no First Mate action writes the key. | 2026-11-11 |
 
 ## Today (verified in code, 2026-11-05)
 
@@ -407,7 +408,8 @@ choice.
   (habit level changes, cards withdrawn unanswered). Nothing to say: no
   brief, and the day counts as dealt with.
 - **Language** (`first_mate/lang.rs`): `config.json` `first_mate_language`,
-  `"en"` (default) or `"zh"`, picks the language of the brief and of every
+  `"en"` or `"zh"` — unset, the language of the user's own prompts (D35) —
+  picks the language of the brief and of every
   note row the core writes into First Mate's timeline (sweep and inventory
   lines, habit level changes, refused callers, a tampered grants file). The
   audit log stays English; cards and First Mate's own words, and its action
