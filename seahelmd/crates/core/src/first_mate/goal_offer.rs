@@ -241,4 +241,21 @@ mod tests {
         fm2.maybe_offer_goal(now);
         assert!(fm2.goal_cards.is_empty());
     }
+
+    #[test]
+    fn an_offer_lost_with_a_restart_is_made_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let repo = dir.join("saas").to_string_lossy().into_owned();
+        let now = seahelm_core_types::now();
+        write_records(dir, &[created(&repo, now - DAY, "user"), created(&repo, now - 2.0 * DAY, "user"), created(&repo, now - 3.0 * DAY, "user")]);
+        let mut fm = mate(dir);
+        fm.maybe_offer_goal(now);
+        assert_eq!(fm.goal_cards.len(), 1);
+        drop(fm);
+        // The core restarted: the card is gone, so the project may be asked again.
+        let mut fm = mate(dir);
+        fm.maybe_offer_goal(now);
+        assert_eq!(fm.goal_cards.len(), 1);
+    }
 }

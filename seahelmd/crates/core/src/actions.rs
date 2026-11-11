@@ -127,6 +127,28 @@ pub fn wait_output(core: &Core, p: &Value) -> RpcResult {
     }
 }
 
+/// Text typed into a pane, as the app's paste path types it. An AI agent's
+/// TUI gets it bracketed (`ESC[200~ … ESC[201~`): typed as bare keys, a long
+/// message reached Claude Code cut to its last few dozen characters — the
+/// TUI guesses where a fast burst of keys starts and ends, and guessed
+/// wrong. Anything else gets the bytes as they are, since nothing says it
+/// asked for bracketed paste.
+pub fn typed(text: &str, agent: bool) -> Vec<u8> {
+    if !agent {
+        return text.as_bytes().to_vec();
+    }
+    // The text cannot end the paste early.
+    let body = text.replace("\x1b[201~", "");
+    let mut out = b"\x1b[200~".to_vec();
+    out.extend_from_slice(body.as_bytes());
+    out.extend_from_slice(b"\x1b[201~");
+    out
+}
+
+fn runs_agent(core: &Core, id: &str) -> bool {
+    core.pane_infos().iter().any(|(p, _)| p.id == id && p.agent_type.is_ai_agent())
+}
+
 /// Type and submit: the Return as a write of its own, a beat later.
 pub fn pane_run(core: &Core, p: &Value) -> RpcResult {
     let id = pane(core, p)?;
@@ -134,7 +156,7 @@ pub fn pane_run(core: &Core, p: &Value) -> RpcResult {
     if command.is_empty() {
         return Err(RpcError::invalid_params("command required"));
     }
-    send(&id, command.as_bytes())?;
+    send(&id, &typed(&command, runs_agent(core, &id)))?;
     std::thread::sleep(SUBMIT_DELAY);
     send(&id, b"\r")?;
     Ok(json!({"sent": true, "pane_id": id}))
@@ -146,7 +168,7 @@ pub fn pane_send_text(core: &Core, p: &Value) -> RpcResult {
     if text.is_empty() {
         return Err(RpcError::invalid_params("text required"));
     }
-    send(&id, text.as_bytes())?;
+    send(&id, &typed(text, runs_agent(core, &id)))?;
     // `enter: true` submits it, the Return as a write of its own a beat
     // later (as `pane.run`): a TUI reading the text and the Return in one
     // read can take the Return as part of a paste and not submit.
@@ -467,6 +489,14 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agents_get_text_as_one_bracketed_paste() {
+        assert_eq!(typed("ls -la", false), b"ls -la".to_vec());
+        assert_eq!(typed("给运动场馆\n\n[seahelm projects] []", true), "\x1b[200~给运动场馆\n\n[seahelm projects] []\x1b[201~".as_bytes().to_vec());
+        // A paste end inside the text is dropped, so it cannot end the paste.
+        assert_eq!(typed("a\x1b[201~b", true), b"\x1b[200~ab\x1b[201~".to_vec());
+    }
 
     #[test]
     fn branch_hints_require_first_mate_execution() {
