@@ -19,6 +19,9 @@ gpui = "0.2.2"
 keep-vt = { path = "../../seahelmd/crates/keep-vt" }
 seahelmd = { path = "../../seahelmd/crates/seahelmd" }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [profile.release]
 debug = 1
 

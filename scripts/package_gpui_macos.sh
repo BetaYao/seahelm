@@ -24,6 +24,8 @@ NOTARYTOOL_PROFILE="${NOTARYTOOL_PROFILE:-}"
 APPLE_ID="${APPLE_ID:-}"
 APPLE_APP_SPECIFIC_PASSWORD="${APPLE_APP_SPECIFIC_PASSWORD:-}"
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
+SPARKLE_PRIVATE_KEY="${SPARKLE_PRIVATE_KEY:-}"
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-Jfw9OUu27+LJNKOa9RxZJf70cGSyQXCetbWKF9bBxds=}"
 
 APP_NAME="Seahelm GPUI"
 BUNDLE_ID="com.seahelm.gpui"
@@ -35,11 +37,12 @@ if [[ -z "$version" ]]; then
   version="$(sed -n 's/.*MARKETING_VERSION: "\(.*\)"/\1/p' "$PROJECT_DIR/project.yml" | head -1)"
 fi
 short_version="${version%%-*}"
+UPDATER_PACKAGE="$PROJECT_DIR/clients/gpui/updater"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 APP_PATH="$work/$APP_NAME.app"
-mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$(dirname "$OUTPUT_PATH")"
+mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$APP_PATH/Contents/Frameworks" "$(dirname "$OUTPUT_PATH")"
 OUTPUT_PATH="$(cd "$(dirname "$OUTPUT_PATH")" && pwd)/$(basename "$OUTPUT_PATH")"
 
 echo "==> Assembling $APP_NAME.app ($version)"
@@ -47,6 +50,21 @@ cp "$GPUI_BIN" "$APP_PATH/Contents/MacOS/seahelm-gpui"
 for bin in "${COMPANIONS[@]}"; do
   cp "$DAEMON_DIR/$bin" "$APP_PATH/Contents/MacOS/$bin"
 done
+
+echo "==> Building Sparkle updater bridge"
+swift build --package-path "$UPDATER_PACKAGE" --configuration release
+updater_lib="$(find "$UPDATER_PACKAGE/.build" -path '*/release/libSeahelmGPUIUpdater.dylib' -type f -print -quit)"
+sparkle_framework="$(find "$UPDATER_PACKAGE/.build/artifacts" -name Sparkle.framework -type d -print -quit 2>/dev/null)"
+[[ -f "$updater_lib" ]] || { echo "Sparkle updater dylib not found under $UPDATER_PACKAGE/.build" >&2; exit 1; }
+[[ -d "$sparkle_framework" ]] || { echo "Sparkle.framework not found under $UPDATER_PACKAGE/.build/artifacts" >&2; exit 1; }
+cp "$updater_lib" "$APP_PATH/Contents/Frameworks/"
+ditto "$sparkle_framework" "$APP_PATH/Contents/Frameworks/Sparkle.framework"
+# SwiftPM's dylib refers to Sparkle through @rpath. Resolve it beside the dylib
+# when the GPUI executable loads the updater bridge from Contents/Frameworks.
+updater_dylib="$APP_PATH/Contents/Frameworks/libSeahelmGPUIUpdater.dylib"
+if ! otool -l "$updater_dylib" | grep -Fq 'path @loader_path'; then
+  install_name_tool -add_rpath @loader_path "$updater_dylib"
+fi
 
 # The AppKit app's icon, as an .icns.
 iconset="$work/AppIcon.iconset"
@@ -72,11 +90,15 @@ cat > "$APP_PATH/Contents/Info.plist" <<EOF
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$short_version</string>
-  <key>CFBundleVersion</key><string>$version</string>
+  <key>CFBundleVersion</key><string>$short_version</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <key>SUFeedURL</key><string>https://github.com/BetaYao/seahelm/releases/latest/download/appcast-gpui-arm64.xml</string>
+  <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_ED_KEY</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUAutomaticallyUpdate</key><false/>
 </dict>
 </plist>
 EOF
@@ -87,6 +109,21 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
   for bin in "${COMPANIONS[@]}"; do
     codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_PATH/Contents/MacOS/$bin"
   done
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" \
+    "$APP_PATH/Contents/Frameworks/libSeahelmGPUIUpdater.dylib"
+  sparkle="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+  sparkle_nested=(
+    "$sparkle/Versions/B/XPCServices/Downloader.xpc"
+    "$sparkle/Versions/B/XPCServices/Installer.xpc"
+    "$sparkle/Versions/B/Autoupdate"
+    "$sparkle/Versions/B/Updater.app"
+  )
+  for item in "${sparkle_nested[@]}"; do
+    if [[ -e "$item" ]]; then
+      codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$item"
+    fi
+  done
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$sparkle"
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_PATH"
   codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 else
@@ -130,5 +167,47 @@ if [[ "$ENABLE_NOTARIZATION" == "1" ]]; then
   rm -f "$OUTPUT_PATH"
   ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUTPUT_PATH"
 fi
+
+generate_appcast() {
+  if [[ -z "$SPARKLE_PRIVATE_KEY" || -z "$RELEASE_VERSION" ]]; then
+    echo "==> Missing Sparkle private key or release tag; skipping GPUI appcast"
+    return
+  fi
+
+  local sign_update
+  sign_update="$(find "$UPDATER_PACKAGE/.build/artifacts" -name sign_update -type f -perm -u+x -print -quit 2>/dev/null)"
+  [[ -n "$sign_update" ]] || { echo "Sparkle sign_update not found" >&2; exit 1; }
+  local attrs
+  attrs="$("$sign_update" "$OUTPUT_PATH" --ed-key-file - <<<"$SPARKLE_PRIVATE_KEY")"
+  [[ -n "$attrs" ]] || { echo "sign_update produced no GPUI signature" >&2; exit 1; }
+
+  local appcast="$PROJECT_DIR/dist/appcast-gpui-arm64.xml"
+  local url="https://github.com/BetaYao/seahelm/releases/download/${RELEASE_VERSION}/seahelm-gpui-macos-arm64.zip"
+  local pubdate
+  pubdate="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+  cat >"$appcast" <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Seahelm GPUI (arm64)</title>
+    <link>https://github.com/BetaYao/seahelm</link>
+    <description>Seahelm GPUI updates for Apple Silicon</description>
+    <language>en</language>
+    <item>
+      <title>$short_version</title>
+      <link>https://github.com/BetaYao/seahelm/releases/tag/$RELEASE_VERSION</link>
+      <sparkle:version>$short_version</sparkle:version>
+      <sparkle:shortVersionString>$short_version</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>$pubdate</pubDate>
+      <enclosure url="$url" type="application/octet-stream" $attrs />
+    </item>
+  </channel>
+</rss>
+XML
+  echo "==> Wrote ${appcast##*/}"
+}
+
+generate_appcast
 
 echo "==> $OUTPUT_PATH"

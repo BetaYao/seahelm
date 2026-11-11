@@ -343,9 +343,14 @@ jobs:
           SIGN_IDENTITY: ${{ env.HAS_CERTIFICATE_SECRETS == 'true' && secrets.APPLE_DEVELOPER_IDENTITY || '' }}
           ENABLE_NOTARIZATION: ${{ env.HAS_CERTIFICATE_SECRETS == 'true' && env.HAS_NOTARY_SECRETS == 'true' && '1' || '0' }}
           NOTARYTOOL_PROFILE: seahelm-notarytool
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
         run: |
           scripts/package_gpui_macos.sh
           echo "file=$OUTPUT_PATH" >> "$GITHUB_ENV"
+          if [ -f dist/appcast-gpui-arm64.xml ]; then
+            echo "appcast=dist/appcast-gpui-arm64.xml" >> "$GITHUB_ENV"
+          fi
 
       - name: Package
         if: runner.os != 'macOS'
@@ -401,6 +406,7 @@ jobs:
           path: |
             ${{ env.file }}
             ${{ env.setup || env.file }}
+            ${{ env.appcast }}
           if-no-files-found: error
 
   publish:
@@ -430,6 +436,31 @@ jobs:
           pattern: gpui-*
           merge-multiple: true
 
+      # The stable feed URL follows releases/latest. Keep the previous feed
+      # when this release has no macOS GPUI package; its enclosure still points
+      # to the previous release's signed zip. Prereleases do not move latest.
+      - name: Preserve the last successful GPUI appcast
+        if: ${{ !contains(github.ref_name, '-') }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = 'dist/appcast-gpui-arm64.xml';
+            if (fs.existsSync(path)) return;
+
+            const { data: release } = await github.rest.repos.getLatestRelease(context.repo);
+            const asset = release.assets.find(asset => asset.name === 'appcast-gpui-arm64.xml');
+            if (!asset) {
+              throw new Error('No previous GPUI appcast exists. Build the macOS GPUI package before publishing this stable release.');
+            }
+            const response = await fetch(asset.browser_download_url);
+            if (!response.ok) {
+              throw new Error(`Cannot preserve GPUI appcast: HTTP ${response.status}`);
+            }
+            fs.mkdirSync('dist', { recursive: true });
+            fs.writeFileSync(path, Buffer.from(await response.arrayBuffer()));
+            core.info(`Preserved GPUI appcast from ${release.tag_name}`);
+
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@v3
         with:
@@ -438,6 +469,7 @@ jobs:
             dist/seahelm-macos-x86_64.zip
             dist/appcast-arm64.xml
             dist/appcast-x86_64.xml
+            dist/appcast-gpui-arm64.xml
             dist/seahelm-gpui-*
           fail_on_unmatched_files: false
           generate_release_notes: true
