@@ -90,6 +90,9 @@ everything already queued, up to 256 KiB.
 - Dark and light (Catppuccin Mocha / Latte): starts as the system is; the
   contrast button flips the chrome and every pane live, and programs that
   asked (DEC 2031) are told.
+- The macOS app checks for signed GPUI releases through Sparkle and offers the
+  update for install. It follows `auto_update.enabled` and
+  `auto_update.check_interval_hours` in `~/.config/seahelm/config.json`.
 
 ## Not done yet
 

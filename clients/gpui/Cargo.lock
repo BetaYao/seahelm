@@ -4693,6 +4693,7 @@ dependencies = [
  "futures",
  "gpui",
  "keep-vt",
+ "libc",
  "seahelmd",
  "serde",
  "serde_json",

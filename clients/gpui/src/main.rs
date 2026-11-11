@@ -29,6 +29,7 @@ mod terminal_view;
 mod text_input;
 mod theme;
 mod tokens;
+mod updater;
 mod user_config;
 mod workspace;
 mod worktree_git;
@@ -106,6 +107,7 @@ fn main() {
             }
             None => {
                 cx.open_window(options, |_, cx| cx.new(Workspace::new)).expect("open window");
+                updater::start();
             }
         }
         // The last window closed is the client done: with no Dock icon to
