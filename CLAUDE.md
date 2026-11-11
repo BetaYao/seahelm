@@ -40,9 +40,11 @@ xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug 
 # Run a single test method
 xcodebuild -project seahelm.xcodeproj -scheme seahelmTests -configuration Debug test -only-testing:seahelmTests/ConfigTests/testDefaultConfig
 
-# Run UI tests — prefer targeted unit classes during active development.
-# The full seahelmUITests suite is slow AND hijacks the live app's control
-# socket, freezing panes at "running". Avoid it unless you specifically need it.
+# Run UI tests — prefer ./run_ui_tests.sh, and targeted unit classes during
+# active development. Each test runs the app in a /tmp/shui-* scratch home with
+# its own core and seahelmd daemons; run_ui_tests.sh ends them after the run.
+# A bare xcodebuild (or Xcode's ⌘U) does not: they keep running until the next
+# test launch sweeps scratch dirs older than 30 min (UITestScratch.sweepStale).
 xcodebuild -project seahelm.xcodeproj -scheme seahelmUITests -configuration Debug test
 
 # Clean build

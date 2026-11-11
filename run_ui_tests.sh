@@ -47,6 +47,8 @@ set -e
 
 # Each test launched the app in a scratch home under /tmp/shui-* (UITests'
 # ScratchHome): end the core and seahelmd daemons it left there, then remove it.
+# (The app also sweeps older ones at each test launch, UITestScratch.sweepStale;
+# this takes the last test's at once.)
 for dir in /tmp/shui-*; do
     [ -d "$dir" ] || continue
     pids=$(lsof -t +D "$dir" 2>/dev/null | sort -u || true)
