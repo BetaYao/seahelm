@@ -135,7 +135,7 @@ version. The core retains its last revision in process memory, so rewriting both
 on-disk files cannot change an active core's trusted memory. SessionStart hooks
 and project events include it; new-agent briefs carry only a pointer. Injection
 keeps whole goal/milestone/don'ts entries first, then newest notes, with a real
-total/capacity warning. `/notes [undo] @repo` works from the island and chats (not `/memory`: that is Claude Code's own).
+total/capacity warning. `/notes [undo] @repo` works from the island and chats (not `/memory`: that is Claude Code's own). A project with 3+ worktrees made in 7 days and an empty memory gets one proactive card asking for its final goal (`first_mate/goal_offer.rs`, `first-mate/goal-offers.json`): "tell" starts a First Mate turn that asks in one line and stores the user's own words as `goal:`; later (or dismissing) asks again after 14 days; don't is for good.
 First Mate may write notes; only the user may undo memory or confirm external edits. Routing uses the original user message and known
 project names, approved aliases or matching GitHub remotes; a mandate starts
 once per successful turn (another start asks on a card), otherwise ranked project
