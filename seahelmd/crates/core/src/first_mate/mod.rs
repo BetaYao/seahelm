@@ -36,6 +36,7 @@ pub mod rules;
 pub mod sweep;
 pub mod task_sources;
 pub mod source_offer;
+pub mod goal_offer;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -304,6 +305,10 @@ struct FirstMate {
     /// payload → (repo, `owner/repo`).
     source_offers: source_offer::State,
     source_offer_cards: HashMap<String, (String, String)>,
+    /// Asking busy projects for their goal (`goal_offer`) and the cards:
+    /// payload → repo.
+    goal_offers: goal_offer::State,
+    goal_cards: HashMap<String, String>,
     core: Arc<Core>,
     tx: Sender<Msg>,
     dir: PathBuf,
@@ -402,6 +407,8 @@ impl FirstMate {
             task_in_flight: std::collections::BTreeSet::new(),
             source_offers: source_offer::State::load(&dir),
             source_offer_cards: HashMap::new(),
+            goal_offers: goal_offer::State::load(&dir),
+            goal_cards: HashMap::new(),
             core: core.clone(),
             tx,
             ledger: Ledger::open(dir.join("state.json")),
@@ -608,6 +615,7 @@ impl FirstMate {
         self.expire_cards(now);
         self.poll_tasks(now);
         self.maybe_offer_source(now);
+        self.maybe_offer_goal(now);
         self.maybe_brief(now);
         self.release_held(now);
         if self.awaiting_since.is_some_and(|t| t.elapsed() > Duration::from_secs(120)) {
@@ -642,6 +650,7 @@ impl FirstMate {
         }
         for id in std::mem::take(&mut self.task_cards).keys() { self.core.drop_card_payload(id); }
         for id in std::mem::take(&mut self.source_offer_cards).keys() { self.core.drop_card_payload(id); }
+        for id in std::mem::take(&mut self.goal_cards).keys() { self.core.drop_card_payload(id); }
         self.task_in_flight.clear();
         self.approvals.clear();
         self.proposals.clear();
@@ -1124,6 +1133,7 @@ impl FirstMate {
             return;
         }
         if self.answer_source_offer(payload, option, now) { return; }
+        if self.answer_goal(payload, option, now) { return; }
         if self.answer_task(payload, option, now) { return; }
         if self.research_answer(payload, option) { return; }
         if self.answered_habit(payload, option, via.clone(), now) {
