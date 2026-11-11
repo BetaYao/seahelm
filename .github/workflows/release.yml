@@ -106,21 +106,14 @@ jobs:
       # seahelmd — the session daemon bundled as Resources/bin/seahelmd — is
       # built from source by the app's "Embed and sign seahelmd" phase
       # (scripts/build-seahelmd.sh) for this job's arch. It links libghostty-vt,
-      # built with Zig from the Ghostty commit seahelmd/vendor/build-vt.sh pins
-      # and cached here by that script's hash; Zig is only needed on a miss.
+      # the official XCFramework of the release seahelmd/vendor/build-vt.sh
+      # pins (no Zig), cached here by that script's hash.
       - name: Cache libghostty-vt
         id: vtcache
         uses: actions/cache@v5
         with:
           path: ~/.cache/seahelm/libghostty-vt
           key: libghostty-vt-${{ matrix.arch }}-${{ hashFiles('seahelmd/vendor/build-vt.sh') }}
-
-      - name: Install Zig
-        if: steps.vtcache.outputs.cache-hit != 'true'
-        uses: mlugg/setup-zig@v2
-        with:
-          # The pinned Ghostty commit's minimum_zig_version.
-          version: 0.16.0
 
       - name: Rust target for ${{ matrix.arch }}
         run: rustup target add ${{ matrix.arch == 'arm64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
@@ -249,12 +242,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Resolve Ghostty commit
+      - name: Resolve libghostty-vt version
         id: vt
         run: |
-          c=$(sed -n 's/^COMMIT="\${GHOSTTY_COMMIT:-\([0-9a-f]*\)}"$/\1/p' seahelmd/vendor/build-vt.sh)
-          [ -n "$c" ] || { echo "no pinned commit in build-vt.sh" >&2; exit 1; }
-          echo "commit=$c" >> "$GITHUB_OUTPUT"
+          v=$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' seahelmd/vendor/build-vt.sh)
+          [ -n "$v" ] || { echo "no pinned version in build-vt.sh" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Cache libghostty-vt
         id: vtcache
@@ -263,13 +256,15 @@ jobs:
           # keep-vt's default slice for the target: no KEEP_GHOSTTY_VT_DIR, so
           # no Windows drive path goes through Git Bash.
           path: seahelmd/vendor/${{ matrix.vt_slice }}
-          key: gpui-libghostty-vt-${{ matrix.name }}-${{ steps.vt.outputs.commit }}
+          key: gpui-libghostty-vt-${{ matrix.name }}-${{ steps.vt.outputs.version }}
 
+      # macOS takes the prebuilt XCFramework; the others build the release
+      # from source with libghostty-vt's minimum_zig_version.
       - name: Install Zig
-        if: steps.vtcache.outputs.cache-hit != 'true'
+        if: steps.vtcache.outputs.cache-hit != 'true' && runner.os != 'macOS'
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       - name: Build libghostty-vt
         if: steps.vtcache.outputs.cache-hit != 'true'

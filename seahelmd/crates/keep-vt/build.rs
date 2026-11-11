@@ -1,12 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
-    // Vendored libghostty-vt, one directory per platform. Reproduce with
-    // vendor/fetch.sh — the macOS slice comes from upstream's prebuilt
-    // xcframework, the Linux ones are built from upstream's source tarball
-    // with Zig (which is also what links the Rust for those targets), and
-    // the Windows one is built with Zig on Windows, against the MSVC
-    // toolchain the Rust links with (vendor/build-vt.sh, under Git Bash).
+    // Vendored libghostty-vt, one directory per platform, put there by
+    // vendor/build-vt.sh from the release it pins: the macOS slice from the
+    // official XCFramework, the others built from the release's source
+    // tarball with Zig (Windows on Windows, against the MSVC toolchain the
+    // Rust links with, under Git Bash).
     //
     // `KEEP_GHOSTTY_VT_DIR` names the directory outright, for a build that
     // keeps the library somewhere else.
@@ -30,7 +29,7 @@ fn main() {
     };
     let vendor = vendor
         .canonicalize()
-        .unwrap_or_else(|_| panic!("{} missing - run vendor/fetch.sh", vendor.display()));
+        .unwrap_or_else(|_| panic!("{} missing - run vendor/build-vt.sh", vendor.display()));
 
     // Zig names the static library for the platform: `libghostty-vt.a`, or
     // `ghostty-vt-static.lib` beside the import library of the DLL.
@@ -48,4 +47,62 @@ fn main() {
     }
     println!("cargo:include={}", vendor.join("include").display());
     println!("cargo:rerun-if-changed={}", vendor.join(file).display());
+
+    check_abi(&vendor.join("include"));
+}
+
+/// Compile `src/abi.rs`, as C `_Static_assert`s, against the headers of the
+/// library being linked: the bindings are written by hand, and a value or a
+/// layout that moved upstream would otherwise go on compiling and corrupt
+/// every call that uses it. Nothing is linked; a mismatch fails the build
+/// with the C name and the value the Rust side expects.
+fn check_abi(include: &Path) {
+    let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default());
+    let table = manifest.join("src/abi.rs");
+    println!("cargo:rerun-if-changed={}", table.display());
+    let text = std::fs::read_to_string(&table).expect("src/abi.rs");
+    let mut c = String::from("#include <stddef.h>\n#include <ghostty/vt.h>\n");
+    let mut checks = 0;
+    for line in text.lines().map(str::trim) {
+        let Some(args) = line.strip_suffix(");") else { continue };
+        let assert = if let Some(args) = args.strip_prefix("abi!(") {
+            // abi!(<rust>, <value>, "<C name>")
+            let (rest, name) = args.rsplit_once(", ").expect(line);
+            let (_, value) = rest.rsplit_once(", ").expect(line);
+            let name = name.trim_matches('"');
+            format!("_Static_assert((long long)({name}) == ({value}), \"keep-vt abi: {name} is not {value}\");")
+        } else if let Some(args) = args.strip_prefix("abi_size!(") {
+            // abi_size!(<rust type>, <size>, "<C type>")
+            let (rest, name) = args.rsplit_once(", ").expect(line);
+            let (_, size) = rest.rsplit_once(", ").expect(line);
+            let name = name.trim_matches('"');
+            format!("_Static_assert(sizeof({name}) == {size}, \"keep-vt abi: sizeof({name}) is not {size}\");")
+        } else if let Some(args) = args.strip_prefix("abi_offset!(") {
+            // abi_offset!(<rust type>, <field>, <offset>, "<C type>", "<C field>")
+            let parts: Vec<&str> = args.rsplitn(4, ", ").collect();
+            let (field, name, offset) = (parts[0].trim_matches('"'), parts[1].trim_matches('"'), parts[2]);
+            format!(
+                "_Static_assert(offsetof({name}, {field}) == {offset}, \"keep-vt abi: {name}.{field} is not at {offset}\");"
+            )
+        } else {
+            continue;
+        };
+        c.push_str(&assert);
+        c.push('\n');
+        checks += 1;
+    }
+    assert!(checks > 0, "src/abi.rs: no abi checks found");
+    let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR")).join("abi_check.c");
+    std::fs::write(&out, c).expect("write abi_check.c");
+    // `canonicalize` gives Windows' verbatim form (`\\?\D:\...`), which
+    // rustc takes and cl.exe's -I does not.
+    let include = include.to_string_lossy();
+    let include = include.strip_prefix(r"\\?\").unwrap_or(&include);
+    cc::Build::new()
+        .file(&out)
+        .include(include)
+        .std("c11")
+        .cargo_metadata(false)
+        .warnings(false)
+        .compile_intermediates();
 }
