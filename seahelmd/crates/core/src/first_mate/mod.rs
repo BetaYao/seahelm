@@ -35,6 +35,7 @@ pub mod research;
 pub mod rules;
 pub mod sweep;
 pub mod task_sources;
+pub mod source_offer;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -299,6 +300,10 @@ struct FirstMate {
     tasks_running: bool,
     task_cards: HashMap<String, Vec<task_sources::Task>>,
     task_in_flight: std::collections::BTreeSet<String>,
+    /// Offers to watch a repo's issues (`source_offer`) and their cards:
+    /// payload → (repo, `owner/repo`).
+    source_offers: source_offer::State,
+    source_offer_cards: HashMap<String, (String, String)>,
     core: Arc<Core>,
     tx: Sender<Msg>,
     dir: PathBuf,
@@ -395,6 +400,8 @@ impl FirstMate {
             tasks_running: false,
             task_cards: HashMap::new(),
             task_in_flight: std::collections::BTreeSet::new(),
+            source_offers: source_offer::State::load(&dir),
+            source_offer_cards: HashMap::new(),
             core: core.clone(),
             tx,
             ledger: Ledger::open(dir.join("state.json")),
@@ -600,6 +607,7 @@ impl FirstMate {
         self.check_memory_edits(now);
         self.expire_cards(now);
         self.poll_tasks(now);
+        self.maybe_offer_source(now);
         self.maybe_brief(now);
         self.release_held(now);
         if self.awaiting_since.is_some_and(|t| t.elapsed() > Duration::from_secs(120)) {
@@ -633,6 +641,7 @@ impl FirstMate {
             self.core.drop_card_payload(&id);
         }
         for id in std::mem::take(&mut self.task_cards).keys() { self.core.drop_card_payload(id); }
+        for id in std::mem::take(&mut self.source_offer_cards).keys() { self.core.drop_card_payload(id); }
         self.task_in_flight.clear();
         self.approvals.clear();
         self.proposals.clear();
@@ -1114,6 +1123,7 @@ impl FirstMate {
             }
             return;
         }
+        if self.answer_source_offer(payload, option, now) { return; }
         if self.answer_task(payload, option, now) { return; }
         if self.research_answer(payload, option) { return; }
         if self.answered_habit(payload, option, via.clone(), now) {

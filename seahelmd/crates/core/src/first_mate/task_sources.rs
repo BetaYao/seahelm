@@ -228,13 +228,28 @@ fn validate(s: &Source) -> Result<(), String> {
         _ => Err("invalid task source".into()),
     }
 }
+/// Whether `repo` has any task source.
+pub(super) fn has_source(dir: &Path, repo: &str) -> bool {
+    sources(dir).iter().any(|s| observations::norm(&s.repo) == observations::norm(repo))
+}
+
+/// A GitHub source for `repo` (`owner/repo`), as `task-source.add` writes
+/// one: the user said yes to First Mate's offer (`source_offer`).
+pub(super) fn add_github(dir: &Path, repo: &str, github: &str, assigned_to_me: bool) -> Result<(), String> {
+    let source = Source {
+        id: "gh".into(), repo: repo.into(), kind: "github".into(), github: github.into(), assigned_to_me,
+        labels: Vec::new(), milestone: String::new(), site: String::new(), jql: String::new(), minutes: cadence(),
+    };
+    rpc_at(dir, "task-source.add", &json!({"source": source}), &Live).map(|_| ()).map_err(|e| e.message)
+}
+
 fn secret_key(s: &Source) -> String {
     format!("{}:{}", habits::repo_key(&s.repo), s.id)
 }
 pub fn rpc(method: &str, p: &Value) -> RpcResult {
     rpc_at(&super::pane::dir(), method, p, &Live)
 }
-fn rpc_at(dir: &Path, method: &str, p: &Value, fetch: &dyn Fetcher) -> RpcResult {
+pub(super) fn rpc_at(dir: &Path, method: &str, p: &Value, fetch: &dyn Fetcher) -> RpcResult {
     let run = || -> Result<Value, String> {
         let repo = p["repo"].as_str().unwrap_or_default();
         let path = dir
