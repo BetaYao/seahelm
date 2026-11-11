@@ -1191,6 +1191,13 @@ function heldMessageSeq(){
 
 function onSocketGone(ws){
   if (S.gw && S.gw.ws !== ws) return;          // a socket already replaced
+  // Requests still waiting on this socket will never be answered. Each is
+  // failed now, so what it held — a card's buttons, the composer's text, the
+  // new-work sheet's "Starting…" — is let go. Not retried: whether the
+  // request reached the Mac before the link died is unknowable here, and a
+  // resent prompt or worktree.create could happen twice. The auth reply is
+  // left out: failing it reads as a rejected credential and stops reconnecting.
+  const orphaned = S.gw ? [...S.gw.req.values()].filter(cb => cb.method !== 'auth') : [];
   S.gw = null; S.transport = null;
   // The panes' attach leases went with the socket; keep where we were so
   // the reconnect can put it back rather than landing on an empty page.
@@ -1199,7 +1206,15 @@ function onSocketGone(ws){
   // Do not overwrite a gate-visible auth error with a generic "offline".
   if (reconnector.isStopped && !gateErrorMsg) setStatus(false, 'Offline');
   reconnector.closed();
+  for (const cb of orphaned) {
+    try { cb(null, { code: LINK_LOST, message: 'Connection lost' }); }
+    catch (e) { log('sys', '(reply)', String(e && e.message || e)); }
+  }
 }
+
+/** The error a request gets when its socket died before the answer came. */
+const LINK_LOST = 'link-lost';
+function linkLost(r){ return !!(r && r.ok === false && r.error && r.error.code === LINK_LOST); }
 
 // ── liveness ─────────────────────────────────────────────────────────────
 // A phone that sleeps through a WiFi hand-off, or a tunnel that drops the path,
@@ -1262,7 +1277,7 @@ function gwSend(method, params, onReply){
   if (!S.gw || !S.gw.ws || S.gw.ws.readyState !== WebSocket.OPEN) return;
   const id = 'g' + (++S.gw.n);
   const frame = { id, method, params };
-  if (onReply) S.gw.req.set(id, onReply);
+  if (onReply) S.gw.req.set(id, Object.assign((r, e) => onReply(r, e), { method }));
   S.gw.ws.send(JSON.stringify(frame));
   log('tx', method, frame);
 }
@@ -1976,7 +1991,7 @@ function sendTimelineCardAction(id, { index = null, dismiss = false } = {}){
       S.cardActionSignatures.delete(cardId);
       if (previousSelection) S.cardSelections.set(cardId, previousSelection);
       renderMessageTimeline(FM_KEY);
-      showActionToast((r.error && r.error.message) || 'Not sent', true);
+      showActionToast(linkLost(r) ? 'Connection lost — tap again if it is still waiting' : ((r.error && r.error.message) || 'Not sent'), true);
     }
   });
 }
@@ -2229,7 +2244,15 @@ function sendComposerText(byTap){
   if (S.todoFilter) setMateTodoFilter(false);
   const pane = S.panes.get(key) || {};
   const paneId = pane.pane_id || key;
-  sendCommand('pane.send_text', { pane_id: paneId, text, enter: true }, () => {});
+  sendCommand('pane.send_text', { pane_id: paneId, text, enter: true }, (r) => {
+    if (!r || r.ok !== false) return;
+    // Not sent, or not known to be: give the words back rather than lose
+    // them, unless something new has been typed since.
+    if (!input.value.trim()) { input.value = text; autoGrowComposer(); renderSendButton(); }
+    showActionToast(linkLost(r)
+      ? 'Connection lost — your message may not have been sent'
+      : ((r.error && r.error.message) || 'Not sent'), true);
+  });
   input.value = '';
   if (byTap) input.blur();
   autoGrowComposer();
@@ -2686,7 +2709,7 @@ function renderReplyBar(){
             S.events.set(pid, e);
           }
           renderSuggestions();
-          showActionToast((r.error && r.error.message) || 'Not sent', true);
+          showActionToast(linkLost(r) ? 'Connection lost — tap again if it is still waiting' : ((r.error && r.error.message) || 'Not sent'), true);
         }
       });
   };
@@ -3510,7 +3533,9 @@ function nwSubmit(){
     nw.busy = false;
     $('newWork').classList.remove('busy');
     if (!r || r.ok === false) {
-      nwError((r && r.error && r.error.message) || 'Could not start the worktree');
+      nwError(linkLost(r)
+        ? 'Connection lost before the Mac answered. The worktree may have been made — check the list before starting it again.'
+        : (r && r.error && r.error.message) || 'Could not start the worktree');
       nwSyncButton();
       return;
     }
@@ -4578,7 +4603,16 @@ function sendCommand(method, params, onReply){
     if (!onReply) return;
     onReply(error ? { ok: false, error } : { ok: true, result: result ?? {} });
   });
+  // Something the user did and is waiting to see: find out now whether the
+  // link is alive, rather than at the next heartbeat (up to 23 s on a path
+  // that died without closing), so a lost request is let go while the user
+  // still remembers sending it.
+  if (USER_ACTIONS.has(method)) probeLink(HEARTBEAT_TIMEOUT_MS);
 }
+const USER_ACTIONS = new Set([
+  'pane.send_text', 'cards.answer', 'cards.dismiss', 'worktree.create', 'pane.new', 'pane.close',
+  'autopilot.say', 'pane.rename',
+]);
 
 // ── wire ─────────────────────────────────────────────────────────────────────
 renderGate();   // the gate is the page until a connection exists
