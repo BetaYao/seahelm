@@ -3744,26 +3744,36 @@ function renderVtModeBadge(){
 renderVtModeBadge();
 
 // ── Terminal size ─────────────────────────────────────────────────────────
-// Off: the desktop's grid, drawn as large as the slot allows. On: the grid
-// this screen's slot holds, asked of seahelmd for every pane on screen. The
-// session takes the smallest of its viewers, so the desktop pane shrinks to
-// match while the page looks and springs back when it stops.
+// 'desktop': the desktop's grid, drawn as large as the slot allows.
+// 'fit': the grid this screen's slot holds, asked of seahelmd for every pane
+//   on screen. The session takes the smallest of its viewers, so it follows
+//   this screen only where this screen is the smaller one.
+// 'take': the same grid, and the session is sized for this page alone; a
+//   desktop pane it no longer fits shows a notice until the page lets go.
+// Leaving the page, or going back to 'desktop', gives the size back.
 const VT_FIT_KEY = 'seahelm_vt_fit';
-function loadVtFit(){ return localStorage.getItem(VT_FIT_KEY) === '1'; }
-function setVtFit(on){
-  localStorage.setItem(VT_FIT_KEY, on ? '1' : '0');
+const VT_FIT_MODES = ['desktop', 'fit', 'take'];
+const VT_FIT_LABELS = { desktop: 'Desktop', fit: 'This screen', take: 'Take over' };
+function loadVtFit(){
+  const v = localStorage.getItem(VT_FIT_KEY);
+  return v === '1' ? 'fit' : (VT_FIT_MODES.includes(v) ? v : 'desktop');
+}
+function setVtFit(mode){
+  localStorage.setItem(VT_FIT_KEY, mode);
   renderVtFitBadge();
   sendViewerSizes();
 }
 function renderVtFitBadge(){
   const el = $('vtFitBadge');
   if (!el) return;
-  const on = loadVtFit();
-  el.innerHTML = `Terminal size <span class="val">${on ? 'This screen' : 'Desktop'}</span>`;
-  el.title = on
-    ? 'Laid out for this screen; the desktop pane follows while you look — click to keep the desktop size'
-    : 'The desktop pane\'s size, scaled to fit — click to lay it out for this screen';
-  el.onclick = () => setVtFit(!on);
+  const mode = loadVtFit();
+  el.innerHTML = `Terminal size <span class="val">${VT_FIT_LABELS[mode]}</span>`;
+  el.title = {
+    desktop: 'The desktop pane\'s size, scaled to fit — click to lay it out for this screen',
+    fit: 'Laid out for this screen where it is smaller than the desktop pane — click to take over',
+    take: 'Laid out for this screen alone; the desktop pane shows a notice while you look — click for the desktop size',
+  }[mode];
+  el.onclick = () => setVtFit(VT_FIT_MODES[(VT_FIT_MODES.indexOf(mode) + 1) % VT_FIT_MODES.length]);
 }
 renderVtFitBadge();
 
@@ -3792,14 +3802,21 @@ function slotGrid(entry){
 /** Tell the gateway the size this pane wants: its slot's grid, or none. */
 function sendViewerSize(key, entry){
   if (!isLinked() || SHARE_TOKEN) return;
-  const want = loadVtFit() ? slotGrid(entry) : null;
+  const mode = loadVtFit();
+  const grid = mode === 'desktop' ? null : slotGrid(entry);
+  const want = grid && { cols: grid.cols, rows: grid.rows, take: mode === 'take' };
   const was = entry.sentSize;
   if (!want && !was) return;
-  if (want && was && want.cols === was.cols && want.rows === was.rows) return;
+  if (want && was && want.cols === was.cols && want.rows === was.rows && want.take === was.take) return;
   entry.sentSize = want;
-  const size = want || { cols: 0, rows: 0 };
-  sendCommand('pane.vt_size', { pane_session_key: key, cols: size.cols, rows: size.rows }, (r) => {
-    if (r && r.ok === false) log('sys','(vt size failed)', JSON.stringify(r.error||r));
+  const size = want || { cols: 0, rows: 0, take: false };
+  sendCommand('pane.vt_size', { pane_session_key: key, cols: size.cols, rows: size.rows, take_over: size.take }, (r) => {
+    if (r && r.ok === false){ log('sys','(vt size failed)', JSON.stringify(r.error||r)); return; }
+    // Session daemons outlive upgrades; one started before take-over existed
+    // got a plain sized attach instead.
+    if (size.take && r && r.take_over === false){
+      showActionToast('This pane started before take-over existed — restart it to use it. Sized to fit instead.', true);
+    }
   });
 }
 function sendViewerSizes(){

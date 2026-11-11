@@ -40,6 +40,11 @@ struct Subscriber {
     /// The size this client shows. Zero in either direction means "not
     /// looking" and is left out of the negotiation.
     size: (u16, u16),
+    /// Attached with `TakeOver`: while any such viewer looks, the session is
+    /// sized for those alone.
+    takes_over: bool,
+    /// Shown the notice: a taker sized the session past this viewer.
+    parked: Arc<AtomicBool>,
 }
 
 /// Screen state and the clients watching it, under one lock on purpose:
@@ -133,6 +138,7 @@ pub struct Attachment {
     inner: Arc<Mutex<Inner>>,
     id: u64,
     overflowed: Arc<AtomicBool>,
+    parked: Arc<AtomicBool>,
 }
 
 impl Attachment {
@@ -142,6 +148,20 @@ impl Attachment {
 
     pub fn overflowed(&self) -> bool {
         self.overflowed.load(Ordering::Acquire)
+    }
+
+    /// Whether a taker has sized the session past this viewer.
+    pub fn parked(&self) -> bool {
+        self.parked.load(Ordering::Acquire)
+    }
+
+    /// What a parked viewer is shown in place of the screen.
+    pub fn notice(&self) -> Vec<u8> {
+        let (cols, rows) = self.inner.lock().map(|g| g.terminal.size()).unwrap_or((0, 0));
+        format!(
+            "\r\n  \x1b[1mThis pane is shown on another screen, at {cols}\u{d7}{rows}.\x1b[0m\r\n\r\n  \x1b[2mIt comes back here when that screen lets go. Keys typed here still reach it.\x1b[0m\r\n"
+        )
+        .into_bytes()
     }
 
     /// Recover from a drop: discard what is queued and return the whole screen
@@ -300,15 +320,23 @@ impl Session {
     }
 
     /// Subscribe: the screen as it stands, plus a feed of everything after.
-    pub fn attach(&self, cols: u16, rows: u16) -> Result<(Vec<u8>, Attachment)> {
+    pub fn attach(&self, cols: u16, rows: u16, takes_over: bool) -> Result<(Vec<u8>, Attachment)> {
         let attachment = {
             let mut guard = self.inner.lock().map_err(|_| anyhow::anyhow!("session poisoned"))?;
             let (tx, rx) = sync_channel(CLIENT_BACKLOG);
             let id = guard.next_id;
             guard.next_id += 1;
             let overflowed = Arc::new(AtomicBool::new(false));
-            guard.subscribers.push(Subscriber { id, tx, overflowed: Arc::clone(&overflowed), size: (cols, rows) });
-            Attachment { output: rx, inner: Arc::clone(&self.inner), id, overflowed }
+            let parked = Arc::new(AtomicBool::new(false));
+            guard.subscribers.push(Subscriber {
+                id,
+                tx,
+                overflowed: Arc::clone(&overflowed),
+                size: (cols, rows),
+                takes_over,
+                parked: Arc::clone(&parked),
+            });
+            Attachment { output: rx, inner: Arc::clone(&self.inner), id, overflowed, parked }
         };
         // Size first, screen second: the repaint is the screen the new size
         // produced, taken under the same lock as the drain.
@@ -342,14 +370,28 @@ impl Session {
 
     /// Fit the PTY to the smallest viewer. A viewer larger than the grid shows
     /// margin; one smaller than it garbles. Nobody looking leaves it alone.
+    ///
+    /// While a viewer that takes over looks, only takers count, and every
+    /// other viewer the grid no longer fits is parked: shown a notice rather
+    /// than the screen. The last taker leaving unparks them, each repainted.
     fn negotiate(&self, caused_by: Option<u64>) -> Result<()> {
+        let looks = |s: &Subscriber| s.size.0 > 0 && s.size.1 > 0;
         let (wanted, viewers) = {
             let guard = self.inner.lock().map_err(|_| anyhow::anyhow!("session poisoned"))?;
+            let taking = guard.subscribers.iter().any(|s| looks(s) && s.takes_over);
             let looking: Vec<(u16, u16)> =
-                guard.subscribers.iter().map(|s| s.size).filter(|(c, r)| *c > 0 && *r > 0).collect();
+                guard.subscribers.iter().filter(|s| looks(s) && (s.takes_over || !taking)).map(|s| s.size).collect();
             let Some(cols) = looking.iter().map(|(c, _)| *c).min() else { return Ok(()) };
             let rows = looking.iter().map(|(_, r)| *r).min().unwrap_or(0);
-            ((cols, rows), guard.subscribers.len())
+            let wanted = (cols, rows);
+            for s in &guard.subscribers {
+                let park = taking && !s.takes_over && looks(s) && (s.size.0 < wanted.0 || s.size.1 < wanted.1);
+                let was = s.parked.swap(park, Ordering::AcqRel);
+                if was && !park {
+                    s.overflowed.store(true, Ordering::Release);
+                }
+            }
+            (wanted, guard.subscribers.len())
         };
         if wanted == self.size() {
             return Ok(());
@@ -402,6 +444,8 @@ impl Session {
         j.num("generation", sig.generation as i64);
         j.num("cols", cols as i64);
         j.num("rows", rows as i64);
+        // This daemon knows `Msg::TakeOver`.
+        j.boolean("take_over", true);
         j.boolean("alt_screen", t.alternate_screen().is_some());
         j.string("title", &t.title());
         j.string("pwd", &t.pwd());

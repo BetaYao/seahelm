@@ -41,6 +41,8 @@ struct Stream {
     live: Arc<Mutex<bool>>,
     /// The size this attachment asked for; (0, 0) is passive.
     size: (u16, u16),
+    /// Attached with `TakeOver`.
+    takes_over: bool,
 }
 
 impl Stream {
@@ -72,7 +74,7 @@ impl VtStreams {
             return json!({"ok": false, "error": "missing pane_session_key"});
         }
         self.close(pane);
-        self.attach(pane, (0, 0), None)
+        self.attach(pane, (0, 0), false, None)
     }
 
     /// Give an open pane's attachment a size of its own, or (0, 0) to go back
@@ -85,7 +87,12 @@ impl VtStreams {
     /// has its screen: the page gets a whole screen at the new size, and the
     /// session is never left without this viewer in between (which would let
     /// it spring back to the desktop's size, and the program redraw twice).
-    pub fn resize(&mut self, pane: &str, cols: u16, rows: u16) -> Value {
+    ///
+    /// `take_over` sizes the session for this page alone, whatever the
+    /// desktop pane's size; the daemon shows a pane the grid no longer fits a
+    /// notice until the page lets go. A daemon from before `TakeOver` gets a
+    /// plain sized attach, and the answer says `take_over: false`.
+    pub fn resize(&mut self, pane: &str, cols: u16, rows: u16, take_over: bool) -> Value {
         let size = if cols == 0 || rows == 0 {
             (0, 0)
         } else {
@@ -94,17 +101,20 @@ impl VtStreams {
         let Some(old) = self.streams.remove(pane) else {
             return json!({"ok": false, "error": "pane is not open"});
         };
-        if old.size == size {
+        let take_over = take_over && size != (0, 0) && knows_take_over(pane);
+        if old.size == size && old.takes_over == take_over {
             self.streams.insert(pane.to_string(), old);
-            return json!({"ok": true});
+            return json!({"ok": true, "take_over": take_over});
         }
         old.retire();
-        self.attach(pane, size, Some(old.socket))
+        let mut r = self.attach(pane, size, take_over, Some(old.socket));
+        r["take_over"] = json!(take_over);
+        r
     }
 
     /// One attachment at `size`. `replacing` is the socket of the attachment
     /// this one takes over from: shut once this one has its first screen.
-    fn attach(&mut self, pane: &str, size: (u16, u16), replacing: Option<seahelmd::platform::Stream>) -> Value {
+    fn attach(&mut self, pane: &str, size: (u16, u16), takes_over: bool, replacing: Option<seahelmd::platform::Stream>) -> Value {
         let drop_old = |old: &Option<seahelmd::platform::Stream>| {
             if let Some(o) = old {
                 let _ = o.shutdown(Shutdown::Both);
@@ -125,7 +135,8 @@ impl VtStreams {
             drop_old(&replacing);
             return json!({"ok": false, "error": "socket clone failed"});
         };
-        if let Err(e) = proto::write(&mut writer, &Msg::Attach { cols: size.0, rows: size.1 }) {
+        let hello = if takes_over { Msg::TakeOver { cols: size.0, rows: size.1 } } else { Msg::Attach { cols: size.0, rows: size.1 } };
+        if let Err(e) = proto::write(&mut writer, &hello) {
             drop_old(&replacing);
             return json!({"ok": false, "error": e.to_string()});
         }
@@ -171,7 +182,7 @@ impl VtStreams {
             }
             drop_old(&replacing);
         });
-        self.streams.insert(pane.to_string(), Stream { input, socket: closer, last_seen: Instant::now(), live, size });
+        self.streams.insert(pane.to_string(), Stream { input, socket: closer, last_seen: Instant::now(), live, size, takes_over });
         if passive {
             json!({"ok": true, "cols": cols, "rows": rows})
         } else {
@@ -222,6 +233,13 @@ impl Drop for VtStreams {
     fn drop(&mut self) {
         self.close_all();
     }
+}
+
+/// Whether the pane's daemon knows `Msg::TakeOver` (one that does not
+/// would drop the connection). Daemons outlive upgrades, so old ones linger.
+fn knows_take_over(pane: &str) -> bool {
+    let Ok(Msg::Text(json)) = seahelmd::client::request(pane, &Msg::Snapshot) else { return false };
+    serde_json::from_str::<Value>(&json).ok().and_then(|v| v.get("take_over").and_then(Value::as_bool)).unwrap_or(false)
 }
 
 /// The session's size as its daemon reports it.
@@ -305,20 +323,29 @@ mod tests {
         assert_eq!(vt.open(name)["ok"], true);
         assert_eq!(next_snapshot(&mut rx), (100, 30), "passive: the desktop's size");
 
-        assert_eq!(vt.resize(name, 60, 20)["ok"], true);
+        assert_eq!(vt.resize(name, 60, 20, false)["ok"], true);
         assert_eq!(next_snapshot(&mut rx), (60, 20), "sized: a screen at the page's size");
         wait_size(name, (60, 20));
 
         // Wider than the desktop: the smaller of each wins.
-        assert_eq!(vt.resize(name, 160, 24)["ok"], true);
+        assert_eq!(vt.resize(name, 160, 24, false)["ok"], true);
         snapshot_until(&mut rx, (100, 24));
         wait_size(name, (100, 24));
 
-        assert_eq!(vt.resize(name, 0, 0)["ok"], true);
+        assert_eq!(vt.resize(name, 0, 0, false)["ok"], true);
         snapshot_until(&mut rx, (100, 30));
         wait_size(name, (100, 30));
 
-        assert_eq!(vt.resize("no-such-pane", 60, 20)["ok"], false);
+        // Taking over: the page's size, wider than the desktop or not.
+        let r = vt.resize(name, 160, 24, true);
+        assert_eq!((r["ok"].as_bool(), r["take_over"].as_bool()), (Some(true), Some(true)), "{r}");
+        snapshot_until(&mut rx, (160, 24));
+        wait_size(name, (160, 24));
+        assert_eq!(vt.resize(name, 0, 0, true)["take_over"], false, "passive never takes over");
+        snapshot_until(&mut rx, (100, 30));
+        wait_size(name, (100, 30));
+
+        assert_eq!(vt.resize("no-such-pane", 60, 20, false)["ok"], false);
         drop(vt);
         let _ = seahelmd::client::request(name, &Msg::Kill);
         let _ = std::fs::remove_dir_all(&dir);

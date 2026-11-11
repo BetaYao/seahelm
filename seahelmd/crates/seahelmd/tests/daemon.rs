@@ -450,3 +450,54 @@ fn the_7501_answer_comes_before_da1_as_its_query_did() {
     let h = dir.wait_for("order", "FIRST[");
     assert!(h.contains("FIRST[]7]"), "DA1 was answered first, so the program gives up on 7501:\n{h}");
 }
+
+/// Keep reading until the mirror shows `needle`.
+fn mirror_shows(m: &mut Mirror, needle: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !m.text().contains(needle) {
+        assert!(Instant::now() < deadline, "never showed {needle:?}:\n{}", m.text());
+        m.pump_one(Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn a_viewer_that_takes_over_sizes_the_session_and_the_others_get_a_notice() {
+    let dir = Dir::new();
+    dir.cli(&["new", "take", "bash", "--norc", "-c", "while :; do printf 'tick %s\\n' \"$(stty size)\"; sleep 0.2; done"], &[]);
+    let mut desk = Mirror::attach(&dir, "take", 64, 40);
+    let size = |d: &Dir| (snapshot_num(&d.snapshot("take"), "cols"), snapshot_num(&d.snapshot("take"), "rows"));
+    assert!(dir.snapshot("take").contains(r#""take_over":true"#));
+    mirror_shows(&mut desk, "tick 40 64");
+
+    // Wider than the desktop: the taker's size wins, and the desktop pane is
+    // told rather than shown a screen it cannot hold.
+    let mut web = dir.connect("take");
+    proto::write(&mut web, &Msg::TakeOver { cols: 120, rows: 30 }).unwrap();
+    web.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    assert!(matches!(proto::read(&mut web), Ok(Some(Msg::Repaint(_)))));
+    assert_eq!(size(&dir), (120, 30));
+    mirror_shows(&mut desk, "shown on another screen, at 120×30");
+    desk.pump_until_quiet();
+    assert!(!desk.text().contains("tick 30 120"), "a parked viewer gets no output:\n{}", desk.text());
+
+    // The taker leaves: the desktop's size again, and its screen back.
+    drop(web);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while size(&dir) != (64, 40) {
+        assert!(Instant::now() < deadline, "the session never went back: {:?}", size(&dir));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    mirror_shows(&mut desk, "tick 40 64");
+    assert!(!desk.text().contains("another screen"), "{}", desk.text());
+}
+
+#[test]
+fn a_taker_smaller_than_everyone_parks_nobody() {
+    let dir = Dir::new();
+    dir.cli(&["new", "take2", "bash", "--norc", "-c", "while :; do printf 'tick %s\\n' \"$(stty size)\"; sleep 0.2; done"], &[]);
+    let mut desk = Mirror::attach(&dir, "take2", 100, 40);
+    let mut web = dir.connect("take2");
+    proto::write(&mut web, &Msg::TakeOver { cols: 60, rows: 20 }).unwrap();
+    mirror_shows(&mut desk, "tick 20 60");
+    assert!(!desk.text().contains("another screen"), "{}", desk.text());
+}

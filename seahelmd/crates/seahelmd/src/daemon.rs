@@ -145,7 +145,11 @@ fn handle(stream: Stream, lazy: &Arc<Lazy>, name: &str, created: u64, start_dir:
     // watching; anything that needs the program starts it.
     let reply = match first {
         Msg::Attach { cols, rows } => match lazy.get_or_start((cols, rows)) {
-            Ok(session) => return attached(reader, writer, &session, cols, rows),
+            Ok(session) => return attached(reader, writer, &session, cols, rows, false),
+            Err(e) => Msg::Error(e.to_string()),
+        },
+        Msg::TakeOver { cols, rows } => match lazy.get_or_start((cols, rows)) {
+            Ok(session) => return attached(reader, writer, &session, cols, rows, true),
             Err(e) => Msg::Error(e.to_string()),
         },
         // The row seahelm parses (`SessionManager.parseSeahelmdSessions`). start_dir is
@@ -195,8 +199,8 @@ fn handle(stream: Stream, lazy: &Arc<Lazy>, name: &str, created: u64, start_dir:
 /// An attached client: a pump thread carries the session's output to it, and
 /// this thread carries its keystrokes and size to the session. Only the pump
 /// writes to the socket and only this thread reads it.
-fn attached(mut reader: Stream, mut writer: Stream, session: &Arc<Session>, cols: u16, rows: u16) {
-    let (repaint, attachment) = match session.attach(cols, rows) {
+fn attached(mut reader: Stream, mut writer: Stream, session: &Arc<Session>, cols: u16, rows: u16, takes_over: bool) {
+    let (repaint, attachment) = match session.attach(cols, rows, takes_over) {
         Ok(a) => a,
         Err(e) => {
             let _ = proto::write(&mut writer, &Msg::Error(e.to_string()));
@@ -211,7 +215,30 @@ fn attached(mut reader: Stream, mut writer: Stream, session: &Arc<Session>, cols
             if proto::write(&mut writer, &Msg::Repaint(repaint)).is_err() {
                 return;
             }
+            // Whether this viewer is being shown the notice in place of a
+            // screen it no longer fits (see `Msg::TakeOver`).
+            let mut on_notice = false;
             while !stop.load(Ordering::Acquire) {
+                if attachment.parked() {
+                    // What the program writes is for a grid this viewer is
+                    // not: drop it. When the taker leaves, the viewer is
+                    // marked behind and repainted below.
+                    while attachment.output.try_recv().is_ok() {}
+                    if !on_notice {
+                        on_notice = true;
+                        if proto::write(&mut writer, &Msg::Repaint(attachment.notice())).is_err() {
+                            break;
+                        }
+                    }
+                    match attachment.output.recv_timeout(Duration::from_millis(100)) {
+                        Err(RecvTimeoutError::Disconnected) => {
+                            let _ = proto::write(&mut writer, &Msg::Ended);
+                            break;
+                        }
+                        _ => continue,
+                    }
+                }
+                on_notice = false;
                 let msg = match attachment.output.recv_timeout(Duration::from_millis(100)) {
                     // Behind: what is queued is stale, the whole screen is not.
                     Ok(_) | Err(RecvTimeoutError::Timeout) if attachment.overflowed() => {

@@ -367,8 +367,9 @@ impl Session {
                 let key = pane_ref(&p).unwrap_or_default();
                 let n = |k: &str| p.get(k).and_then(Value::as_u64).unwrap_or(0).min(u16::MAX as u64) as u16;
                 let (cols, rows) = (n("cols"), n("rows"));
+                let take_over = p.get("take_over").and_then(Value::as_bool).unwrap_or(false);
                 let vt = &mut self.vt;
-                Ok(tokio::task::block_in_place(|| vt.resize(&key, cols, rows)))
+                Ok(tokio::task::block_in_place(|| vt.resize(&key, cols, rows, take_over)))
             }
             "pane.vt_close" => {
                 self.vt.close(&pane_ref(&p).unwrap_or_default());
