@@ -18,6 +18,7 @@ mod fonts;
 mod gateway_client;
 mod gateway_page;
 mod keys;
+mod labels;
 mod notify;
 mod platform;
 mod session;

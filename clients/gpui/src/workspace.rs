@@ -63,6 +63,7 @@ actions!(
         PrevWorktree,
         ToggleSidebar,
         ToggleFirstMate,
+        CommandPalette,
         NewWorktreeHere,
         ToggleSettings
     ]
@@ -89,6 +90,7 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("cmd-ctrl-=", EqualizeSplit, None),
             KeyBinding::new("cmd-b", ToggleSidebar, None),
             KeyBinding::new("cmd-j", ToggleFirstMate, None),
+            KeyBinding::new("cmd-p", CommandPalette, None),
             KeyBinding::new("cmd-n", NewWorktreeHere, None),
             KeyBinding::new("cmd-,", ToggleSettings, None),
         ]);
@@ -109,6 +111,7 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("ctrl-alt-=", EqualizeSplit, None),
             KeyBinding::new("ctrl-shift-b", ToggleSidebar, None),
             KeyBinding::new("ctrl-shift-j", ToggleFirstMate, None),
+            KeyBinding::new("ctrl-shift-p", CommandPalette, None),
             KeyBinding::new("ctrl-shift-n", NewWorktreeHere, None),
             KeyBinding::new("ctrl-,", ToggleSettings, None),
         ]);
@@ -127,6 +130,10 @@ pub fn bind_keys(cx: &mut App) {
 struct Panes {
     tree: SplitTree,
     views: HashMap<LeafId, Entity<TerminalView>>,
+    /// Put to sleep from the pane menu: no terminal attached, the session
+    /// running on in seahelmd until the pane is woken (the macOS app's
+    /// Sleep Pane, which frees the surface the same way).
+    asleep: std::collections::HashSet<LeafId>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -204,6 +211,8 @@ pub struct Workspace {
     settings_page: Entity<SettingsPage>,
     /// What the core knows about each pane, by session (`pane_extras`).
     pane_facts: pane_extras::Facts,
+    /// Each worktree's colour label, by path (`labels`).
+    labels: HashMap<String, crate::labels::Label>,
     /// A pane's right-click menu, while it is open.
     pane_menu: Option<pane_menu::PaneMenu>,
     /// The share button's popover, while it is open.
@@ -271,6 +280,7 @@ impl Workspace {
             pane_facts: HashMap::new(),
             share: None,
             pane_menu: None,
+            labels: crate::labels::load(),
             share_lifetime: crate::gateway_client::Lifetime::Day,
             presence: HashMap::new(),
             zoomed: None,
@@ -316,6 +326,8 @@ impl Workspace {
     fn poll_fleet(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| loop {
             let snap = cx.background_executor().spawn(async { fleet::read() }).await;
+            // Labels set in the macOS app show here within a poll.
+            let labels = cx.background_executor().spawn(async { crate::labels::load() }).await;
             // The core watches the PRs of every worktree listed, panes or not.
             let paths: Vec<String> =
                 snap.groups.iter().flat_map(|g| g.items.iter().map(|i| i.worktree_path.clone())).collect();
@@ -323,6 +335,7 @@ impl Workspace {
             let alive = this
                 .update(cx, |w, cx| {
                     w.fleet = snap;
+                    w.labels = labels;
                     if w.selected.is_none() {
                         w.selected = w.fleet.groups.iter().flat_map(|g| g.items.first()).next().map(|i| i.id.clone());
                         w.side_follow(cx);
@@ -1156,6 +1169,9 @@ impl Workspace {
         if let Some(t) = self.panes.get(id).and_then(|p| p.views.get(&leaf)) {
             return Some(t.clone());
         }
+        if self.panes.get(id).is_some_and(|p| p.asleep.contains(&leaf)) {
+            return None;
+        }
         let item = self.fleet.find(id)?.clone();
         let name = pane_session(id, leaf);
         if let Err(e) = session::ensure_in(&name, &[], Some(&item.worktree_path)) {
@@ -1279,6 +1295,43 @@ impl Workspace {
             None => tree.frames(),
         };
         for (leaf, r) in frames {
+            if self.panes.get(id).is_some_and(|p| p.asleep.contains(&leaf)) {
+                let worktree = id.to_string();
+                body = body.child(
+                    div()
+                        .absolute()
+                        .left(px(r.x * w))
+                        .top(px(r.y * h))
+                        .w(px(r.w * w))
+                        .h(px(r.h * h))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(8.))
+                        .font_family(SYSTEM)
+                        .text_size(px(12.))
+                        .text_color(tokens::ink_dim())
+                        .child("Pane asleep · its session keeps running")
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("wake-{id}-{leaf}")))
+                                .px(px(12.))
+                                .h(px(26.))
+                                .rounded(px(6.))
+                                .flex()
+                                .items_center()
+                                .border_1()
+                                .border_color(tokens::hairline())
+                                .text_color(tokens::ink())
+                                .cursor_pointer()
+                                .hover(|s| s.bg(tokens::row_hover()))
+                                .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| w.wake_pane(&worktree, leaf, window, cx)))
+                                .child("Wake"),
+                        ),
+                );
+                continue;
+            }
             let Some(view) = self.view_for(id, leaf, window, cx) else { continue };
             let mut pane = div()
                 .absolute()
@@ -1452,6 +1505,25 @@ impl Workspace {
         }
     }
 
+    /// Detach a pane's terminal, its session left running (Sleep Pane).
+    fn sleep_pane(&mut self, worktree: &str, leaf: LeafId, cx: &mut Context<Self>) {
+        let Some(p) = self.panes.get_mut(worktree) else { return };
+        p.views.remove(&leaf);
+        p.asleep.insert(leaf);
+        notify::log("sleep_pane", serde_json::json!({"worktree": worktree, "leaf": leaf}));
+        cx.notify();
+    }
+
+    fn wake_pane(&mut self, worktree: &str, leaf: LeafId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(p) = self.panes.get_mut(worktree) else { return };
+        p.asleep.remove(&leaf);
+        p.tree.focused = leaf;
+        if let Some(v) = self.view_for(worktree, leaf, window, cx) {
+            window.focus(&v.focus_handle(cx));
+        }
+        cx.notify();
+    }
+
     fn resize_pane(&mut self, axis: Axis, delta: f32, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else { return };
         if self.panes.get_mut(&id).is_some_and(|p| p.tree.nudge(axis, delta)) {
@@ -1606,6 +1678,16 @@ impl Render for Workspace {
                 cx.notify();
             }))
             .on_action(cx.listener(|w, _: &ToggleFirstMate, window, cx| w.toggle_first_mate(window, cx)))
+            // The macOS app's cmd+p opens the island's command line, which is
+            // First Mate's: here that is First Mate's own column, opened (never
+            // closed) and focused.
+            .on_action(cx.listener(|w, _: &CommandPalette, window, cx| {
+                if !w.first_mate_open {
+                    w.toggle_first_mate(window, cx);
+                } else if let Some(view) = w.first_mate_terminal(cx) {
+                    window.focus(&view.focus_handle(cx));
+                }
+            }))
             .on_action(cx.listener(|w, _: &NewWorktreeHere, window, cx| w.new_worktree_here(window, cx)))
             .on_action(cx.listener(|w, _: &ToggleSettings, window, cx| {
                 let open = !w.settings_open;
@@ -1827,8 +1909,12 @@ impl Workspace {
                 .child(if panes == 0 { "—".to_string() } else { format!("{panes} panes") }),
         );
 
+        let label = self.labels.get(&item.worktree_path).copied();
         div()
             .id(SharedString::from(format!("row-{}", item.id)))
+            .relative()
+            // The label's ribbon down the row's left edge, as on macOS.
+            .when_some(label, |d, l| d.child(div().absolute().left(px(2.)).top(px(9.)).bottom(px(9.)).w(px(3.)).rounded(px(1.5)).bg(l.colour())))
             .rounded(px(8.))
             .flex()
             .flex_row()

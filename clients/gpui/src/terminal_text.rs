@@ -114,6 +114,46 @@ pub fn drop_text(paths: &[std::path::PathBuf], windows: bool) -> String {
     out
 }
 
+/// The path-like word at column `col` of a row (one entry per column, a
+/// wide character's spacer empty): the run of non-blank characters around
+/// it, without the brackets and quotes prose puts round a path, and without
+/// a `:line` or `:line:col` suffix.
+pub fn token_at(cells: &[String], col: usize) -> Option<String> {
+    let text: Vec<char> = cells.iter().map(|c| c.chars().next().unwrap_or(' ')).collect();
+    let blank = |c: char| c.is_whitespace();
+    if col >= text.len() || blank(text[col]) {
+        return None;
+    }
+    let mut a = col;
+    while a > 0 && !blank(text[a - 1]) {
+        a -= 1;
+    }
+    let mut b = col + 1;
+    while b < text.len() && !blank(text[b]) {
+        b += 1;
+    }
+    let word: String = text[a..b].iter().collect();
+    let frame: &[char] = &['"', '\'', '`', '(', ')', '[', ']', '<', '>', '{', '}', ',', ';'];
+    // Brackets and quotes, and a sentence's full stop, in any order.
+    let mut word = word;
+    loop {
+        let trimmed = word.trim_matches(frame).trim_end_matches(['.', ':']).to_string();
+        if trimmed == word {
+            break;
+        }
+        word = trimmed;
+    }
+    // file.rs:12 or file.rs:12:3
+    for _ in 0..2 {
+        if let Some((head, tail)) = word.rsplit_once(':') {
+            if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) {
+                word = head.to_string();
+            }
+        }
+    }
+    (!word.is_empty()).then_some(word)
+}
+
 /// An agent's `::seahelm-suggest:: a | b` line, as its suggestion card
 /// becomes clickable on it (the macOS app's `SuggestLineLocator`).
 pub const SUGGEST_MARKER: &str = "::seahelm-suggest::";
@@ -244,6 +284,15 @@ mod tests {
 
     fn opts(o: &[&str]) -> Vec<String> {
         o.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_word_under_the_pointer_is_a_path_without_its_frame() {
+        let cells = |s: &str| s.chars().map(|c| c.to_string()).collect::<Vec<_>>();
+        let row = cells("see (src/main.rs:12:3), then `docs/a.md`.");
+        assert_eq!(token_at(&row, 8).as_deref(), Some("src/main.rs"));
+        assert_eq!(token_at(&row, 30).as_deref(), Some("docs/a.md"));
+        assert_eq!(token_at(&row, 3), None, "a blank");
     }
 
     #[test]

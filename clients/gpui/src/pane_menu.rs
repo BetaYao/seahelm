@@ -14,6 +14,8 @@ pub struct PaneMenu {
     leaf: LeafId,
     at: Point<Pixels>,
     link: Option<String>,
+    /// A file in the worktree named under the pointer, relative to it.
+    preview: Option<String>,
     has_selection: bool,
 }
 
@@ -28,7 +30,9 @@ impl Workspace {
             }
         }
         self.row_menu = None;
-        self.pane_menu = Some(PaneMenu { worktree, leaf, at: e.at, link: e.link.clone(), has_selection: e.has_selection });
+        let root = self.fleet.find(&worktree).map(|i| i.worktree_path.clone());
+        let preview = root.as_deref().zip(e.word.as_deref()).and_then(|(root, word)| file_in(root, word));
+        self.pane_menu = Some(PaneMenu { worktree, leaf, at: e.at, link: e.link.clone(), preview, has_selection: e.has_selection });
         cx.notify();
     }
 
@@ -66,6 +70,14 @@ impl Workspace {
                 w.split(Axis::Vertical, window, cx);
             })))
             .child(separator());
+        if let (Some(rel), Some(root)) = (m.preview.clone(), self.fleet.find(&m.worktree).map(|i| i.worktree_path.clone())) {
+            menu = menu
+                .child(item("pm-preview", "Preview", true).on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
+                    w.pane_menu = None;
+                    w.open_preview(crate::side_panel::OpenItem::File { worktree: root.clone(), path: rel.clone() }, cx);
+                })))
+                .child(separator());
+        }
         if let Some(link) = m.link.clone() {
             let copy = link.clone();
             menu = menu
@@ -104,6 +116,13 @@ impl Workspace {
                 w.pane_menu = None;
                 w.open_rename(key.clone(), window, cx);
             })))
+            .child(item("pm-sleep", "Sleep Pane", true).when(true, |d| {
+                let (wt, leaf) = (m.worktree.clone(), m.leaf);
+                d.on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
+                    w.pane_menu = None;
+                    w.sleep_pane(&wt, leaf, cx);
+                }))
+            }))
             .child(item("pm-close", "Close Pane", can_close).when(can_close, |d| {
                 d.on_click(cx.listener(|w, _: &ClickEvent, window, cx| {
                     w.pane_menu = None;
@@ -125,6 +144,18 @@ impl Workspace {
             .into_any_element(),
         )
     }
+}
+
+/// `word` as a file inside the worktree at `root`, relative to it: a
+/// relative path is taken from the worktree, an absolute one must lie in it.
+fn file_in(root: &str, word: &str) -> Option<String> {
+    let root = std::path::Path::new(root);
+    let path = std::path::Path::new(word.strip_prefix("./").unwrap_or(word));
+    let full = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
+    if !full.is_file() {
+        return None;
+    }
+    full.strip_prefix(root).ok().map(|r| r.to_string_lossy().replace('\\', "/"))
 }
 
 fn item(id: &'static str, label: &str, enabled: bool) -> gpui::Stateful<gpui::Div> {
