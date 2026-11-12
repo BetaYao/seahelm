@@ -508,7 +508,26 @@ impl Workspace {
         self.card_submits.retain(|id, _| cards.iter().any(|c| &c.id == id));
         if self.cards != cards {
             self.cards = cards;
+            self.sync_suggestions(cx);
             cx.notify();
+        }
+    }
+
+    /// Each pane's newest suggestion card, for its terminal to draw on the
+    /// `::seahelm-suggest::` line (the strip above the terminals leaves
+    /// suggestions out).
+    fn sync_suggestions(&self, cx: &mut Context<Self>) {
+        for (id, panes) in &self.panes {
+            for (leaf, view) in &panes.views {
+                let key = pane_session(id, *leaf);
+                let card = self
+                    .cards
+                    .iter()
+                    .filter(|c| c.kind == "suggestion" && c.pane_session_key == key)
+                    .max_by(|a, b| a.fresh_at.total_cmp(&b.fresh_at))
+                    .map(|c| (c.id.clone(), c.labels.clone()));
+                view.update(cx, |v, cx| v.set_suggestion(card, cx));
+            }
         }
     }
 
@@ -564,7 +583,8 @@ impl Workspace {
     /// The selected worktree's cards, above its terminals: what is asked,
     /// and a button per answer.
     fn card_strip(&self, worktree: &str, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        let cards: Vec<&core_client::Card> = self.cards.iter().filter(|c| c.worktree_path == worktree).collect();
+        // Suggestions are drawn on their line in the terminal instead.
+        let cards: Vec<&core_client::Card> = self.cards.iter().filter(|c| c.worktree_path == worktree && c.kind != "suggestion").collect();
         if cards.is_empty() {
             return None;
         }
@@ -951,7 +971,8 @@ impl Workspace {
     /// given, and how many cards wait. Opens the workbench.
     fn first_mate_dock(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let (status, colour) = self.first_mate_status();
-        let n = self.cards.len();
+        let suggestions = self.cards.iter().filter(|c| c.kind == "suggestion").count();
+        let n = self.cards.len() - suggestions;
         let mut usage = div().flex().flex_row().items_center().gap(px(4.)).text_size(px(10.5)).line_height(px(14.));
         for (i, r) in self.usage.iter().enumerate() {
             if let Some(seg) = r.segments.first() {
@@ -1002,11 +1023,13 @@ impl Workspace {
                 div()
                     .text_size(px(10.5))
                     .line_height(px(14.))
-                    .text_color(if n > 0 { tokens::attention() } else { tokens::ink_faint() })
-                    .child(match n {
-                        0 => "Nothing waiting · standing by".to_string(),
-                        1 => "1 card waiting for you".to_string(),
-                        n => format!("{n} cards waiting for you"),
+                    .text_color(if n > 0 { tokens::attention() } else if suggestions > 0 { tokens::accent() } else { tokens::ink_faint() })
+                    .child(match (n, suggestions) {
+                        (0, 0) => "Nothing waiting · standing by".to_string(),
+                        (0, s) => format!("{s} suggestion{} on screen", if s == 1 { "" } else { "s" }),
+                        (1, 0) => "1 card waiting for you".to_string(),
+                        (n, 0) => format!("{n} cards waiting for you"),
+                        (n, s) => format!("{n} card{} waiting · {s} suggestion{}", if n == 1 { "" } else { "s" }, if s == 1 { "" } else { "s" }),
                     }),
             )
     }
@@ -1166,10 +1189,13 @@ impl Workspace {
         let menu = cx.subscribe(&view, move |w, _, e: &crate::terminal_view::ContextMenuRequested, cx| {
             w.open_pane_menu(worktree.clone(), leaf, e, cx)
         });
+        let picked = cx.subscribe(&view, |w, _, e: &crate::terminal_view::SuggestionPicked, cx| w.answer_card(e.card_id.clone(), e.index, cx));
         let panes = self.panes.entry(id.to_string()).or_default();
         panes.views.insert(leaf, view.clone());
         panes._subscriptions.push(sub);
         panes._subscriptions.push(menu);
+        panes._subscriptions.push(picked);
+        self.sync_suggestions(cx);
         Some(view)
     }
 

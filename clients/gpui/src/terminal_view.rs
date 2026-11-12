@@ -65,6 +65,12 @@ pub struct TerminalView {
     mouse_encoder: Option<MouseEncoder>,
     /// A button whose press went to the program, so its release does too.
     reported_button: Option<VtButton>,
+    /// The pane's suggestion card (id, options): drawn as links on its
+    /// `::seahelm-suggest::` line while it is on screen.
+    suggestion: Option<(String, Vec<String>)>,
+    /// Where each option was drawn last frame, for the pointer.
+    suggestion_hits: Vec<(Bounds<Pixels>, usize)>,
+    suggestion_hover: Option<usize>,
 }
 
 /// A right-click the program did not take: the workspace opens the pane's
@@ -77,6 +83,14 @@ pub struct ContextMenuRequested {
 }
 
 impl gpui::EventEmitter<ContextMenuRequested> for TerminalView {}
+
+/// An option of the pane's suggestion card was clicked on its line.
+pub struct SuggestionPicked {
+    pub card_id: String,
+    pub index: usize,
+}
+
+impl gpui::EventEmitter<SuggestionPicked> for TerminalView {}
 
 #[derive(Clone, Copy)]
 struct Geom {
@@ -135,7 +149,23 @@ impl TerminalView {
             key_encoder: KeyEncoder::new().ok(),
             mouse_encoder: MouseEncoder::new().ok(),
             reported_button: None,
+            suggestion: None,
+            suggestion_hits: Vec::new(),
+            suggestion_hover: None,
         }
+    }
+
+    /// The suggestion card waiting on this pane, or none.
+    pub fn set_suggestion(&mut self, card: Option<(String, Vec<String>)>, cx: &mut Context<Self>) {
+        if self.suggestion != card {
+            self.suggestion = card;
+            self.suggestion_hover = None;
+            cx.notify();
+        }
+    }
+
+    fn suggestion_at(&self, position: gpui::Point<Pixels>) -> Option<usize> {
+        self.suggestion_hits.iter().find(|(b, _)| b.contains(&position)).map(|(_, i)| *i)
     }
 
     pub fn title(&self) -> String {
@@ -480,6 +510,12 @@ impl TerminalView {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus);
+        if event.button == MouseButton::Left {
+            if let (Some(index), Some((card_id, _))) = (self.suggestion_at(event.position), self.suggestion.as_ref()) {
+                cx.emit(SuggestionPicked { card_id: card_id.clone(), index });
+                return;
+            }
+        }
         if let Some(url) = self.link_at(event) {
             cx.open_url(&url);
             return;
@@ -510,6 +546,13 @@ impl TerminalView {
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, hovered: bool, cx: &mut Context<Self>) {
+        if !self.suggestion_hits.is_empty() {
+            let over = if hovered { self.suggestion_at(event.position) } else { None };
+            if over != self.suggestion_hover {
+                self.suggestion_hover = over;
+                cx.notify();
+            }
+        }
         // Motion for the program: while a reported button is held (it may
         // leave the pane), or over the pane (any-event mode; the encoder
         // drops what the mode does not report).
@@ -747,6 +790,12 @@ pub struct Layout {
     ime_anchor: Option<Bounds<Pixels>>,
     bounds: Bounds<Pixels>,
     hitbox: Option<Hitbox>,
+    /// A suggestion card on its line: the hover fill under the text, the
+    /// marker's veil and the options' underlines over it, and a hitbox per
+    /// option for the pointer.
+    suggestion_under: Vec<gpui::PaintQuad>,
+    suggestion_over: Vec<gpui::PaintQuad>,
+    suggestion_hitboxes: Vec<Hitbox>,
     started: Instant,
 }
 
@@ -830,6 +879,9 @@ impl Element for TerminalElement {
             ime_anchor: None,
             bounds,
             hitbox: Some(hitbox),
+            suggestion_under: Vec::new(),
+            suggestion_over: Vec::new(),
+            suggestion_hitboxes: Vec::new(),
             started,
         };
         let Some(frame) = v.frame.clone() else { return layout };
@@ -918,6 +970,46 @@ impl Element for TerminalElement {
             }
         }
 
+        // The suggestion card's line, if it is on screen and says what the
+        // card says.
+        let mut hits = Vec::new();
+        if let Some((_, options)) = v.suggestion.as_ref() {
+            let texts: Vec<crate::terminal_text::RowText> = v
+                .rows
+                .iter()
+                .map(|row| {
+                    crate::terminal_text::RowText::from_cells(row.cells.iter().map(|c| match c.width {
+                        Width::Tail | Width::Head => None,
+                        w => Some((c.text.as_str(), w == Width::Wide)),
+                    }))
+                })
+                .collect();
+            if texts.iter().any(|t| t.contains_marker()) {
+                if let Some((marker, spans)) = crate::terminal_text::locate_suggestion(options, &texts) {
+                    let rect = |s: crate::terminal_text::Span| {
+                        Bounds::new(point(origin.x + cell_w * s.col as f32, origin.y + cell_h * s.row as f32), size(cell_w * s.width as f32, cell_h))
+                    };
+                    layout.suggestion_over.push(fill(rect(marker), crate::tokens::alpha(theme::rgb(default_bg), 0.6)));
+                    let accent = crate::tokens::accent();
+                    for (i, span) in spans.into_iter().enumerate() {
+                        let r = rect(span);
+                        let pad = cell_w * 0.55;
+                        let hit = Bounds::from_corners(point(r.left() - pad, r.top()), point(r.right() + pad, r.bottom()));
+                        if v.suggestion_hover == Some(i) {
+                            let fill_r = Bounds::from_corners(point(hit.left(), r.top() - px(1.)), point(hit.right(), r.bottom() + px(1.)));
+                            layout.suggestion_under.push(fill(fill_r, crate::tokens::alpha(accent, 0.16)).corner_radii(px(4.)));
+                        }
+                        layout.suggestion_over.push(fill(
+                            Bounds::new(point(r.left(), r.bottom() - px(1.)), size(r.size.width, px(1.))),
+                            crate::tokens::alpha(accent, 0.85),
+                        ));
+                        layout.suggestion_hitboxes.push(window.insert_hitbox(hit, HitboxBehavior::Normal));
+                        hits.push((hit, i));
+                    }
+                }
+            }
+        }
+
         if let Some((cx_, cy)) = frame.cursor.at {
             let at = point(origin.x + cell_w * cx_ as f32, origin.y + cell_h * cy as f32);
             layout.ime_anchor = Some(Bounds::new(at, cell));
@@ -952,6 +1044,7 @@ impl Element for TerminalElement {
                 (true, CursorShape::Block) => fill(Bounds::new(at, size(w, cell_h)), colour),
             });
         }
+        self.view.update(cx, |v, _| v.suggestion_hits = hits);
         layout
     }
 
@@ -993,6 +1086,12 @@ impl Element for TerminalElement {
         for quad in layout.backgrounds.drain(..) {
             window.paint_quad(quad);
         }
+        for quad in layout.suggestion_under.drain(..) {
+            window.paint_quad(quad);
+        }
+        for hitbox in layout.suggestion_hitboxes.drain(..) {
+            window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
+        }
         // A block cursor goes under its character, which is drawn in the
         // background colour on top of it.
         let block = layout.cursor.as_ref().is_some_and(|c| c.border_widths.top == px(0.));
@@ -1003,6 +1102,9 @@ impl Element for TerminalElement {
         }
         for seg in &layout.segments {
             let _ = seg.line.paint(seg.origin, layout.cell.height, window, cx);
+        }
+        for quad in layout.suggestion_over.drain(..) {
+            window.paint_quad(quad);
         }
         if let Some(c) = layout.cursor.take() {
             window.paint_quad(c);

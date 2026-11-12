@@ -114,9 +114,160 @@ pub fn drop_text(paths: &[std::path::PathBuf], windows: bool) -> String {
     out
 }
 
+/// An agent's `::seahelm-suggest:: a | b` line, as its suggestion card
+/// becomes clickable on it (the macOS app's `SuggestLineLocator`).
+pub const SUGGEST_MARKER: &str = "::seahelm-suggest::";
+
+/// A row as text, and for each char the columns it covers.
+pub struct RowText {
+    chars: Vec<char>,
+    cols: Vec<usize>,
+    ends: Vec<usize>,
+}
+
+impl RowText {
+    /// From a row's cells: (text, wide) per column; a wide character's
+    /// tail is `None`, a blank cell empty text.
+    pub fn from_cells<'a>(cells: impl IntoIterator<Item = Option<(&'a str, bool)>>) -> RowText {
+        let mut row = RowText { chars: Vec::new(), cols: Vec::new(), ends: Vec::new() };
+        for (c, cell) in cells.into_iter().enumerate() {
+            let Some((text, wide)) = cell else { continue };
+            let text = if text.is_empty() { " " } else { text };
+            for ch in text.chars() {
+                row.chars.push(ch);
+                row.cols.push(c);
+                row.ends.push(c + if wide { 2 } else { 1 });
+            }
+        }
+        row
+    }
+
+    pub fn contains_marker(&self) -> bool {
+        let m: Vec<char> = SUGGEST_MARKER.chars().collect();
+        find(&self.chars, &m, 0).is_some()
+    }
+}
+
+/// Columns on screen: `row`, from `col`, `width` columns wide.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Span {
+    pub row: usize,
+    pub col: usize,
+    pub width: usize,
+}
+
+/// The marker and each option of the card on the lowest line that says
+/// exactly what the card says: every option in order, one `|` between
+/// them, nothing after the last, following a hard wrap up to 3 rows.
+/// Anything else (an older line, other options, an option cut by a wrap)
+/// gets nothing.
+pub fn locate_suggestion(options: &[String], rows: &[RowText]) -> Option<(Span, Vec<Span>)> {
+    if options.is_empty() || options.iter().any(|o| o.is_empty()) {
+        return None;
+    }
+    let marker: Vec<char> = SUGGEST_MARKER.chars().collect();
+    for r in (0..rows.len()).rev() {
+        if let Some(at) = find(&rows[r].chars, &marker, 0) {
+            if let Some(spans) = place(options, rows, r, at + marker.len()) {
+                return Some((span(&rows[r], r, at, at + marker.len()), spans));
+            }
+        }
+    }
+    None
+}
+
+fn place(options: &[String], rows: &[RowText], marker_row: usize, after: usize) -> Option<Vec<Span>> {
+    let last = (marker_row + 3).min(rows.len() - 1);
+    let (mut row, mut cursor) = (marker_row, after);
+    let mut spans = Vec::new();
+    for (i, option) in options.iter().enumerate() {
+        let want = usize::from(i > 0);
+        let option: Vec<char> = option.chars().collect();
+        let mut seen = 0;
+        loop {
+            let line = &rows[row].chars;
+            if let Some(hit) = find(line, &option, cursor) {
+                if bars(&line[cursor..hit]).is_some_and(|g| seen + g == want) {
+                    spans.push(span(&rows[row], row, hit, hit + option.len()));
+                    cursor = hit + option.len();
+                    break;
+                }
+            }
+            let gap = bars(&line[cursor.min(line.len())..])?;
+            if seen + gap > want || row >= last {
+                return None;
+            }
+            seen += gap;
+            row += 1;
+            cursor = 0;
+        }
+    }
+    rows[row].chars[cursor..].iter().all(|c| c.is_whitespace()).then_some(spans)
+}
+
+fn span(row: &RowText, r: usize, from: usize, to: usize) -> Span {
+    Span { row: r, col: row.cols[from], width: row.ends[to - 1] - row.cols[from] }
+}
+
+/// How many `|` a stretch of separator holds; None if it holds anything else.
+fn bars(s: &[char]) -> Option<usize> {
+    s.iter().all(|c| c.is_whitespace() || *c == '|').then(|| s.iter().filter(|c| **c == '|').count())
+}
+
+fn find(hay: &[char], needle: &[char], from: usize) -> Option<usize> {
+    if needle.is_empty() || hay.len() < needle.len() {
+        return None;
+    }
+    (from..=hay.len() - needle.len()).find(|&i| hay[i..i + needle.len()] == *needle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rows(lines: &[&str]) -> Vec<RowText> {
+        lines
+            .iter()
+            .map(|l| {
+                let mut cells = Vec::new();
+                for ch in l.chars() {
+                    let wide = ch as u32 >= 0x2E80;
+                    cells.push(Some((ch.to_string(), wide)));
+                    if wide {
+                        cells.push(None);
+                    }
+                }
+                RowText::from_cells(cells.iter().map(|c| c.as_ref().map(|(t, w)| (t.as_str(), *w))))
+            })
+            .collect()
+    }
+
+    fn opts(o: &[&str]) -> Vec<String> {
+        o.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_suggest_line_is_found_in_columns_on_the_lowest_match() {
+        let r = rows(&["  ::seahelm-suggest:: old | other", "", "  ::seahelm-suggest:: 做原型 | Ship it", ""]);
+        let (marker, spans) = locate_suggestion(&opts(&["做原型", "Ship it"]), &r).unwrap();
+        assert_eq!(marker, Span { row: 2, col: 2, width: 19 });
+        assert_eq!(spans, vec![Span { row: 2, col: 22, width: 6 }, Span { row: 2, col: 31, width: 7 }]);
+    }
+
+    #[test]
+    fn a_wrapped_suggest_line_is_followed() {
+        let r = rows(&["::seahelm-suggest:: merge it |", "  run the tests"]);
+        let (_, spans) = locate_suggestion(&opts(&["merge it", "run the tests"]), &r).unwrap();
+        assert_eq!(spans, vec![Span { row: 0, col: 20, width: 8 }, Span { row: 1, col: 2, width: 13 }]);
+    }
+
+    #[test]
+    fn a_line_that_differs_from_the_card_gets_nothing() {
+        for line in ["::seahelm-suggest:: a | b | c", "::seahelm-suggest:: b | a", "::seahelm-suggest:: a b", "::seahelm-suggest:: x a | b", "::seahelm-suggest:: a || b", "a | b"] {
+            assert!(locate_suggestion(&opts(&["a", "b"]), &rows(&[line])).is_none(), "{line}");
+        }
+        assert!(locate_suggestion(&opts(&["merge it"]), &rows(&["::seahelm-suggest:: mer", "ge it"])).is_none());
+    }
     use std::path::PathBuf;
 
     fn cells(s: &str) -> Vec<String> {

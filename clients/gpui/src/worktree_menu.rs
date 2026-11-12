@@ -388,13 +388,13 @@ impl Workspace {
             menu = menu.child(menu_item("menu-editor", "Open in Editor", false).on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
                 w.close_row_menu(cx);
                 if !open_in_editor(&edit) {
-                    let _ = window.prompt(
+                    drop(window.prompt(
                         PromptLevel::Info,
                         "No supported editor found",
                         Some("Install VS Code, Cursor or Zed (with its command on PATH) to use Open in Editor."),
                         &["OK"],
                         cx,
-                    );
+                    ));
                 }
             })));
             let copy = it.worktree_path.clone();
