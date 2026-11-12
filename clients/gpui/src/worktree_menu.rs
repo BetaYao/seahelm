@@ -225,6 +225,9 @@ impl Workspace {
         if self.new_worktree.is_some() {
             return Some(self.new_worktree_sheet(cx).into_any_element());
         }
+        if let Some(popover) = self.share_popover(cx) {
+            return Some(popover);
+        }
         self.row_menu.as_ref().map(|m| self.row_menu_view(m, cx).into_any_element())
     }
 

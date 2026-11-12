@@ -155,6 +155,82 @@ pub fn revoke_share(id: &str) -> Result<(), String> {
     call("share.revoke", json!({"id": id})).map(|_| ())
 }
 
+/// How long a share link lives: the macOS app's `ShareLinkLifetime`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lifetime {
+    Hour,
+    Day,
+    Week,
+    Never,
+}
+
+impl Lifetime {
+    pub const ALL: [Lifetime; 4] = [Lifetime::Hour, Lifetime::Day, Lifetime::Week, Lifetime::Never];
+
+    pub fn seconds(self) -> Option<u64> {
+        match self {
+            Lifetime::Hour => Some(3600),
+            Lifetime::Day => Some(86_400),
+            Lifetime::Week => Some(7 * 86_400),
+            Lifetime::Never => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Lifetime::Hour => "1 hour",
+            Lifetime::Day => "24 hours",
+            Lifetime::Week => "7 days",
+            Lifetime::Never => "Never",
+        }
+    }
+}
+
+/// A link minted for one pane, with what only the gateway knows about it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shared {
+    pub id: String,
+    pub url: String,
+    pub expires_at: Option<f64>,
+    /// Whether the web listener is up, so the link opens anything yet.
+    pub listening: bool,
+    /// Other live links to the same pane.
+    pub others: usize,
+}
+
+fn shared(id: String, url: String, expires_at: Option<f64>, pane: &str) -> Shared {
+    let listening = call("gateway.status", json!({})).map(parse::<Status>).map(|s| s.web.listening).unwrap_or(false);
+    let others = call("share.list", json!({}))
+        .map(|v| parse::<Vec<ShareLink>>(v["links"].clone()))
+        .unwrap_or_default()
+        .iter()
+        .filter(|l| l.pane_session_key == pane && l.id != id)
+        .count();
+    Shared { id, url, expires_at, listening, others }
+}
+
+/// `share.create`: a link another machine opens to see only this pane.
+pub fn create_share(pane: &str, label: &str, lifetime: Lifetime) -> Result<Shared, String> {
+    let v = call("share.create", json!({"pane_session_key": pane, "label": label, "lifetime_seconds": lifetime.seconds()}))?;
+    let id = v["id"].as_str().unwrap_or_default().to_string();
+    let url = v["url"].as_str().unwrap_or_default().to_string();
+    if id.is_empty() || url.is_empty() {
+        return Err("seahelm-gateway sent no link".into());
+    }
+    Ok(shared(id, url, v["expires_at"].as_f64(), pane))
+}
+
+/// A new lifetime for a link, counted from now.
+pub fn set_share_lifetime(link: &Shared, pane: &str, lifetime: Lifetime) -> Result<Shared, String> {
+    let v = call("share.update", json!({"id": link.id, "lifetime_seconds": lifetime.seconds()}))?;
+    Ok(shared(link.id.clone(), link.url.clone(), v["expires_at"].as_f64(), pane))
+}
+
+/// Every link to a pane.
+pub fn revoke_pane_shares(pane: &str) -> Result<(), String> {
+    call("share.revoke", json!({"pane_session_key": pane})).map(|_| ())
+}
+
 /// The bot's @username for a token, without saving it.
 pub fn validate_token(token: &str) -> Result<String, String> {
     let v = call("telegram.validate_token", json!({"bot_token": token}))?;
