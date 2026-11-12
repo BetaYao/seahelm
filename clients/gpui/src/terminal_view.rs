@@ -79,6 +79,8 @@ pub struct ContextMenuRequested {
     pub at: gpui::Point<Pixels>,
     /// A URL under the pointer.
     pub link: Option<String>,
+    /// The path-like word under it, for Preview.
+    pub word: Option<String>,
     pub has_selection: bool,
 }
 
@@ -524,7 +526,12 @@ impl TerminalView {
         // (shift gets the menu anyway, as it gets a selection).
         if event.button == MouseButton::Right && (event.modifiers.shift || !self.program_has_mouse()) {
             let has_selection = self.with_terminal(|t| t.selection_text()).flatten().is_some_and(|t| !t.is_empty());
-            cx.emit(ContextMenuRequested { at: event.position, link: self.url_under(event.position), has_selection });
+            let word = self.pointer(event.position).and_then(|at| {
+                let row = self.rows.get(at.row as usize)?;
+                let cells: Vec<String> = row.cells.iter().map(|c| c.text.clone()).collect();
+                crate::terminal_text::token_at(&cells, at.col as usize)
+            });
+            cx.emit(ContextMenuRequested { at: event.position, link: self.url_under(event.position), word, has_selection });
             return;
         }
         if !event.modifiers.shift && self.program_has_mouse() {

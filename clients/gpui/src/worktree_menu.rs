@@ -408,6 +408,8 @@ impl Workspace {
                 w.close_row_menu(cx);
             })));
             menu = menu.child(div().my(px(4.)).h(px(1.)).bg(tokens::hairline()));
+            menu = menu.child(self.label_row(&it.worktree_path, cx));
+            menu = menu.child(div().my(px(4.)).h(px(1.)).bg(tokens::hairline()));
             if it.is_main {
                 menu = menu.child(menu_item("menu-delete", "Delete Worktree…", false).opacity(0.4).child(
                     div().ml(px(6.)).text_size(px(11.)).text_color(tokens::ink_faint()).child("main checkout"),
@@ -431,6 +433,53 @@ impl Workspace {
                 .child(anchored().position(point(m.at.x, m.at.y)).snap_to_window().child(menu)),
         )
         .with_priority(1)
+    }
+}
+
+impl Workspace {
+    /// Label: None, then the eight swatches, the current one ringed (the
+    /// macOS row menu's Label submenu, flat).
+    fn label_row(&self, path: &str, cx: &mut Context<Self>) -> gpui::AnyElement {
+        use crate::labels::{self, Label};
+        let current = self.labels.get(path).copied();
+        let mut row = div().mx(px(5.)).px(px(9.)).h(px(26.)).flex().flex_row().items_center().gap(px(6.)).child(div().text_color(tokens::ink()).child("Label")).child(div().flex_1());
+        let swatch = |id: String, on: bool| {
+            div()
+                .id(gpui::SharedString::from(id))
+                .size(px(16.))
+                .rounded(px(4.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .border_1()
+                .border_color(if on { tokens::ink() } else { gpui::transparent_black().into() })
+        };
+        let choices: Vec<Option<Label>> = std::iter::once(None).chain(Label::ALL.into_iter().map(Some)).collect();
+        for choice in choices {
+            let p = path.to_string();
+            let id = format!("label-{}-{}", choice.map_or("none", |l| l.key()), path);
+            let mut s = swatch(id, choice == current);
+            s = match choice {
+                Some(l) => s.child(div().size(px(10.)).rounded(px(2.5)).bg(l.colour())),
+                None => s.child(div().text_size(px(11.)).text_color(tokens::ink_faint()).child("⊘")),
+            };
+            row = row.child(s.on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
+                if let Err(e) = labels::set(&p, choice) {
+                    eprintln!("seahelm-gpui: label {p}: {e}");
+                }
+                match choice {
+                    Some(l) => {
+                        w.labels.insert(p.clone(), l);
+                    }
+                    None => {
+                        w.labels.remove(&p);
+                    }
+                }
+                w.close_row_menu(cx);
+            })));
+        }
+        row.into_any_element()
     }
 }
 
