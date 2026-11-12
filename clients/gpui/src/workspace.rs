@@ -24,6 +24,8 @@ use crate::session;
 mod worktree_menu;
 #[path = "pane_extras.rs"]
 mod pane_extras;
+#[path = "share_popover.rs"]
+mod share_popover;
 #[path = "preview_tabs.rs"]
 mod preview_tabs;
 use worktree_menu::{CancelSheet, NewWorktree, RowMenu};
@@ -160,6 +162,10 @@ pub struct Workspace {
     settings_page: Entity<SettingsPage>,
     /// What the core knows about each pane, by session (`pane_extras`).
     pane_facts: pane_extras::Facts,
+    /// The share button's popover, while it is open.
+    share: Option<share_popover::SharePopover>,
+    /// The lifetime picked last, so the next link starts there.
+    share_lifetime: crate::gateway_client::Lifetime,
     /// Who is at work on a pane through the core, by session.
     presence: HashMap<String, pane_extras::Presence>,
     /// Files and changes opened as tabs in the main area, by worktree.
@@ -219,6 +225,8 @@ impl Workspace {
             settings_section: SettingsSection::General,
             settings_page: cx.new(SettingsPage::new),
             pane_facts: HashMap::new(),
+            share: None,
+            share_lifetime: crate::gateway_client::Lifetime::Day,
             presence: HashMap::new(),
             zoomed: None,
             preview_tabs: HashMap::new(),
@@ -665,7 +673,7 @@ impl Workspace {
         self.set_settings_open(open, window, cx);
     }
 
-    /// Settings, on `section`: the main header's share button opens Pairing.
+    /// Settings, on `section`.
     fn open_settings(&mut self, section: SettingsSection, window: &mut Window, cx: &mut Context<Self>) {
         self.settings_section = section;
         self.set_settings_open(true, window, cx);
@@ -1742,12 +1750,13 @@ impl Workspace {
             .bg(theme::rgb(theme::bg()))
             .child(drag_area())
             .when(platform::MAC && !self.sidebar_visible, |d| d.pl(px(82.)))
-            // Sharing lives in Settings ▸ Pairing (web access, share links).
+            // A link to the focused pane, as the macOS header's share button
+            // makes one; the popover leads on to Settings ▸ Pairing.
             .child(
                 div().ml(px(12.)).child(
-                    chrome_icon("share", self.settings_open && self.settings_section == SettingsSection::Pairing)
-                        .id("open-pairing")
-                        .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.open_settings(SettingsSection::Pairing, window, cx))),
+                    chrome_icon("share", self.share.is_some())
+                        .id("share-pane")
+                        .on_click(cx.listener(|w, e: &ClickEvent, _, cx| w.share_focused_pane(e, cx))),
                 ),
             )
             .child(div().ml(px(6.)).font_family(SYSTEM).text_size(px(11.)).line_height(px(15.)).text_color(tokens::ink_dim()).child(memory))
