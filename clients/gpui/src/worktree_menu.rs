@@ -28,7 +28,26 @@ use crate::worktree_git;
 gpui::actions!(seahelm, [CancelSheet]);
 
 /// The agents the core can start in a new worktree (`worktree.options`).
-const AGENTS: &[(&str, &str)] = &[("claudeCode", "Claude Code"), ("codex", "Codex")];
+/// Every agent seahelm-core can start a worktree with (its `launch_parts`),
+/// as the macOS app's picker lists them.
+const AGENTS: &[(&str, &str)] = &[
+    ("claudeCode", "Claude Code"),
+    ("codex", "Codex"),
+    ("openCode", "OpenCode"),
+    ("gemini", "Gemini"),
+    ("cursor", "Cursor"),
+    ("aider", "Aider"),
+    ("goose", "Goose"),
+    ("amp", "Amp"),
+    ("cline", "Cline"),
+    ("kiro", "Kiro"),
+    ("pi", "Pi"),
+];
+
+thread_local! {
+    /// The agent picked last, so the next sheet starts on it.
+    static LAST_AGENT: std::cell::Cell<&'static str> = const { std::cell::Cell::new("claudeCode") };
+}
 
 pub struct NewWorktree {
     project: String,
@@ -64,11 +83,15 @@ impl Workspace {
 
     pub(super) fn open_new_worktree(&mut self, project: String, project_name: String, window: &mut Window, cx: &mut Context<Self>) {
         self.row_menu = None;
-        let input = cx.new(|cx| TextInput::new("What should the agent do?", cx));
+        let input = cx.new(|cx| {
+            let mut t = TextInput::new("What should the agent do? (Shift+Enter for a new line)", cx);
+            t.set_multiline(3, 10);
+            t
+        });
         let submit = cx.subscribe(&input, |w, _, _: &Submitted, cx| w.create_worktree(cx));
         window.focus(&input.focus_handle(cx));
         notify::log("worktree.new.open", serde_json::json!({"project": project}));
-        self.new_worktree = Some(NewWorktree { project, project_name, input, agent: AGENTS[0].0, busy: false, error: None, _submit: submit });
+        self.new_worktree = Some(NewWorktree { project, project_name, input, agent: LAST_AGENT.with(|a| a.get()), busy: false, error: None, _submit: submit });
         cx.notify();
     }
 
@@ -242,7 +265,7 @@ impl Workspace {
 
     fn new_worktree_sheet(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(s) = &self.new_worktree else { return div().into_any_element() };
-        let mut agents = div().flex().flex_row().gap(px(6.));
+        let mut agents = div().flex().flex_row().flex_wrap().gap(px(6.));
         for (id, label) in AGENTS {
             let on = s.agent == *id;
             let id = *id;
@@ -261,6 +284,7 @@ impl Workspace {
                     .on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
                         if let Some(s) = w.new_worktree.as_mut() {
                             s.agent = id;
+                            LAST_AGENT.with(|a| a.set(id));
                             cx.notify();
                         }
                     }))
@@ -268,7 +292,7 @@ impl Workspace {
             );
         }
         let card = div()
-            .w(px(460.))
+            .w(px(560.))
             .p(px(18.))
             .rounded(px(12.))
             .bg(tokens::sidebar_tint())
@@ -291,7 +315,15 @@ impl Workspace {
                     .child("A branch named after the task, off the project's trunk, with the agent started on it."),
             )
             .child(s.input.clone())
-            .child(div().flex().flex_row().items_center().gap(px(10.)).child(div().text_color(tokens::ink_dim()).child("Agent")).child(agents))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .gap(px(10.))
+                    .child(div().pt(px(5.)).flex_none().text_color(tokens::ink_dim()).child("Agent"))
+                    .child(div().flex_1().child(agents)),
+            )
             .when_some(s.error.clone(), |d, e| d.child(div().text_color(tokens::danger()).child(e)))
             .child(
                 div()

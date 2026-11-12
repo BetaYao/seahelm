@@ -252,18 +252,51 @@ pub fn branch_name(task: &str, existing: &[String]) -> String {
     (2..).map(|n| format!("{base}-{n}")).find(|b| !existing.contains(b)).unwrap_or(base)
 }
 
-fn agent_command(agent: AgentType, task: &str, yolo: bool) -> Option<String> {
-    let (bin, flag) = match agent {
-        AgentType::ClaudeCode => ("claude", "--dangerously-skip-permissions"),
-        AgentType::Codex => ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+/// The agents a worktree or pane can be started with: the binary and its
+/// skip-permissions flag, as the macOS app's `AgentType.launchCommand` /
+/// `yoloFlag` have them (Cursor's agent CLI is `agent`, not the IDE shim).
+pub fn launch_parts(agent: AgentType) -> Option<(&'static str, Option<&'static str>)> {
+    use AgentType::*;
+    Some(match agent {
+        ClaudeCode => ("claude", Some("--dangerously-skip-permissions")),
+        Codex => ("codex", Some("--dangerously-bypass-approvals-and-sandbox")),
+        OpenCode => ("opencode", Some("--yolo")),
+        Gemini => ("gemini", None),
+        Cline => ("cline", None),
+        Goose => ("goose", None),
+        Amp => ("amp", None),
+        Aider => ("aider", None),
+        Cursor => ("agent", Some("--yolo")),
+        Kiro => ("kiro", None),
+        Pi => ("pi", None),
         _ => return None,
-    };
-    let mut cmd = bin.to_string();
-    if yolo {
-        cmd += &format!(" {flag}");
+    })
+}
+
+/// An `agent_type` from the wire (`claudeCode`, `openCode`…) that can be
+/// launched; empty is Claude Code.
+fn launchable(name: &str) -> Result<AgentType, RpcError> {
+    if name.is_empty() {
+        return Ok(AgentType::ClaudeCode);
     }
-    cmd += &format!(" {}", shell_quote(task));
-    Some(cmd)
+    serde_json::from_value::<AgentType>(json!(name))
+        .ok()
+        .filter(|a| launch_parts(*a).is_some())
+        .ok_or_else(|| RpcError::invalid_params(format!("agent_type {name} cannot be launched")))
+}
+
+fn bare_command(agent: AgentType, yolo: bool) -> Option<String> {
+    let (bin, flag) = launch_parts(agent)?;
+    Some(match flag {
+        Some(flag) if yolo => format!("{bin} {flag}"),
+        _ => bin.to_string(),
+    })
+}
+
+/// The agent with its task as the initial prompt, a positional argument,
+/// as the macOS app launches every agent.
+fn agent_command(agent: AgentType, task: &str, yolo: bool) -> Option<String> {
+    Some(format!("{} {}", bare_command(agent, yolo)?, shell_quote(task)))
 }
 
 fn shell_quote(s: &str) -> String {
@@ -308,11 +341,7 @@ fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcRes
     if repo.as_os_str().is_empty() || s(p, "prompt").is_empty() {
         return Err(RpcError::invalid_params("repo_path and prompt are required"));
     }
-    let agent = match s(p, "agent_type").as_str() {
-        "" | "claudeCode" => AgentType::ClaudeCode,
-        "codex" => AgentType::Codex,
-        other => return Err(RpcError::invalid_params(format!("agent_type {other} cannot be launched"))),
-    };
+    let agent = launchable(&s(p, "agent_type"))?;
     let top = git(&repo, &["rev-parse", "--show-toplevel"]).ok_or_else(|| RpcError::invalid_params("not a git repository"))?;
     let repo = PathBuf::from(top.trim());
     let branches: Vec<String> = git(&repo, &["branch", "-a", "--format=%(refname:short)"])
@@ -512,6 +541,29 @@ mod tests {
     }
 
     #[test]
+    fn every_agent_the_macos_app_launches_can_be_started() {
+        for (wire, cmd) in [
+            ("", "claude"),
+            ("claudeCode", "claude"),
+            ("codex", "codex"),
+            ("openCode", "opencode"),
+            ("gemini", "gemini"),
+            ("cursor", "agent"),
+            ("pi", "pi"),
+        ] {
+            let agent = launchable(wire).unwrap();
+            assert_eq!(bare_command(agent, false).as_deref(), Some(cmd), "{wire}");
+        }
+        assert_eq!(bare_command(AgentType::OpenCode, true).as_deref(), Some("opencode --yolo"));
+        assert_eq!(bare_command(AgentType::Gemini, true).as_deref(), Some("gemini"), "no flag known");
+        assert!(launchable("npm").is_err());
+        assert!(launchable("nonsense").is_err());
+        if !cfg!(windows) {
+            assert_eq!(agent_command(AgentType::Aider, "fix it", false).as_deref(), Some("aider 'fix it'"));
+        }
+    }
+
+    #[test]
     fn branch_names_from_tasks() {
         assert_eq!(branch_name("Fix the login 500 on /api/session!", &[]), "task/fix-the-login-500-on-api");
         assert_eq!(branch_name("修复登录", &[]), "task/agent");
@@ -589,22 +641,14 @@ pub fn pane_new(core: &Core, p: &Value) -> RpcResult {
     }
     let agent = match s(p, "agent_type").as_str() {
         "" | "shell" => None,
-        "claudeCode" => Some(AgentType::ClaudeCode),
-        "codex" => Some(AgentType::Codex),
-        other => return Err(RpcError::invalid_params(format!("agent_type {other} cannot be launched"))),
+        other => Some(launchable(other)?),
     };
     let base = gpui_session_name(&worktree);
     let session = (2..1000)
         .map(|n| format!("{base}-{n}"))
         .find(|name| core.pane_row(name).is_none() && seahelmd::client::socket_path(name).map(|p| !p.exists()).unwrap_or(false))
         .ok_or_else(|| RpcError::internal("no free session name"))?;
-    let launch = agent.and_then(|a| {
-        let (bin, flag) = match a {
-            AgentType::ClaudeCode => ("claude", "--dangerously-skip-permissions"),
-            _ => ("codex", "--dangerously-bypass-approvals-and-sandbox"),
-        };
-        Some(if crate::first_mate::UserConfig::load().agent_yolo { format!("{bin} {flag}") } else { bin.to_string() })
-    });
+    let launch = agent.and_then(|a| bare_command(a, crate::first_mate::UserConfig::load().agent_yolo));
     start_plain_session(&session, &dir, launch.as_deref()).map_err(RpcError::internal)?;
     let field = |k: &str| like.as_ref().and_then(|r| r[k].as_str()).unwrap_or_default().to_string();
     let project = Some(field("project")).filter(|p| !p.is_empty()).unwrap_or_else(|| {
