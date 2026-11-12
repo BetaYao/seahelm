@@ -26,6 +26,8 @@ mod worktree_menu;
 mod pane_extras;
 #[path = "share_popover.rs"]
 mod share_popover;
+#[path = "pane_menu.rs"]
+mod pane_menu;
 #[path = "preview_tabs.rs"]
 mod preview_tabs;
 use worktree_menu::{CancelSheet, NewWorktree, RowMenu};
@@ -43,7 +45,27 @@ const DIVIDER_HIT: f32 = 16.0;
 
 actions!(
     seahelm,
-    [SplitRight, SplitDown, ClosePane, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPaneDown, ZoomPane]
+    [
+        SplitRight,
+        SplitDown,
+        ClosePane,
+        FocusPaneLeft,
+        FocusPaneRight,
+        FocusPaneUp,
+        FocusPaneDown,
+        ZoomPane,
+        ResizePaneLeft,
+        ResizePaneRight,
+        ResizePaneUp,
+        ResizePaneDown,
+        EqualizeSplit,
+        NextWorktree,
+        PrevWorktree,
+        ToggleSidebar,
+        ToggleFirstMate,
+        NewWorktreeHere,
+        ToggleSettings
+    ]
 );
 
 /// The split shortcuts: the macOS app's on macOS; elsewhere ctrl+shift
@@ -60,6 +82,15 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("cmd-alt-up", FocusPaneUp, None),
             KeyBinding::new("cmd-alt-down", FocusPaneDown, None),
             KeyBinding::new("cmd-shift-enter", ZoomPane, None),
+            KeyBinding::new("cmd-ctrl-left", ResizePaneLeft, None),
+            KeyBinding::new("cmd-ctrl-right", ResizePaneRight, None),
+            KeyBinding::new("cmd-ctrl-up", ResizePaneUp, None),
+            KeyBinding::new("cmd-ctrl-down", ResizePaneDown, None),
+            KeyBinding::new("cmd-ctrl-=", EqualizeSplit, None),
+            KeyBinding::new("cmd-b", ToggleSidebar, None),
+            KeyBinding::new("cmd-j", ToggleFirstMate, None),
+            KeyBinding::new("cmd-n", NewWorktreeHere, None),
+            KeyBinding::new("cmd-,", ToggleSettings, None),
         ]);
     } else {
         cx.bind_keys([
@@ -71,8 +102,19 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("ctrl-alt-up", FocusPaneUp, None),
             KeyBinding::new("ctrl-alt-down", FocusPaneDown, None),
             KeyBinding::new("ctrl-shift-enter", ZoomPane, None),
+            KeyBinding::new("ctrl-alt-shift-left", ResizePaneLeft, None),
+            KeyBinding::new("ctrl-alt-shift-right", ResizePaneRight, None),
+            KeyBinding::new("ctrl-alt-shift-up", ResizePaneUp, None),
+            KeyBinding::new("ctrl-alt-shift-down", ResizePaneDown, None),
+            KeyBinding::new("ctrl-alt-=", EqualizeSplit, None),
+            KeyBinding::new("ctrl-shift-b", ToggleSidebar, None),
+            KeyBinding::new("ctrl-shift-j", ToggleFirstMate, None),
+            KeyBinding::new("ctrl-shift-n", NewWorktreeHere, None),
+            KeyBinding::new("ctrl-,", ToggleSettings, None),
         ]);
     }
+    // Both: ctrl+tab walks the fleet as on macOS.
+    cx.bind_keys([KeyBinding::new("ctrl-tab", NextWorktree, None), KeyBinding::new("ctrl-shift-tab", PrevWorktree, None)]);
     cx.bind_keys([
         KeyBinding::new("escape", CancelSheet, Some("NewWorktreeSheet")),
         KeyBinding::new("escape", CancelSheet, Some("RenamePaneSheet")),
@@ -162,6 +204,8 @@ pub struct Workspace {
     settings_page: Entity<SettingsPage>,
     /// What the core knows about each pane, by session (`pane_extras`).
     pane_facts: pane_extras::Facts,
+    /// A pane's right-click menu, while it is open.
+    pane_menu: Option<pane_menu::PaneMenu>,
     /// The share button's popover, while it is open.
     share: Option<share_popover::SharePopover>,
     /// The lifetime picked last, so the next link starts there.
@@ -226,6 +270,7 @@ impl Workspace {
             settings_page: cx.new(SettingsPage::new),
             pane_facts: HashMap::new(),
             share: None,
+            pane_menu: None,
             share_lifetime: crate::gateway_client::Lifetime::Day,
             presence: HashMap::new(),
             zoomed: None,
@@ -463,7 +508,26 @@ impl Workspace {
         self.card_submits.retain(|id, _| cards.iter().any(|c| &c.id == id));
         if self.cards != cards {
             self.cards = cards;
+            self.sync_suggestions(cx);
             cx.notify();
+        }
+    }
+
+    /// Each pane's newest suggestion card, for its terminal to draw on the
+    /// `::seahelm-suggest::` line (the strip above the terminals leaves
+    /// suggestions out).
+    fn sync_suggestions(&self, cx: &mut Context<Self>) {
+        for (id, panes) in &self.panes {
+            for (leaf, view) in &panes.views {
+                let key = pane_session(id, *leaf);
+                let card = self
+                    .cards
+                    .iter()
+                    .filter(|c| c.kind == "suggestion" && c.pane_session_key == key)
+                    .max_by(|a, b| a.fresh_at.total_cmp(&b.fresh_at))
+                    .map(|c| (c.id.clone(), c.labels.clone()));
+                view.update(cx, |v, cx| v.set_suggestion(card, cx));
+            }
         }
     }
 
@@ -519,7 +583,8 @@ impl Workspace {
     /// The selected worktree's cards, above its terminals: what is asked,
     /// and a button per answer.
     fn card_strip(&self, worktree: &str, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        let cards: Vec<&core_client::Card> = self.cards.iter().filter(|c| c.worktree_path == worktree).collect();
+        // Suggestions are drawn on their line in the terminal instead.
+        let cards: Vec<&core_client::Card> = self.cards.iter().filter(|c| c.worktree_path == worktree && c.kind != "suggestion").collect();
         if cards.is_empty() {
             return None;
         }
@@ -906,7 +971,8 @@ impl Workspace {
     /// given, and how many cards wait. Opens the workbench.
     fn first_mate_dock(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let (status, colour) = self.first_mate_status();
-        let n = self.cards.len();
+        let suggestions = self.cards.iter().filter(|c| c.kind == "suggestion").count();
+        let n = self.cards.len() - suggestions;
         let mut usage = div().flex().flex_row().items_center().gap(px(4.)).text_size(px(10.5)).line_height(px(14.));
         for (i, r) in self.usage.iter().enumerate() {
             if let Some(seg) = r.segments.first() {
@@ -957,11 +1023,13 @@ impl Workspace {
                 div()
                     .text_size(px(10.5))
                     .line_height(px(14.))
-                    .text_color(if n > 0 { tokens::attention() } else { tokens::ink_faint() })
-                    .child(match n {
-                        0 => "Nothing waiting · standing by".to_string(),
-                        1 => "1 card waiting for you".to_string(),
-                        n => format!("{n} cards waiting for you"),
+                    .text_color(if n > 0 { tokens::attention() } else if suggestions > 0 { tokens::accent() } else { tokens::ink_faint() })
+                    .child(match (n, suggestions) {
+                        (0, 0) => "Nothing waiting · standing by".to_string(),
+                        (0, s) => format!("{s} suggestion{} on screen", if s == 1 { "" } else { "s" }),
+                        (1, 0) => "1 card waiting for you".to_string(),
+                        (n, 0) => format!("{n} cards waiting for you"),
+                        (n, s) => format!("{n} card{} waiting · {s} suggestion{}", if n == 1 { "" } else { "s" }, if s == 1 { "" } else { "s" }),
                     }),
             )
     }
@@ -1117,9 +1185,17 @@ impl Workspace {
                 }
             }
         });
+        let worktree = id.to_string();
+        let menu = cx.subscribe(&view, move |w, _, e: &crate::terminal_view::ContextMenuRequested, cx| {
+            w.open_pane_menu(worktree.clone(), leaf, e, cx)
+        });
+        let picked = cx.subscribe(&view, |w, _, e: &crate::terminal_view::SuggestionPicked, cx| w.answer_card(e.card_id.clone(), e.index, cx));
         let panes = self.panes.entry(id.to_string()).or_default();
         panes.views.insert(leaf, view.clone());
         panes._subscriptions.push(sub);
+        panes._subscriptions.push(menu);
+        panes._subscriptions.push(picked);
+        self.sync_suggestions(cx);
         Some(view)
     }
 
@@ -1376,6 +1452,48 @@ impl Workspace {
         }
     }
 
+    fn resize_pane(&mut self, axis: Axis, delta: f32, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else { return };
+        if self.panes.get_mut(&id).is_some_and(|p| p.tree.nudge(axis, delta)) {
+            self.save_layouts();
+            cx.notify();
+        }
+    }
+
+    fn equalize_split(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else { return };
+        if self.panes.get_mut(&id).is_some_and(|p| p.tree.equalize_focused()) {
+            self.save_layouts();
+            cx.notify();
+        }
+    }
+
+    /// The next (or previous) worktree in the fleet's order, wrapping.
+    fn step_worktree(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let ids: Vec<String> = self.display_groups(fleet::now()).into_iter().flat_map(|g| g.items.into_iter().map(|i| i.id)).collect();
+        if ids.is_empty() {
+            return;
+        }
+        let at = self.selected.as_ref().and_then(|s| ids.iter().position(|i| i == s));
+        let next = match at {
+            Some(i) => (i as isize + step).rem_euclid(ids.len() as isize) as usize,
+            None => 0,
+        };
+        self.select(ids[next].clone(), window, cx);
+    }
+
+    /// The new-worktree sheet for the selected worktree's project (cmd+n).
+    fn new_worktree_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let project = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.project_of(id))
+            .or_else(|| self.fleet.groups.iter().find(|g| !g.path.is_empty()).map(|g| (g.path.clone(), g.title.clone())));
+        if let Some((path, name)) = project {
+            self.open_new_worktree(path, name, window, cx);
+        }
+    }
+
     fn toggle_sidebar(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.sidebar_visible = !self.sidebar_visible;
         cx.notify();
@@ -1476,6 +1594,23 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &FocusPaneUp, window, cx| w.focus_pane(Direction::Up, window, cx)))
             .on_action(cx.listener(|w, _: &FocusPaneDown, window, cx| w.focus_pane(Direction::Down, window, cx)))
             .on_action(cx.listener(|w, _: &ZoomPane, _, cx| w.toggle_zoom(cx)))
+            .on_action(cx.listener(|w, _: &ResizePaneLeft, _, cx| w.resize_pane(Axis::Horizontal, -0.05, cx)))
+            .on_action(cx.listener(|w, _: &ResizePaneRight, _, cx| w.resize_pane(Axis::Horizontal, 0.05, cx)))
+            .on_action(cx.listener(|w, _: &ResizePaneUp, _, cx| w.resize_pane(Axis::Vertical, -0.05, cx)))
+            .on_action(cx.listener(|w, _: &ResizePaneDown, _, cx| w.resize_pane(Axis::Vertical, 0.05, cx)))
+            .on_action(cx.listener(|w, _: &EqualizeSplit, _, cx| w.equalize_split(cx)))
+            .on_action(cx.listener(|w, _: &NextWorktree, window, cx| w.step_worktree(1, window, cx)))
+            .on_action(cx.listener(|w, _: &PrevWorktree, window, cx| w.step_worktree(-1, window, cx)))
+            .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
+                w.sidebar_visible = !w.sidebar_visible;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|w, _: &ToggleFirstMate, window, cx| w.toggle_first_mate(window, cx)))
+            .on_action(cx.listener(|w, _: &NewWorktreeHere, window, cx| w.new_worktree_here(window, cx)))
+            .on_action(cx.listener(|w, _: &ToggleSettings, window, cx| {
+                let open = !w.settings_open;
+                w.set_settings_open(open, window, cx);
+            }))
             .capture_key_down(cx.listener(|w, _: &KeyDownEvent, _, _| w.note_activity()))
             .capture_any_mouse_down(cx.listener(|w, _: &MouseDownEvent, _, _| w.note_activity()));
         if self.dragging_divider || self.split_drag.as_ref().is_some_and(|d| d.axis == Axis::Horizontal) {
@@ -1636,6 +1771,7 @@ impl Workspace {
 
     fn row(&self, item: &Item, now: f64, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected.as_deref() == Some(item.id.as_str());
+        let menu_on = self.row_menu.as_ref().is_some_and(|m| m.is_on(&item.id));
         let panes = self.panes.get(&item.id).map_or(0, |p| p.views.len());
         let stats = self.git.get(&item.worktree_path);
         let id = item.id.clone();
@@ -1701,7 +1837,9 @@ impl Workspace {
             .py(px(8.))
             .gap(px(7.))
             .when(selected, |d| d.bg(tokens::row_selected()))
-            .when(!selected, |d| d.hover(|s| s.bg(tokens::row_hover())))
+            // The row a context menu is open on stays lit, as AppKit lights it.
+            .when(!selected && menu_on, |d| d.bg(tokens::row_hover()))
+            .when(!selected && !menu_on, |d| d.hover(|s| s.bg(tokens::row_hover())))
             .on_click({
                 let id = id.clone();
                 cx.listener(move |w, _: &ClickEvent, window, cx| w.select(id.clone(), window, cx))

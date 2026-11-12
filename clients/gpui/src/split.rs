@@ -170,6 +170,56 @@ impl SplitTree {
         self.set_ratio(path, 0.5);
     }
 
+    /// The path to the innermost split around the focused pane, along
+    /// `axis` when given: the one the keyboard resizes or evens out.
+    fn focused_split(&self, axis: Option<Axis>) -> Option<Vec<bool>> {
+        fn walk(n: &Node, leaf: LeafId, axis: Option<Axis>, path: &mut Vec<bool>, best: &mut Option<Vec<bool>>) -> bool {
+            match n {
+                Node::Leaf(id) => *id == leaf,
+                Node::Split { axis: ax, a, b, .. } => {
+                    for (right, child) in [(false, a), (true, b)] {
+                        path.push(right);
+                        let found = walk(child, leaf, axis, path, best);
+                        path.pop();
+                        if found {
+                            if axis.is_none_or(|want| want == *ax) && best.is_none() {
+                                *best = Some(path.clone());
+                            }
+                            return true;
+                        }
+                    }
+                    false
+                }
+            }
+        }
+        let mut best = None;
+        walk(&self.root, self.focused, axis, &mut Vec::new(), &mut best);
+        best
+    }
+
+    /// Move the divider beside the focused pane by `delta` (cmd+ctrl+arrow,
+    /// 0.05 a press as in the macOS app): right and down make it larger.
+    pub fn nudge(&mut self, axis: Axis, delta: f32) -> bool {
+        let Some(path) = self.focused_split(Some(axis)) else { return false };
+        let ratio = self.dividers().into_iter().find(|d| d.path == path).map(|d| {
+            let (start, len) = match axis {
+                Axis::Horizontal => (d.area.x, d.area.w),
+                Axis::Vertical => (d.area.y, d.area.h),
+            };
+            (d.at - start) / len
+        });
+        let Some(ratio) = ratio else { return false };
+        self.set_ratio(&path, ratio + delta);
+        true
+    }
+
+    /// Even out the split around the focused pane (cmd+ctrl+=).
+    pub fn equalize_focused(&mut self) -> bool {
+        let Some(path) = self.focused_split(None) else { return false };
+        self.equalize(&path);
+        true
+    }
+
     /// The pane next to the focused one in `dir`: of the panes whose edge
     /// touches it on that side and overlap it across, the one most in line
     /// with its centre.
@@ -338,6 +388,23 @@ mod tests {
         assert_eq!(t.dividers()[0].at, MAX_RATIO);
         t.equalize(&[]);
         assert_eq!(t.dividers()[0].at, 0.5);
+    }
+
+    #[test]
+    fn the_keyboard_resizes_the_split_around_the_focused_pane() {
+        let mut t = SplitTree::default();
+        let right = t.split(Axis::Horizontal);
+        let below = t.split(Axis::Vertical);
+        assert_eq!(t.focused, below);
+        assert!(t.nudge(Axis::Vertical, 0.05));
+        assert!((t.dividers()[1].at - 0.55).abs() < 1e-6, "the inner, vertical split moved");
+        assert!(t.nudge(Axis::Horizontal, -0.05));
+        assert!((t.dividers()[0].at - 0.45).abs() < 1e-6, "the outer, horizontal one");
+        t.focused = right;
+        assert!(t.equalize_focused());
+        assert_eq!(t.dividers()[1].at, 0.5);
+        let mut lone = SplitTree::default();
+        assert!(!lone.nudge(Axis::Horizontal, 0.05));
     }
 
     #[test]

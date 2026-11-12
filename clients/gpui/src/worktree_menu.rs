@@ -28,7 +28,26 @@ use crate::worktree_git;
 gpui::actions!(seahelm, [CancelSheet]);
 
 /// The agents the core can start in a new worktree (`worktree.options`).
-const AGENTS: &[(&str, &str)] = &[("claudeCode", "Claude Code"), ("codex", "Codex")];
+/// Every agent seahelm-core can start a worktree with (its `launch_parts`),
+/// as the macOS app's picker lists them.
+const AGENTS: &[(&str, &str)] = &[
+    ("claudeCode", "Claude Code"),
+    ("codex", "Codex"),
+    ("openCode", "OpenCode"),
+    ("gemini", "Gemini"),
+    ("cursor", "Cursor"),
+    ("aider", "Aider"),
+    ("goose", "Goose"),
+    ("amp", "Amp"),
+    ("cline", "Cline"),
+    ("kiro", "Kiro"),
+    ("pi", "Pi"),
+];
+
+thread_local! {
+    /// The agent picked last, so the next sheet starts on it.
+    static LAST_AGENT: std::cell::Cell<&'static str> = const { std::cell::Cell::new("claudeCode") };
+}
 
 pub struct NewWorktree {
     project: String,
@@ -45,9 +64,15 @@ pub struct RowMenu {
     at: Point<Pixels>,
 }
 
+impl RowMenu {
+    pub fn is_on(&self, item: &str) -> bool {
+        self.item == item
+    }
+}
+
 impl Workspace {
     /// The project a worktree belongs to: its group's main checkout.
-    fn project_of(&self, item: &str) -> Option<(String, String)> {
+    pub(super) fn project_of(&self, item: &str) -> Option<(String, String)> {
         self.fleet
             .groups
             .iter()
@@ -58,11 +83,15 @@ impl Workspace {
 
     pub(super) fn open_new_worktree(&mut self, project: String, project_name: String, window: &mut Window, cx: &mut Context<Self>) {
         self.row_menu = None;
-        let input = cx.new(|cx| TextInput::new("What should the agent do?", cx));
+        let input = cx.new(|cx| {
+            let mut t = TextInput::new("What should the agent do? (Shift+Enter for a new line)", cx);
+            t.set_multiline(3, 10);
+            t
+        });
         let submit = cx.subscribe(&input, |w, _, _: &Submitted, cx| w.create_worktree(cx));
         window.focus(&input.focus_handle(cx));
         notify::log("worktree.new.open", serde_json::json!({"project": project}));
-        self.new_worktree = Some(NewWorktree { project, project_name, input, agent: AGENTS[0].0, busy: false, error: None, _submit: submit });
+        self.new_worktree = Some(NewWorktree { project, project_name, input, agent: LAST_AGENT.with(|a| a.get()), busy: false, error: None, _submit: submit });
         cx.notify();
     }
 
@@ -228,12 +257,15 @@ impl Workspace {
         if let Some(popover) = self.share_popover(cx) {
             return Some(popover);
         }
+        if let Some(menu) = self.pane_menu_view(cx) {
+            return Some(menu);
+        }
         self.row_menu.as_ref().map(|m| self.row_menu_view(m, cx).into_any_element())
     }
 
     fn new_worktree_sheet(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(s) = &self.new_worktree else { return div().into_any_element() };
-        let mut agents = div().flex().flex_row().gap(px(6.));
+        let mut agents = div().flex().flex_row().flex_wrap().gap(px(6.));
         for (id, label) in AGENTS {
             let on = s.agent == *id;
             let id = *id;
@@ -252,6 +284,7 @@ impl Workspace {
                     .on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
                         if let Some(s) = w.new_worktree.as_mut() {
                             s.agent = id;
+                            LAST_AGENT.with(|a| a.set(id));
                             cx.notify();
                         }
                     }))
@@ -259,7 +292,7 @@ impl Workspace {
             );
         }
         let card = div()
-            .w(px(460.))
+            .w(px(560.))
             .p(px(18.))
             .rounded(px(12.))
             .bg(tokens::sidebar_tint())
@@ -282,7 +315,15 @@ impl Workspace {
                     .child("A branch named after the task, off the project's trunk, with the agent started on it."),
             )
             .child(s.input.clone())
-            .child(div().flex().flex_row().items_center().gap(px(10.)).child(div().text_color(tokens::ink_dim()).child("Agent")).child(agents))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .gap(px(10.))
+                    .child(div().pt(px(5.)).flex_none().text_color(tokens::ink_dim()).child("Agent"))
+                    .child(div().flex_1().child(agents)),
+            )
             .when_some(s.error.clone(), |d, e| d.child(div().text_color(tokens::danger()).child(e)))
             .child(
                 div()
@@ -316,7 +357,7 @@ impl Workspace {
 
     fn row_menu_view(&self, m: &RowMenu, cx: &mut Context<Self>) -> impl IntoElement {
         let item = self.fleet.find(&m.item).cloned();
-        let pr_url = item.as_ref().and_then(|i| self.prs.get(&i.worktree_path)).map(|p| p.url.clone()).filter(|u| !u.is_empty());
+        let pr = item.as_ref().and_then(|i| self.prs.get(&i.worktree_path)).filter(|p| !p.url.is_empty()).map(|p| (p.url.clone(), p.number));
         let project = self.project_of(&m.item);
         let mut menu = div()
             .min_w(px(210.))
@@ -332,8 +373,8 @@ impl Workspace {
             .text_size(px(12.5))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         if let Some(it) = item.clone() {
-            if let Some(url) = pr_url {
-                menu = menu.child(menu_item("menu-pr", "Open Pull Request", false).on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
+            if let Some((url, number)) = pr {
+                menu = menu.child(menu_item("menu-pr", &format!("Open Pull Request #{number}"), false).on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
                     cx.open_url(&url);
                     w.close_row_menu(cx);
                 })));
@@ -343,6 +384,19 @@ impl Workspace {
                     w.open_new_worktree(path.clone(), name.clone(), window, cx)
                 })));
             }
+            let edit = it.worktree_path.clone();
+            menu = menu.child(menu_item("menu-editor", "Open in Editor", false).on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
+                w.close_row_menu(cx);
+                if !open_in_editor(&edit) {
+                    drop(window.prompt(
+                        PromptLevel::Info,
+                        "No supported editor found",
+                        Some("Install VS Code, Cursor or Zed (with its command on PATH) to use Open in Editor."),
+                        &["OK"],
+                        cx,
+                    ));
+                }
+            })));
             let copy = it.worktree_path.clone();
             menu = menu.child(menu_item("menu-copy", "Copy Path", false).on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()));
@@ -368,6 +422,8 @@ impl Workspace {
         deferred(
             div()
                 .id("menu-backdrop")
+                // Rows under the menu keep their hover off while it is open.
+                .occlude()
                 .absolute()
                 .inset_0()
                 .on_mouse_down(MouseButton::Left, cx.listener(|w, _, _, cx| w.close_row_menu(cx)))
@@ -376,6 +432,29 @@ impl Workspace {
         )
         .with_priority(1)
     }
+}
+
+/// The worktree in the first editor whose command is on PATH, as the macOS
+/// app's Open in Editor tries VS Code, Cursor, Zed in turn.
+fn open_in_editor(path: &str) -> bool {
+    for editor in ["cursor", "code", "zed", "subl"] {
+        let spawned = if cfg!(windows) {
+            std::process::Command::new("cmd").args(["/C", editor, path]).spawn()
+        } else {
+            std::process::Command::new(editor).arg(path).spawn()
+        };
+        match spawned {
+            Ok(mut child) if cfg!(windows) => {
+                // `cmd` starts even when the editor is missing; its exit says.
+                if child.wait().map(|s| s.success()).unwrap_or(false) {
+                    return true;
+                }
+            }
+            Ok(_) => return true,
+            Err(_) => continue,
+        }
+    }
+    false
 }
 
 /// What the delete prompt says: what goes, what stays, what git will refuse.
