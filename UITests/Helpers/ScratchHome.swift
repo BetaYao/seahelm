@@ -9,7 +9,9 @@ import Foundation
 /// (`CFFIXED_USER_HOME` moves Foundation's home, `HOME` the children's), the
 /// core's socket and the seahelmd socket dir. The runner is sandboxed and
 /// cannot create it; the app does, under `-SeahelmUITesting`
-/// (`UITestScratch`), and `run_ui_tests.sh` clears it afterwards.
+/// (`UITestScratch`). `run_ui_tests.sh` clears it after the run, and each app
+/// launch clears what older launches left (`UITestScratch.sweepStale`), so a
+/// bare `xcodebuild test` or ⌘U leaves nothing running for long either.
 struct ScratchHome {
     let root = "/tmp/shui-\(UUID().uuidString.prefix(8))"
 
