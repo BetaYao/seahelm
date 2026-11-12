@@ -45,7 +45,27 @@ const DIVIDER_HIT: f32 = 16.0;
 
 actions!(
     seahelm,
-    [SplitRight, SplitDown, ClosePane, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPaneDown, ZoomPane]
+    [
+        SplitRight,
+        SplitDown,
+        ClosePane,
+        FocusPaneLeft,
+        FocusPaneRight,
+        FocusPaneUp,
+        FocusPaneDown,
+        ZoomPane,
+        ResizePaneLeft,
+        ResizePaneRight,
+        ResizePaneUp,
+        ResizePaneDown,
+        EqualizeSplit,
+        NextWorktree,
+        PrevWorktree,
+        ToggleSidebar,
+        ToggleFirstMate,
+        NewWorktreeHere,
+        ToggleSettings
+    ]
 );
 
 /// The split shortcuts: the macOS app's on macOS; elsewhere ctrl+shift
@@ -62,6 +82,15 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("cmd-alt-up", FocusPaneUp, None),
             KeyBinding::new("cmd-alt-down", FocusPaneDown, None),
             KeyBinding::new("cmd-shift-enter", ZoomPane, None),
+            KeyBinding::new("cmd-ctrl-left", ResizePaneLeft, None),
+            KeyBinding::new("cmd-ctrl-right", ResizePaneRight, None),
+            KeyBinding::new("cmd-ctrl-up", ResizePaneUp, None),
+            KeyBinding::new("cmd-ctrl-down", ResizePaneDown, None),
+            KeyBinding::new("cmd-ctrl-=", EqualizeSplit, None),
+            KeyBinding::new("cmd-b", ToggleSidebar, None),
+            KeyBinding::new("cmd-j", ToggleFirstMate, None),
+            KeyBinding::new("cmd-n", NewWorktreeHere, None),
+            KeyBinding::new("cmd-,", ToggleSettings, None),
         ]);
     } else {
         cx.bind_keys([
@@ -73,8 +102,19 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("ctrl-alt-up", FocusPaneUp, None),
             KeyBinding::new("ctrl-alt-down", FocusPaneDown, None),
             KeyBinding::new("ctrl-shift-enter", ZoomPane, None),
+            KeyBinding::new("ctrl-alt-shift-left", ResizePaneLeft, None),
+            KeyBinding::new("ctrl-alt-shift-right", ResizePaneRight, None),
+            KeyBinding::new("ctrl-alt-shift-up", ResizePaneUp, None),
+            KeyBinding::new("ctrl-alt-shift-down", ResizePaneDown, None),
+            KeyBinding::new("ctrl-alt-=", EqualizeSplit, None),
+            KeyBinding::new("ctrl-shift-b", ToggleSidebar, None),
+            KeyBinding::new("ctrl-shift-j", ToggleFirstMate, None),
+            KeyBinding::new("ctrl-shift-n", NewWorktreeHere, None),
+            KeyBinding::new("ctrl-,", ToggleSettings, None),
         ]);
     }
+    // Both: ctrl+tab walks the fleet as on macOS.
+    cx.bind_keys([KeyBinding::new("ctrl-tab", NextWorktree, None), KeyBinding::new("ctrl-shift-tab", PrevWorktree, None)]);
     cx.bind_keys([
         KeyBinding::new("escape", CancelSheet, Some("NewWorktreeSheet")),
         KeyBinding::new("escape", CancelSheet, Some("RenamePaneSheet")),
@@ -1386,6 +1426,48 @@ impl Workspace {
         }
     }
 
+    fn resize_pane(&mut self, axis: Axis, delta: f32, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else { return };
+        if self.panes.get_mut(&id).is_some_and(|p| p.tree.nudge(axis, delta)) {
+            self.save_layouts();
+            cx.notify();
+        }
+    }
+
+    fn equalize_split(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else { return };
+        if self.panes.get_mut(&id).is_some_and(|p| p.tree.equalize_focused()) {
+            self.save_layouts();
+            cx.notify();
+        }
+    }
+
+    /// The next (or previous) worktree in the fleet's order, wrapping.
+    fn step_worktree(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let ids: Vec<String> = self.display_groups(fleet::now()).into_iter().flat_map(|g| g.items.into_iter().map(|i| i.id)).collect();
+        if ids.is_empty() {
+            return;
+        }
+        let at = self.selected.as_ref().and_then(|s| ids.iter().position(|i| i == s));
+        let next = match at {
+            Some(i) => (i as isize + step).rem_euclid(ids.len() as isize) as usize,
+            None => 0,
+        };
+        self.select(ids[next].clone(), window, cx);
+    }
+
+    /// The new-worktree sheet for the selected worktree's project (cmd+n).
+    fn new_worktree_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let project = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.project_of(id))
+            .or_else(|| self.fleet.groups.iter().find(|g| !g.path.is_empty()).map(|g| (g.path.clone(), g.title.clone())));
+        if let Some((path, name)) = project {
+            self.open_new_worktree(path, name, window, cx);
+        }
+    }
+
     fn toggle_sidebar(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.sidebar_visible = !self.sidebar_visible;
         cx.notify();
@@ -1486,6 +1568,23 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &FocusPaneUp, window, cx| w.focus_pane(Direction::Up, window, cx)))
             .on_action(cx.listener(|w, _: &FocusPaneDown, window, cx| w.focus_pane(Direction::Down, window, cx)))
             .on_action(cx.listener(|w, _: &ZoomPane, _, cx| w.toggle_zoom(cx)))
+            .on_action(cx.listener(|w, _: &ResizePaneLeft, _, cx| w.resize_pane(Axis::Horizontal, -0.05, cx)))
+            .on_action(cx.listener(|w, _: &ResizePaneRight, _, cx| w.resize_pane(Axis::Horizontal, 0.05, cx)))
+            .on_action(cx.listener(|w, _: &ResizePaneUp, _, cx| w.resize_pane(Axis::Vertical, -0.05, cx)))
+            .on_action(cx.listener(|w, _: &ResizePaneDown, _, cx| w.resize_pane(Axis::Vertical, 0.05, cx)))
+            .on_action(cx.listener(|w, _: &EqualizeSplit, _, cx| w.equalize_split(cx)))
+            .on_action(cx.listener(|w, _: &NextWorktree, window, cx| w.step_worktree(1, window, cx)))
+            .on_action(cx.listener(|w, _: &PrevWorktree, window, cx| w.step_worktree(-1, window, cx)))
+            .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
+                w.sidebar_visible = !w.sidebar_visible;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|w, _: &ToggleFirstMate, window, cx| w.toggle_first_mate(window, cx)))
+            .on_action(cx.listener(|w, _: &NewWorktreeHere, window, cx| w.new_worktree_here(window, cx)))
+            .on_action(cx.listener(|w, _: &ToggleSettings, window, cx| {
+                let open = !w.settings_open;
+                w.set_settings_open(open, window, cx);
+            }))
             .capture_key_down(cx.listener(|w, _: &KeyDownEvent, _, _| w.note_activity()))
             .capture_any_mouse_down(cx.listener(|w, _: &MouseDownEvent, _, _| w.note_activity()));
         if self.dragging_divider || self.split_drag.as_ref().is_some_and(|d| d.axis == Axis::Horizontal) {

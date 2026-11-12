@@ -53,7 +53,7 @@ impl RowMenu {
 
 impl Workspace {
     /// The project a worktree belongs to: its group's main checkout.
-    fn project_of(&self, item: &str) -> Option<(String, String)> {
+    pub(super) fn project_of(&self, item: &str) -> Option<(String, String)> {
         self.fleet
             .groups
             .iter()
