@@ -142,6 +142,8 @@ class GhosttyNSView: NSView, NSTextInputClient {
         layer?.shadowPath = CGPath(rect: bounds, transform: nil)
         syncOverlayLayerFrames()
         if !presenceEntries.isEmpty { rebuildPresence() }
+        // The grid reflows; the next look finds where the line went.
+        if suggestionButtons != nil { setSuggestionButtons(nil) }
         syncSurfaceSize()
     }
 
@@ -193,6 +195,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
             applyDropHighlightColors(highlight)
         }
         if !presenceEntries.isEmpty { rebuildPresence() }
+        if suggestionButtons != nil { rebuildSuggestionButtons() }
     }
 
     /// Dark themes are already near-black, so a black wash lands on black and two
@@ -255,6 +258,13 @@ class GhosttyNSView: NSView, NSTextInputClient {
     private var presencePillFrames: [(frame: CGRect, originStationId: String)] = []
     private(set) var presenceEntries: [PresenceEntry] = []
     private static let maxPresencePills = 3
+
+    // Suggestion buttons on the `::seahelm-suggest::` line (InlineSuggestions).
+    var suggestionButtons: SuggestionButtons?
+    var suggestionLayer: CALayer?
+    var suggestionHitFrames: [(frame: CGRect, index: Int)] = []
+    var suggestionTap: ((_ cardID: String, _ index: Int) -> Void)?
+    var suggestionHovered: Int?
 
     func setPresence(_ entries: [PresenceEntry]) {
         guard entries != presenceEntries else { return }
@@ -730,6 +740,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         // One rect covering the grid: Ghostty decides the shape cell by cell and
         // reports it as an action, not as a region.
         addCursorRect(bounds, cursor: Self.cursor(for: cursorShape))
+        for hit in suggestionHitFrames { addCursorRect(hit.frame, cursor: .pointingHand) }
     }
 
     override func cursorUpdate(with event: NSEvent) {
@@ -787,6 +798,10 @@ class GhosttyNSView: NSView, NSTextInputClient {
             PanePresence.shared.navigate(toOrigin: origin)
             return
         }
+        if let (cardID, index) = suggestionHit(at: convert(event.locationInWindow, from: nil)) {
+            suggestionTap?(cardID, index)
+            return
+        }
         if window?.firstResponder !== self {
             window?.makeFirstResponder(self)
         }
@@ -839,7 +854,13 @@ class GhosttyNSView: NSView, NSTextInputClient {
     override func mouseMoved(with event: NSEvent) {
         guard let surface else { return }
         let pos = convert(event.locationInWindow, from: nil)
+        if suggestionButtons != nil { updateSuggestionHover(at: pos) }
         ghostty_surface_mouse_pos(surface, pos.x, Double(bounds.height) - pos.y, modsFromEvent(event))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        if suggestionHovered != nil { updateSuggestionHover(at: CGPoint(x: -1, y: -1)) }
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -1135,7 +1156,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// Held under `ghosttyLock` like every other read: the 2s status poll reads
     /// the same surface from its own queue, and an unserialised read here came
     /// back empty often enough to make the Preview item look broken.
-    private func readViewportRows(_ rows: ClosedRange<Int>) -> String? {
+    func readViewportRows(_ rows: ClosedRange<Int>) -> String? {
         guard let surface else { return nil }
         station?.ghosttyLock.lock()
         defer { station?.ghosttyLock.unlock() }
@@ -1484,7 +1505,7 @@ class GhosttyNSView: NSView, NSTextInputClient {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .activeAlways, .inVisibleRect],
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
