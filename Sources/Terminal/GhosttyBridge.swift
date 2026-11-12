@@ -305,6 +305,17 @@ class GhosttyBridge {
         NotificationCenter.default.post(name: .ghosttyColorSchemeDidChange, object: self)
     }
 
+    /// The terminal's background colour as configured now (theme included),
+    /// for drawing over the grid in the grid's own colour.
+    func terminalBackgroundColor() -> NSColor? {
+        guard let config else { return nil }
+        var color = ghostty_config_color_s()
+        let key = "background"
+        guard ghostty_config_get(config, &color, key, UInt(key.utf8.count)) else { return nil }
+        return NSColor(srgbRed: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255,
+                       blue: CGFloat(color.b) / 255, alpha: 1)
+    }
+
     /// Rebuild the same config stack used at initialize (for hard reload).
     private static func buildConfig() -> ghostty_config_t? {
         guard let config = ghostty_config_new() else { return nil }

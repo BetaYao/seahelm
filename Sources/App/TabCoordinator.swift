@@ -74,6 +74,8 @@ class TabCoordinator {
     // First Mate — status-transition engine + red-zone queue + green-zone watch
     /// The core's cards, as the island, Telegram and the web show them.
     let cards = CardDeck()
+    /// Suggestion cards drawn as buttons on their line in the terminal.
+    private lazy var inlineSuggestions = InlineSuggestions(deck: cards)
 
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -768,6 +770,7 @@ class TabCoordinator {
                         }
                     }
                     self.cards.start()
+                    self.inlineSuggestions.start()
                     CoreClient.shared.start()
                     controlDataSource.splitHandler = { [weak self] targetStationId, axis, focus in
                         guard let self, self.preparePaneControlTarget(targetStationId) else { return nil }
