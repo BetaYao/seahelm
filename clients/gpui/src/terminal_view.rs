@@ -67,6 +67,17 @@ pub struct TerminalView {
     reported_button: Option<VtButton>,
 }
 
+/// A right-click the program did not take: the workspace opens the pane's
+/// menu there (the macOS app's pane context menu).
+pub struct ContextMenuRequested {
+    pub at: gpui::Point<Pixels>,
+    /// A URL under the pointer.
+    pub link: Option<String>,
+    pub has_selection: bool,
+}
+
+impl gpui::EventEmitter<ContextMenuRequested> for TerminalView {}
+
 #[derive(Clone, Copy)]
 struct Geom {
     bounds: Bounds<Pixels>,
@@ -324,11 +335,33 @@ impl TerminalView {
         if !opener || event.button != MouseButton::Left {
             return None;
         }
-        let at = self.pointer(event.position)?;
+        self.url_under(event.position)
+    }
+
+    /// The URL under the pointer, if any.
+    fn url_under(&self, position: gpui::Point<Pixels>) -> Option<String> {
+        let at = self.pointer(position)?;
         let text = |row: &Row| row.cells.iter().map(|c| c.text.clone()).collect::<Vec<String>>();
         let row = self.rows.get(at.row as usize).map(text)?;
         let next = self.rows.get(at.row as usize + 1).map(text);
         crate::terminal_text::url_at(&row, at.col as usize, next.as_deref())
+    }
+
+    /// The selection onto the clipboard; false when nothing is selected.
+    pub fn copy_selection(&self, cx: &mut Context<Self>) -> bool {
+        match self.with_terminal(|t| t.selection_text()).flatten().filter(|t| !t.is_empty()) {
+            Some(text) => {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
+        if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+            self.paste(&text);
+        }
     }
 
     fn paste(&mut self, text: &str) {
@@ -449,6 +482,13 @@ impl TerminalView {
         window.focus(&self.focus);
         if let Some(url) = self.link_at(event) {
             cx.open_url(&url);
+            return;
+        }
+        // The menu, unless a program that tracks the mouse takes the click
+        // (shift gets the menu anyway, as it gets a selection).
+        if event.button == MouseButton::Right && (event.modifiers.shift || !self.program_has_mouse()) {
+            let has_selection = self.with_terminal(|t| t.selection_text()).flatten().is_some_and(|t| !t.is_empty());
+            cx.emit(ContextMenuRequested { at: event.position, link: self.url_under(event.position), has_selection });
             return;
         }
         if !event.modifiers.shift && self.program_has_mouse() {

@@ -45,6 +45,12 @@ pub struct RowMenu {
     at: Point<Pixels>,
 }
 
+impl RowMenu {
+    pub fn is_on(&self, item: &str) -> bool {
+        self.item == item
+    }
+}
+
 impl Workspace {
     /// The project a worktree belongs to: its group's main checkout.
     fn project_of(&self, item: &str) -> Option<(String, String)> {
@@ -228,6 +234,9 @@ impl Workspace {
         if let Some(popover) = self.share_popover(cx) {
             return Some(popover);
         }
+        if let Some(menu) = self.pane_menu_view(cx) {
+            return Some(menu);
+        }
         self.row_menu.as_ref().map(|m| self.row_menu_view(m, cx).into_any_element())
     }
 
@@ -316,7 +325,7 @@ impl Workspace {
 
     fn row_menu_view(&self, m: &RowMenu, cx: &mut Context<Self>) -> impl IntoElement {
         let item = self.fleet.find(&m.item).cloned();
-        let pr_url = item.as_ref().and_then(|i| self.prs.get(&i.worktree_path)).map(|p| p.url.clone()).filter(|u| !u.is_empty());
+        let pr = item.as_ref().and_then(|i| self.prs.get(&i.worktree_path)).filter(|p| !p.url.is_empty()).map(|p| (p.url.clone(), p.number));
         let project = self.project_of(&m.item);
         let mut menu = div()
             .min_w(px(210.))
@@ -332,8 +341,8 @@ impl Workspace {
             .text_size(px(12.5))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         if let Some(it) = item.clone() {
-            if let Some(url) = pr_url {
-                menu = menu.child(menu_item("menu-pr", "Open Pull Request", false).on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
+            if let Some((url, number)) = pr {
+                menu = menu.child(menu_item("menu-pr", &format!("Open Pull Request #{number}"), false).on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
                     cx.open_url(&url);
                     w.close_row_menu(cx);
                 })));
@@ -343,6 +352,19 @@ impl Workspace {
                     w.open_new_worktree(path.clone(), name.clone(), window, cx)
                 })));
             }
+            let edit = it.worktree_path.clone();
+            menu = menu.child(menu_item("menu-editor", "Open in Editor", false).on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
+                w.close_row_menu(cx);
+                if !open_in_editor(&edit) {
+                    let _ = window.prompt(
+                        PromptLevel::Info,
+                        "No supported editor found",
+                        Some("Install VS Code, Cursor or Zed (with its command on PATH) to use Open in Editor."),
+                        &["OK"],
+                        cx,
+                    );
+                }
+            })));
             let copy = it.worktree_path.clone();
             menu = menu.child(menu_item("menu-copy", "Copy Path", false).on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()));
@@ -368,6 +390,8 @@ impl Workspace {
         deferred(
             div()
                 .id("menu-backdrop")
+                // Rows under the menu keep their hover off while it is open.
+                .occlude()
                 .absolute()
                 .inset_0()
                 .on_mouse_down(MouseButton::Left, cx.listener(|w, _, _, cx| w.close_row_menu(cx)))
@@ -376,6 +400,29 @@ impl Workspace {
         )
         .with_priority(1)
     }
+}
+
+/// The worktree in the first editor whose command is on PATH, as the macOS
+/// app's Open in Editor tries VS Code, Cursor, Zed in turn.
+fn open_in_editor(path: &str) -> bool {
+    for editor in ["cursor", "code", "zed", "subl"] {
+        let spawned = if cfg!(windows) {
+            std::process::Command::new("cmd").args(["/C", editor, path]).spawn()
+        } else {
+            std::process::Command::new(editor).arg(path).spawn()
+        };
+        match spawned {
+            Ok(mut child) if cfg!(windows) => {
+                // `cmd` starts even when the editor is missing; its exit says.
+                if child.wait().map(|s| s.success()).unwrap_or(false) {
+                    return true;
+                }
+            }
+            Ok(_) => return true,
+            Err(_) => continue,
+        }
+    }
+    false
 }
 
 /// What the delete prompt says: what goes, what stays, what git will refuse.

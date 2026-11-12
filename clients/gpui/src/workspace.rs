@@ -26,6 +26,8 @@ mod worktree_menu;
 mod pane_extras;
 #[path = "share_popover.rs"]
 mod share_popover;
+#[path = "pane_menu.rs"]
+mod pane_menu;
 #[path = "preview_tabs.rs"]
 mod preview_tabs;
 use worktree_menu::{CancelSheet, NewWorktree, RowMenu};
@@ -162,6 +164,8 @@ pub struct Workspace {
     settings_page: Entity<SettingsPage>,
     /// What the core knows about each pane, by session (`pane_extras`).
     pane_facts: pane_extras::Facts,
+    /// A pane's right-click menu, while it is open.
+    pane_menu: Option<pane_menu::PaneMenu>,
     /// The share button's popover, while it is open.
     share: Option<share_popover::SharePopover>,
     /// The lifetime picked last, so the next link starts there.
@@ -226,6 +230,7 @@ impl Workspace {
             settings_page: cx.new(SettingsPage::new),
             pane_facts: HashMap::new(),
             share: None,
+            pane_menu: None,
             share_lifetime: crate::gateway_client::Lifetime::Day,
             presence: HashMap::new(),
             zoomed: None,
@@ -1117,9 +1122,14 @@ impl Workspace {
                 }
             }
         });
+        let worktree = id.to_string();
+        let menu = cx.subscribe(&view, move |w, _, e: &crate::terminal_view::ContextMenuRequested, cx| {
+            w.open_pane_menu(worktree.clone(), leaf, e, cx)
+        });
         let panes = self.panes.entry(id.to_string()).or_default();
         panes.views.insert(leaf, view.clone());
         panes._subscriptions.push(sub);
+        panes._subscriptions.push(menu);
         Some(view)
     }
 
@@ -1636,6 +1646,7 @@ impl Workspace {
 
     fn row(&self, item: &Item, now: f64, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected.as_deref() == Some(item.id.as_str());
+        let menu_on = self.row_menu.as_ref().is_some_and(|m| m.is_on(&item.id));
         let panes = self.panes.get(&item.id).map_or(0, |p| p.views.len());
         let stats = self.git.get(&item.worktree_path);
         let id = item.id.clone();
@@ -1701,7 +1712,9 @@ impl Workspace {
             .py(px(8.))
             .gap(px(7.))
             .when(selected, |d| d.bg(tokens::row_selected()))
-            .when(!selected, |d| d.hover(|s| s.bg(tokens::row_hover())))
+            // The row a context menu is open on stays lit, as AppKit lights it.
+            .when(!selected && menu_on, |d| d.bg(tokens::row_hover()))
+            .when(!selected && !menu_on, |d| d.hover(|s| s.bg(tokens::row_hover())))
             .on_click({
                 let id = id.clone();
                 cx.listener(move |w, _: &ClickEvent, window, cx| w.select(id.clone(), window, cx))

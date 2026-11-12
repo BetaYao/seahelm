@@ -183,7 +183,7 @@ impl Workspace {
         cx.notify();
     }
 
-    fn open_rename(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_rename(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
         let facts = self.pane_facts.get(&key).cloned().unwrap_or_default();
         let current = facts.custom_title.or(facts.display_title).unwrap_or_default();
         let input = cx.new(|cx| {
