@@ -288,6 +288,36 @@ final class WorktreeDeleterTests: XCTestCase {
         XCTAssertFalse(assessment.deletesBranch)
     }
 
+    // MARK: - leftover integration checkout
+
+    private func detachedCheckout(_ name: String) -> String {
+        let path = tempDir.appendingPathComponent("worktrees/\(name)").path
+        git(["worktree", "add", "--detach", path, "main"], in: repoPath)
+        return path
+    }
+
+    /// A merge seahelm built is throwaway, though it is in no trunk.
+    func testIntegrationAssessmentIgnoresSeahelmsOwnMerge() throws {
+        let path = detachedCheckout("integration")
+        git(["-c", "user.email=\(WorktreeSnapshotter.authorEmail)", "-c", "user.name=seahelm",
+             "commit", "--allow-empty", "-m", "fold"], in: path)
+
+        let assessment = WorktreeDeleter.assessIntegrationDeletion(worktreePath: path, repoPath: repoPath)
+
+        XCTAssertTrue(assessment.isSafe, assessment.losses.joined(separator: " / "))
+        XCTAssertFalse(assessment.deletesBranch)
+    }
+
+    func testIntegrationAssessmentCountsCommitsMadeByHand() throws {
+        let path = detachedCheckout("integration-hand")
+        try commitFile("hand.txt", in: path)
+
+        let assessment = WorktreeDeleter.assessIntegrationDeletion(worktreePath: path, repoPath: repoPath)
+
+        XCTAssertEqual(assessment.losses.count, 1)
+        XCTAssertTrue(assessment.losses[0].contains("on no branch"), assessment.losses[0])
+    }
+
     /// The assessment already established the commits are on trunk, so the
     /// branch must go even where git's own `-d` check (upstream only) would
     /// refuse: merged through a PR with an unpushed commit still on it.

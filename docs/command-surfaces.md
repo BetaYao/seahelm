@@ -20,7 +20,7 @@
 - privacy mode 关掉之后，bot 会看到群里所有消息：这时白名单成员的裸文本**依然不算命令**（只有上面三种形式算），其余人的消息走规则匹配（Triggers）。
 - 白名单（`allowed_users`）按发消息的**用户**判定，与在私聊还是群里无关；不在白名单的人发的 `/命令` 会被忽略。
 
-三个文字入口共用同一个 `CommandExecutor`，差别只在确认方式和"当前"的定义。First Mate 是侧栏的舰队总览加上背后的监督者，不接受文字命令；监督者发起的动作以卡片形式出现在 Island 里，下表最后一列写的是它会不会自己做这件事。目前 Island 只渲染 suggestNextOrder 一类卡片；integrationReport 会进队列，但没有界面把它画出来。
+三个文字入口共用同一个 `CommandExecutor`，差别只在确认方式和"当前"的定义。First Mate 是侧栏的舰队总览加上背后的监督者，不接受文字命令；监督者发起的动作以卡片形式出现在 Island 里，下表最后一列写的是它会不会自己做这件事。目前 Island 只渲染 suggestNextOrder 一类卡片。
 
 ## 矩阵
 
@@ -38,7 +38,6 @@
 | `/return` | 收工所有 worktree：没东西可交付的直接删，其余列出计划 | ✓ | ✓ | ✓ 有剩余时弹 sheet | ✗ |
 | `/return @worktree` | 收工一个：干净且已合并直接删；否则 commit → push → 开 PR → 删 | ✓ 有东西要推时确认；agent 在跑会拒绝 | ✓ 同左 | ✓ sheet 确认，结果弹 sheet；侧栏右键 Return… 走同一条命令 | ✗ |
 | `/forget @repo` | 移除仓库，磁盘不动，杀掉它的会话 | ✓ 需确认 | ✓ 需确认 | ✓ sheet | ✗ |
-| `/integrate [full]` | 跑一轮集成 | ✓ 本地改动挡住时才问确认 | ✓ 同左 | ✓ 报告卡片上带选项 | △ 只出 integrationReport 卡片，不自己跑 |
 | `/idea <文字>` | 记 idea，来源记成会话 key | ✓ | ✓ | ✓ | ✗ |
 | `/feedback <文字>` | 开 GitHub issue（在 Mac 上开浏览器） | ✓ | ✓ | ✓ | ✗ |
 | `/help [命令]` | 命令表 / 单条详解 | ✓ 每封回信签名里也带命令表 | ✓ | ✓ 输入 `/` 出菜单 | ✗ |
@@ -58,7 +57,6 @@
 | inspect / autoCommit | 绿区 | agent 卡住时在它的 pane 里跑配置的检查命令、自动提交 |
 | suggestNextOrder | 红区 | 从 agent 输出里抓到的下一步建议，做成卡片，批准即发送 |
 | AskUserQuestion / 屏幕选项 | 红区 | agent 在问问题，做成可点选的卡片，答案按编号或方向键送回 |
-| integrationReport | 红区 | 一轮集成有冲突或被挡住时的报告 |
 
 ## 通知走向
 

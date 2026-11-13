@@ -217,6 +217,39 @@ enum WorktreeDeleter {
         return WorktreeDeleteAssessment(losses: losses, deletesBranch: deletesBranch)
     }
 
+    /// A leftover integration checkout. Its HEAD is normally a merge seahelm
+    /// built (committed as `WorktreeSnapshotter.authorEmail`) or the trunk
+    /// commit it was created on — throwaway either way, so measuring it against
+    /// trunk like a branch would warn about "unpushed commits" that are nothing
+    /// of the user's. Only a detached HEAD that is neither — commits made there
+    /// by hand, on no branch — counts, plus uncommitted edits.
+    static func assessIntegrationDeletion(worktreePath: String, repoPath: String) -> WorktreeDeleteAssessment {
+        var losses: [String] = []
+        if hasUncommittedChanges(worktreePath: worktreePath) {
+            losses.append(WorktreeDeleteAssessment.uncommittedLoss)
+        }
+        let onBranch = GitProcess.capture(["symbolic-ref", "-q", "HEAD"], in: worktreePath).succeeded
+        if !onBranch,
+           let head = GitProcess.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: worktreePath)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !head.isEmpty,
+           let base = GitDiff.preferredBaseRefs.first(where: {
+               GitProcess.capture(["rev-parse", "--verify", "--quiet", $0], in: repoPath).succeeded
+           }),
+           !isSeahelmBuilt(head: head, base: base, in: worktreePath) {
+            losses.append("Commits made in the integration checkout (at \(head.prefix(9))) are on no branch"
+                + " and will be dropped.")
+        }
+        // Detached (or on a branch it leaves alone): there is no branch to delete.
+        return WorktreeDeleteAssessment(losses: losses, deletesBranch: false)
+    }
+
+    private static func isSeahelmBuilt(head: String, base: String, in path: String) -> Bool {
+        let committer = GitProcess.run(["log", "-1", "--format=%ce", head], in: path)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if committer == WorktreeSnapshotter.authorEmail { return true }
+        return GitProcess.capture(["merge-base", "--is-ancestor", head, base], in: path).succeeded
+    }
+
     /// Commits reachable from the worktree's HEAD that are on neither `trunk`
     /// nor the branch's upstream — what deleting the branch would lose.
     /// Patch-equivalent commits count as present, so a branch rebased onto

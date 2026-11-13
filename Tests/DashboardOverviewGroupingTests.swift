@@ -214,9 +214,9 @@ final class DashboardOverviewGroupingTests: XCTestCase {
     }
 
     /// A checkout that already exists is still recognised: it pins directly
-    /// below main, and the status grouping leaves it out. Nothing on screen
-    /// offers to run an integration.
-    func testExistingCheckoutStillPinsBelowMainAndLeavesStatusGroups() {
+    /// below main, and the status grouping still shows it (no banner does any
+    /// more). Nothing on screen offers to run an integration.
+    func testExistingCheckoutStillPinsBelowMainAndStaysInStatusGroups() {
         withDefaults { defaults in
             let view = makeViewWithIntegrationCheckout(defaults: defaults)
             view.update(fleetWithIntegration())
@@ -224,7 +224,7 @@ final class DashboardOverviewGroupingTests: XCTestCase {
                            ["/alpha", "/alpha-worktrees/integration", "/alpha-worktrees/feature"])
 
             view.selectGroupingModeForTesting(.status)
-            XCTAssertFalse(view.orderedRows.map(\.path).contains("/alpha-worktrees/integration"))
+            XCTAssertTrue(view.orderedRows.map(\.path).contains("/alpha-worktrees/integration"))
         }
     }
 

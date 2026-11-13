@@ -1996,7 +1996,7 @@ extension MainWindowController {
     }
 
     private func revealFirstMateForNewSuggestions() {
-        let suggestions = tabCoordinator.cards.cards.filter { !$0.isFirstMates && $0.kind != .report }
+        let suggestions = tabCoordinator.cards.cards.filter { !$0.isFirstMates }
         let fresh = revealedSuggestions.absorb(suggestions)
         // Only while frontmost: in the background the island already pops, and
         // re-opening the sidebar on a suggestion the user never saw arrive would

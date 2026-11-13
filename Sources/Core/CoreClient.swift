@@ -12,8 +12,6 @@ enum CoreEvent {
     case unseen(terminalID: String, unseen: Bool)
     /// The whole card queue.
     case cards([[String: Any]])
-    /// A card a client raised was answered (`option` nil: dismissed).
-    case cardAnswered(card: [String: Any], option: String?)
     /// Where a pane's agent is working now.
     case location(terminalID: String, worktree: String?, location: String, createdByAgent: Bool)
     /// The user named a pane, here or on another client (`pane.renamed`);
@@ -59,7 +57,7 @@ final class CoreClient {
 
     private static let types = [
         "pane.status_changed", "pane.updated", "pane.notice", "pane.unseen_changed", "pane.location",
-        "pane.closed", "pane.rehomed", "pane.registered", "cards.changed", "card.answered", "agent.session",
+        "pane.closed", "pane.rehomed", "pane.registered", "cards.changed", "agent.session",
         "worktree.discovered", "pane.presence", "pane.renamed",
     ]
 
@@ -186,8 +184,6 @@ final class CoreClient {
                            createdByAgent: ev["created_by_agent"] as? Bool ?? false))
         case "cards.changed":
             emit(.cards(ev["cards"] as? [[String: Any]] ?? []))
-        case "card.answered":
-            emit(.cardAnswered(card: ev["card"] as? [String: Any] ?? [:], option: ev["option"] as? String))
         case "agent.session":
             guard let ref = ev["ref"] as? [String: Any], !key.isEmpty else { return }
             sessions[key] = ref

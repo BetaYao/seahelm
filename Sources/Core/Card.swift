@@ -13,7 +13,9 @@ struct Card: Equatable, Identifiable {
         case choice
         /// The agent's suggested next orders.
         case suggestion
-        /// Raised by a client: a report that needs looking at.
+        /// Legacy: only the removed integration feature raised these, and the
+        /// app that would act on their answer is gone. Kept so `CardDeck` can
+        /// recognise one still in the core's queue and dismiss it.
         case report
         /// First Mate wants to do something its policy says to ask about.
         case approval
@@ -101,8 +103,6 @@ final class CardDeck {
     /// Agent queues that as a follow-up and leaves it in the composer after the
     /// turn. Main thread.
     private var answeringIDs: Set<String> = []
-    /// A card this app raised was answered (`option` nil: dismissed).
-    var onAnswered: ((_ card: [String: Any], _ option: String?) -> Void)?
     /// Test seam: when set, called instead of the core socket. `done` must run
     /// so the in-flight gate releases (sync or later).
     var answerImpl: ((_ card: Card, _ label: String, _ done: @escaping () -> Void) -> Void)?
@@ -112,8 +112,6 @@ final class CardDeck {
             switch event {
             case .cards(let rows):
                 self?.replace(rows.compactMap { Card(json: $0, terminalID: CoreClient.terminalID(session:alias:)) })
-            case .cardAnswered(let card, let option):
-                self?.onAnswered?(card, option)
             default:
                 break
             }
@@ -171,15 +169,6 @@ final class CardDeck {
         }
     }
 
-    /// Put up a card of the app's own; its answer comes back as `onAnswered`.
-    func raise(kind: Card.Kind, worktreePath: String, project: String, message: String,
-               options: [String], payload: String?) {
-        var params: [String: Any] = ["kind": kind.rawValue, "worktree_path": worktreePath, "project": project,
-                                     "message": message, "options": options]
-        if let payload { params["payload"] = payload }
-        DispatchQueue.global(qos: .userInitiated).async { _ = CoreSocketClient.call("cards.raise", params) }
-    }
-
     /// A worktree is gone: so is every card about it.
     func clear(worktreePath: String) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -187,8 +176,17 @@ final class CardDeck {
         }
     }
 
-    /// Take the core's cards as they are now.
-    func replace(_ next: [Card]) {
+    /// Report cards already dismissed, so each is asked about once.
+    private var retiredReportIDs: Set<String> = []
+
+    /// Take the core's cards as they are now. A leftover integration report
+    /// (see `Card.Kind.report`) is dismissed rather than shown: answering it
+    /// would do nothing, and the web and Telegram would keep offering it.
+    func replace(_ incoming: [Card]) {
+        for card in incoming where card.kind == .report && retiredReportIDs.insert(card.id).inserted {
+            dismiss(card)
+        }
+        let next = incoming.filter { $0.kind != .report }
         guard next != cards else { return }
         cards = next
         observers.values.forEach { $0() }

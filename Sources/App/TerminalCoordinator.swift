@@ -665,14 +665,20 @@ class TerminalCoordinator {
             return
         }
 
+        // A leftover integration checkout's commits are throwaway builds, so
+        // "what would be lost" is only work that arrived by hand.
+        let isIntegration = IntegrationWorktreeStore.shared.isIntegrationWorktree(info.path)
+
         onPendingChange?(true)
         // Several synchronous git subprocesses (up to a 5s timeout each on a
         // wedged repo, plus a fetch of the base) — run them off the main
         // thread, then decide.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
-            let assessment = WorktreeDeleter.assessDeletion(worktreePath: info.path, repoPath: repoPath,
-                                                            branchName: info.branch, refreshBase: true)
+            let assessment = isIntegration
+                ? WorktreeDeleter.assessIntegrationDeletion(worktreePath: info.path, repoPath: repoPath)
+                : WorktreeDeleter.assessDeletion(worktreePath: info.path, repoPath: repoPath,
+                                                 branchName: info.branch, refreshBase: true)
             DispatchQueue.main.async {
                 guard let self else {
                     onPendingChange?(false)

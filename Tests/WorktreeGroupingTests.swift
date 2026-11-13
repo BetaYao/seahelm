@@ -56,25 +56,24 @@ final class WorktreeGroupingTests: XCTestCase {
         XCTAssertEqual(groups.first?.items.map(\.path), ["/repo", "/repo/integration", "/repo/a"])
     }
 
-    /// Status groups answer "what needs me now". The checkout has no agent, so
-    /// its status is a shell's and would only dilute the answer.
-    func testStatusGroupingLeavesTheIntegrationOut() {
+    /// No banner shows the checkout in these modes any more, so it is grouped
+    /// like any row; filtering it out would leave it (and its Delete) unreachable.
+    func testStatusGroupingKeepsTheIntegrationCheckout() {
         let groups = WorktreeGrouping.groups([
             item("/repo/a", repo: "alpha", status: .waiting),
             item("/repo/integration", repo: "alpha", status: .idle, integration: true),
         ], mode: .status, now: now)
 
-        XCTAssertEqual(groups.flatMap { $0.items.map(\.path) }, ["/repo/a"])
+        XCTAssertEqual(Set(groups.flatMap { $0.items.map(\.path) }), ["/repo/a", "/repo/integration"])
     }
 
-    /// Same for time buckets: its "activity" is terminal output, not work.
-    func testActivityGroupingLeavesTheIntegrationOut() {
+    func testActivityGroupingKeepsTheIntegrationCheckout() {
         let groups = WorktreeGrouping.groups([
             item("/repo/a", repo: "alpha", activity: now.addingTimeInterval(-60)),
             item("/repo/integration", repo: "alpha", activity: now, integration: true),
         ], mode: .activityTime, now: now, calendar: utcCalendar)
 
-        XCTAssertEqual(groups.flatMap { $0.items.map(\.path) }, ["/repo/a"])
+        XCTAssertEqual(Set(groups.flatMap { $0.items.map(\.path) }), ["/repo/a", "/repo/integration"])
     }
 
     func testRepositoryGroupsRemainInFirstSeenOrderAndNormalizeEmptyName() {

@@ -503,4 +503,27 @@ final class ConfigTests: XCTestCase {
             XCTAssertFalse(out.contains(key), out)
         }
     }
+
+    // MARK: - retired integration feature
+
+    func testIntegrationTurnedOffIsReadFromTheLeftoverKey() {
+        XCTAssertTrue(IntegrationWorktreeStore.featureWasTurnedOff(configData: Data(#"{"integration_enabled":false}"#.utf8)))
+        XCTAssertFalse(IntegrationWorktreeStore.featureWasTurnedOff(configData: Data(#"{"integration_enabled":true}"#.utf8)))
+        XCTAssertFalse(IntegrationWorktreeStore.featureWasTurnedOff(configData: Data("{}".utf8)))
+        XCTAssertFalse(IntegrationWorktreeStore.featureWasTurnedOff(configData: nil))
+    }
+
+    func testRetiringIntegrationStateRemovesOnlyTheObsoleteFiles() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("seahelm-retire-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for name in IntegrationWorktreeStore.obsoleteFileNames + ["integration-worktrees.json"] {
+            try Data("{}".utf8).write(to: dir.appendingPathComponent(name))
+        }
+
+        IntegrationWorktreeStore.retireObsoleteState(configDir: dir)
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        XCTAssertEqual(left, ["integration-worktrees.json"])
+    }
 }

@@ -6,6 +6,8 @@ import Foundation
 /// The integration feature no longer runs, but existing checkouts stay on disk
 /// and stay recorded here so the fleet / First Mate can still recognize them
 /// (not PR work, not cleanup candidates) without recreating or updating them.
+/// Nothing adds an entry any more; one leaves when its checkout is deleted, or
+/// all of them at launch if the user had the feature switched off.
 final class IntegrationWorktreeStore {
     static let shared = IntegrationWorktreeStore()
 
@@ -16,7 +18,35 @@ final class IntegrationWorktreeStore {
     private let lock = NSLock()
 
     private init() {
+        Self.retireObsoleteState(configDir: Config.configDir)
+        if Self.featureWasTurnedOff(configData: try? Data(contentsOf: Config.configPath)) {
+            for repo in store.entries.keys { store.remove(forKey: repo) }
+        }
         knownPaths = store.values
+    }
+
+    /// Files only the removed integration feature read: the commit last
+    /// published into each checkout, and each checkout's round status. Nothing
+    /// reads them now, and worktree paths get reused, so they go.
+    static let obsoleteFileNames = ["integration-published.json", "integration-status.json"]
+
+    static func retireObsoleteState(configDir: URL) {
+        for name in obsoleteFileNames {
+            let url = configDir.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Whether the user had switched the feature off (`integration_enabled:
+    /// false`, which `Config.save` keeps as a foreign key). With it off the
+    /// checkout was an ordinary worktree — every grouping, `/return` allowed —
+    /// and there is no setting left to say so, so its record is dropped instead.
+    static func featureWasTurnedOff(configData: Data?) -> Bool {
+        guard let configData,
+              let object = try? JSONSerialization.jsonObject(with: configData) as? [String: Any]
+        else { return false }
+        return object["integration_enabled"] as? Bool == false
     }
 
     func worktreePath(forRepo repoPath: String) -> String? {
