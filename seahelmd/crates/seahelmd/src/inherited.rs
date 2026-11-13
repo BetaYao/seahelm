@@ -8,7 +8,7 @@
 //! first), and a Claude Code that inherits another session's
 //! `CLAUDE_CODE_CHILD_SESSION` stops saving its transcript. The Swift app
 //! scrubs the same list (`Sources/App/main.swift`, which also says why
-//! `NO_COLOR` is on it).
+//! `NO_COLOR` / `FORCE_COLOR` are on it).
 
 pub const LEAKED: &[&str] = &[
     "SEAHELMD_SESSION",
@@ -21,6 +21,7 @@ pub const LEAKED: &[&str] = &[
     "CLAUDE_CODE_MESSAGING_SOCKET",
     "CLAUDE_CODE_MESSAGING_TOKEN",
     "NO_COLOR",
+    "FORCE_COLOR",
 ];
 
 /// Drop the launching pane's identity from this process's environment.
