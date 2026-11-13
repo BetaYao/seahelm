@@ -257,20 +257,12 @@ final class WorktreeSidePanelViewController: NSViewController {
     /// Identity of a tab's container, so a test can prove it was reused not rebuilt.
     func containerForTesting(_ tab: SidePanelTab) -> NSView? { tabContainers[tab] }
 
-    /// Seam for tests, so one can describe an integration checkout without
-    /// writing into the user's real config directory.
-    private let integrationState: (String) -> IntegrationPanelState?
-
     init(
         worktreePath: String?,
-        initialTab: SidePanelTab = .files,
-        integrationState: @escaping (String) -> IntegrationPanelState? = {
-            IntegrationStatusStore.shared.state(forWorktree: $0)
-        }
+        initialTab: SidePanelTab = .files
     ) {
         self.worktreePath = worktreePath
         self.selectedTab = initialTab
-        self.integrationState = integrationState
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -772,23 +764,8 @@ final class WorktreeSidePanelViewController: NSViewController {
             header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
         ])
 
-        // An integration checkout's diff is the fold of several worktrees, so
-        // the file list alone does not say whose work it is — or whose was left
-        // out. That belongs here rather than behind a fourth chrome icon that
-        // would be dead for every other worktree.
-        let composition = worktreePath.flatMap(integrationState).map(makeIntegrationComposition)
-        if let composition {
-            contentView.addSubview(composition)
-            NSLayoutConstraint.activate([
-                composition.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 6),
-                composition.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-                composition.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            ])
-        }
-        let listTop = composition ?? header
-
         if changedFiles.isEmpty {
-            showPlaceholder(ChangesSummary.emptyMessage(for: branch), identifier: "sidePanel.changesEmpty", below: listTop)
+            showPlaceholder(ChangesSummary.emptyMessage(for: branch), identifier: "sidePanel.changesEmpty", below: header)
             return
         }
 
@@ -801,7 +778,7 @@ final class WorktreeSidePanelViewController: NSViewController {
         contentView.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: listTop.bottomAnchor, constant: 8),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
             scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
             scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
@@ -822,70 +799,6 @@ final class WorktreeSidePanelViewController: NSViewController {
                 scrollView.reflectScrolledClipView(scrollView.contentView)
             }
         }
-    }
-
-    /// What the last round folded in, and what it could not.
-    private func makeIntegrationComposition(_ state: IntegrationPanelState) -> NSView {
-        var lines: [(String, NSColor)] = []
-        lines.append((
-            state.included.isEmpty ? "nothing folded in" : "in: " + state.included.joined(separator: ", "),
-            Theme.textSecondary
-        ))
-        for excluded in state.excluded {
-            var head = excluded.label
-            if let against = excluded.against, !against.isEmpty {
-                head += " vs \(against)"
-            }
-            let where_ = excluded.paths.isEmpty ? "" : " · " + excluded.paths.joined(separator: ", ")
-            lines.append(("excluded: \(head)\(where_)", .systemOrange))
-        }
-        if !state.conflictedPaths.isEmpty {
-            lines.append(("conflict markers: " + state.conflictedPaths.joined(separator: ", "), .systemOrange))
-        }
-        if state.isHeld {
-            // Name what is in the way. "local edits here" was true but not
-            // actionable: the checkout is where things get run, so something is
-            // nearly always dirty and the question is only ever *what*.
-            if let head = state.heldHead {
-                lines.append((
-                    "not checked out — commits made here (\(head.prefix(9))) · /integrate force drops them",
-                    .systemOrange
-                ))
-            } else {
-                let paths = state.heldPaths ?? []
-                let shown = paths.prefix(3).joined(separator: ", ")
-                let rest = paths.count - min(3, paths.count)
-                let detail = paths.isEmpty
-                    ? ""
-                    : " (" + shown + (rest > 0 ? " +\(rest) more" : "") + ")"
-                lines.append((
-                    "not checked out — local edits here\(detail) · /integrate force",
-                    .systemOrange
-                ))
-            }
-        }
-
-        let stack = NSStackView(views: lines.map { text, color in
-            let label = NSTextField(labelWithString: text)
-            label.font = AppFont.mono(size: 10.5)
-            label.textColor = color
-            label.lineBreakMode = .byTruncatingTail
-            return label
-        })
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 2
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.setAccessibilityIdentifier("sidePanel.integrationComposition")
-        return stack
-    }
-
-    /// Composition lines currently rendered, top to bottom.
-    var integrationCompositionLinesForTesting: [String] {
-        guard let stack = contentView.subviews.first(where: {
-            $0.accessibilityIdentifier() == "sidePanel.integrationComposition"
-        }) as? NSStackView else { return [] }
-        return stack.arrangedSubviews.compactMap { ($0 as? NSTextField)?.stringValue }
     }
 
     private func makeChangesFlatScrollView() -> NSScrollView {

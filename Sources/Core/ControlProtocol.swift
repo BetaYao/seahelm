@@ -147,10 +147,6 @@ protocol ControlDataSource: AnyObject {
     func wakePane(paneId: String?) -> [String]?
     /// This process's own memory accounting plus awake/asleep pane counts.
     func memoryStats() -> [String: Any]?
-    /// The integration checkouts and what the last round put in them. `path` is
-    /// any path inside a repo (an agent's cwd, usually) and narrows the answer
-    /// to that repo; nil returns every checkout.
-    func integrationStatus(path: String?) -> [String: Any]?
     /// Recent MessageStream events for one pane, or all panes when `paneId` is nil.
     func messageSnapshot(paneId: String?) -> [[String: Any]]
     /// A page of one pane's MessageStream older than `beforeSeq`, oldest first:
@@ -191,7 +187,6 @@ extension ControlDataSource {
     func sleepPane(paneId: String?) -> [String]? { nil }
     func wakePane(paneId: String?) -> [String]? { nil }
     func memoryStats() -> [String: Any]? { nil }
-    func integrationStatus(path: String?) -> [String: Any]? { nil }
     func messageSnapshot(paneId: String?) -> [[String: Any]] { [] }
     func messageHistory(paneId: String, beforeSeq: UInt64, limit: Int) -> [String: Any] {
         ["messages": [], "has_more": false]
@@ -517,16 +512,6 @@ final class ControlRouter {
             }
             guard let detail = dataSource?.explainPane(paneId: paneId) else {
                 return .error(code: ControlError.notFound, message: "pane not found: \(paneId)")
-            }
-            return .ok(detail)
-
-        case "integration.status":
-            // Read-only, and the answer an agent cannot get any other way: the
-            // round that folds its work in is triggered by its own turn ending,
-            // so looking at git from inside the turn always shows the round
-            // before. This is the only way to ask without racing that edge.
-            guard let detail = dataSource?.integrationStatus(path: params["path"] as? String) else {
-                return .error(code: ControlError.notFound, message: "no integration state")
             }
             return .ok(detail)
 

@@ -74,7 +74,7 @@ enum WorktreeReturnPlanner {
 
     static func plan(_ f: WorktreeReturnFacts) -> WorktreeReturnPlan {
         if f.isMain { return .refuse("is the main worktree — it cannot be returned.") }
-        if f.isIntegration { return .refuse("is the integration checkout — reset or delete it from its row.") }
+        if f.isIntegration { return .refuse("is the integration checkout — delete it from its row if you no longer need it.") }
         if f.agentRunning { return .refuse("has an agent running — leaving it alone.") }
         if f.inMergeOrRebase { return .refuse("is in the middle of a merge or rebase — finish that in the pane first.") }
 

@@ -13,7 +13,7 @@ struct Card: Equatable, Identifiable {
         case choice
         /// The agent's suggested next orders.
         case suggestion
-        /// Raised by a client: an integration round that needs looking at.
+        /// Raised by a client: a report that needs looking at.
         case report
         /// First Mate wants to do something its policy says to ask about.
         case approval
