@@ -15,20 +15,21 @@ import AppKit
 // is left alone — it names a binary, not a session, and a pane may legitimately
 // want the same one.
 //
-// NO_COLOR is not a session identity, but it leaks by the same route and does
-// more damage, because it outlives the launch that carried it: a pane's
-// environment is fixed when its seahelmd session is created, and re-attaching never
-// re-execs the agent. So one relaunch from a shell that happened to have
-// NO_COLOR set leaves those panes rendering monochrome forever, surviving every
-// later app restart. A pane is always a real terminal, so the launching shell's
-// opinion about color never applies to it.
+// NO_COLOR / FORCE_COLOR are not session identity, but they leak by the same
+// route and do more damage, because they outlive the launch that carried them:
+// a pane's environment is fixed when its seahelmd session is created, and
+// re-attaching never re-execs the agent. So one relaunch from a shell that
+// happened to have them set (Cursor's tool shells inject both: NO_COLOR=1 and
+// FORCE_COLOR=0) leaves those panes rendering monochrome forever, surviving
+// every later app restart. A pane is always a real terminal, so the launching
+// shell's opinion about color never applies to it.
 //
 // Scrub before anything can spawn a child.
 let leakedEnv = [
     "SEAHELMD_SESSION", "SEAHELM_ENV", "SEAHELM_SOCKET_PATH", "SEAHELM_PANE_ID",
     "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
-    "NO_COLOR",
+    "NO_COLOR", "FORCE_COLOR",
 ]
 for leaked in leakedEnv {
     unsetenv(leaked)
