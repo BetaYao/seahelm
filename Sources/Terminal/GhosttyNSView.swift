@@ -791,17 +791,24 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// right-button event delivery clears it before we can read it), so we snapshot
     /// it here while it's still intact and use the snapshot to build the menu.
     private var cachedSelectionText: String?
+    /// mouseDown hit a suggestion chip: skip the matching mouseUp so Ghostty
+    /// does not see a release without a press (and so the click cannot also
+    /// start a selection under the chip).
+    private var suggestionClickActive = false
 
     override func mouseDown(with event: NSEvent) {
         // A presence pill is a link to the pane that acted, not terminal content.
         if let origin = presenceOrigin(at: convert(event.locationInWindow, from: nil)) {
+            suggestionClickActive = false
             PanePresence.shared.navigate(toOrigin: origin)
             return
         }
         if let (cardID, index) = suggestionHit(at: convert(event.locationInWindow, from: nil)) {
+            suggestionClickActive = true
             suggestionTap?(cardID, index)
             return
         }
+        suggestionClickActive = false
         if window?.firstResponder !== self {
             window?.makeFirstResponder(self)
         }
@@ -816,6 +823,10 @@ class GhosttyNSView: NSView, NSTextInputClient {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if suggestionClickActive {
+            suggestionClickActive = false
+            return
+        }
         guard let surface else { return }
         let pos = convert(event.locationInWindow, from: nil)
         ghostty_surface_mouse_pos(surface, pos.x, Double(bounds.height) - pos.y, modsFromEvent(event))

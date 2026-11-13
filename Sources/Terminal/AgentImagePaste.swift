@@ -6,9 +6,11 @@ import UniformTypeIdentifiers
 /// itself — image on the clipboard, then its paste-image key — so a drop lands
 /// as an attachment (Claude Code's `[Image #1]`) instead of a path.
 ///
-/// Claude Code, Codex, Cursor Agent, and OpenCode all bind image paste to
-/// ctrl+v on macOS (not cmd+v) and read a PNG from the clipboard. Shells and
-/// other agents keep getting paths.
+/// Claude Code, Codex, and OpenCode bind image paste to ctrl+v on macOS (not
+/// cmd+v) and read a PNG from the clipboard. Cursor Agent does not: it turns a
+/// typed image path into an attachment (same as a drop in native Ghostty), and
+/// ctrl+v with a clipboard PNG leaves its prompt unchanged. Shells and other
+/// agents keep getting paths.
 enum AgentImagePaste {
     /// How long the agent gets to read the clipboard before the next image
     /// replaces it. Claude Code shells out to osascript for every paste.
@@ -19,7 +21,7 @@ enum AgentImagePaste {
     /// Agents known to attach a clipboard PNG on ctrl+v.
     static func supports(_ agent: AgentType?) -> Bool {
         switch agent {
-        case .claudeCode, .codex, .cursor, .openCode: return true
+        case .claudeCode, .codex, .openCode: return true
         default: return false
         }
     }

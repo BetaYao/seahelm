@@ -44,9 +44,11 @@ final class PaneInput {
         if let station, station.canDeliverInput {
             let agent = agentType ?? Fleet.shared.pane(for: terminalID)?.agentType
             let (images, prose) = PasteMedia.peelCachedMedia(from: command)
-            // Claude / Codex / Cursor / OpenCode attach clipboard PNGs on ctrl+v.
-            // Images land in the composer; Enter only when the caller opts in
-            // (fresh worktree brief). Plain text still auto-sends.
+            // Claude / Codex / OpenCode attach clipboard PNGs on ctrl+v.
+            // Cursor Agent attaches from a typed path instead (see
+            // `AgentImagePaste.supports`). Images land in the composer; Enter
+            // only when the caller opts in (fresh worktree brief). Plain text
+            // still auto-sends.
             if !images.isEmpty, AgentImagePaste.supports(agent) {
                 DispatchQueue.main.async {
                     AgentImagePaste.attach(images, to: station) { notAttached in

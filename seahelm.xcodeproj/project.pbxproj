@@ -317,6 +317,7 @@
 		B2D3C5CCB2735F1895E271BE /* TerminalCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCE458A11E72A34C3556092F /* TerminalCoordinatorTests.swift */; };
 		B484B87A3E1D684239F4C957 /* ChromeIconClusterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B653BECE0F1476C0850355 /* ChromeIconClusterView.swift */; };
 		B489F50E6BDE70E1F24CB076 /* SessionTitleLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9108B00E116887EE759F5A7C /* SessionTitleLookupTests.swift */; };
+		B523443E628DFECA7B11264A /* CardDeckAnswerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9EA5F0F2FE9033AEA7CD980 /* CardDeckAnswerTests.swift */; };
 		B560407D380ED3AC6F69226D /* CursorHooksSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EE7B36FE936C4D60F026A14 /* CursorHooksSetupTests.swift */; };
 		B5A6416221795024BC063D17 /* ChromeIconButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4347F9E7EF04217AB29D93E /* ChromeIconButton.swift */; };
 		B5A8C675F44377CC17C92BB4 /* AgentImagePaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1502D5A8F1466C091FE1BC75 /* AgentImagePaste.swift */; };
@@ -796,6 +797,7 @@
 		C8F1B159E50F3F6CDA6466BE /* IntegrationRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationRunner.swift; sourceTree = "<group>"; };
 		C9BF7C60A5333E90B1FFEDB5 /* SpinnerDotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpinnerDotView.swift; sourceTree = "<group>"; };
 		C9D01368A7B337893C6C7FA9 /* FirstLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstLaunchTests.swift; sourceTree = "<group>"; };
+		C9EA5F0F2FE9033AEA7CD980 /* CardDeckAnswerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardDeckAnswerTests.swift; sourceTree = "<group>"; };
 		CACB64102E52932A55C79B2F /* Fleet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fleet.swift; sourceTree = "<group>"; };
 		CC52B4BA3F3B6E593DC13486 /* PiExtensionInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiExtensionInstaller.swift; sourceTree = "<group>"; };
 		CC5DCCDD64708BEB08D20C0A /* PaneWorkingDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneWorkingDirectory.swift; sourceTree = "<group>"; };
@@ -1294,6 +1296,7 @@
 				6C827E67B268966037EEDC48 /* AgentSessionRefTests.swift */,
 				F4D445453693B8D5A3D088F1 /* AgentTypeTests.swift */,
 				F94DD13F50BE3F52F6B4B0B0 /* AutopilotRulesTests.swift */,
+				C9EA5F0F2FE9033AEA7CD980 /* CardDeckAnswerTests.swift */,
 				40D968BCC97595B18597F6F9 /* CardDetailsTests.swift */,
 				5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */,
 				38FD43578EB5A227077BAA11 /* ChromeCollapseAnimationTests.swift */,
@@ -1843,6 +1846,7 @@
 				F18F39D20F1D77592272356C /* AgentSessionRefTests.swift in Sources */,
 				53D46BF1B3E00A35B53A86C4 /* AgentTypeTests.swift in Sources */,
 				8198ED7BA2EB92EEC9CFDD54 /* AutopilotRulesTests.swift in Sources */,
+				B523443E628DFECA7B11264A /* CardDeckAnswerTests.swift in Sources */,
 				238DD92F81ABD4F4AA91AC1F /* CardDetailsTests.swift in Sources */,
 				9F3608916964651FE502DAD3 /* ChoiceOptionParserTests.swift in Sources */,
 				3D18A10A7522058688B2A1F7 /* ChromeCollapseAnimationTests.swift in Sources */,

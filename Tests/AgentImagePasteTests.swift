@@ -40,11 +40,12 @@ final class AgentImagePasteTests: XCTestCase {
 
     // MARK: - Which drops attach
 
-    func testOnlyClaudeCodeAttachesImages() {
+    func testClipboardImagePasteAgents() {
         XCTAssertTrue(AgentImagePaste.supports(.claudeCode))
         XCTAssertTrue(AgentImagePaste.supports(.codex))
-        XCTAssertTrue(AgentImagePaste.supports(.cursor))
         XCTAssertTrue(AgentImagePaste.supports(.openCode))
+        // Cursor Agent attaches from a typed path (Ghostty's drop), not ctrl+v.
+        XCTAssertFalse(AgentImagePaste.supports(.cursor))
         XCTAssertFalse(AgentImagePaste.supports(.gemini))
         XCTAssertFalse(AgentImagePaste.supports(.shellCommand))
         XCTAssertFalse(AgentImagePaste.supports(nil))

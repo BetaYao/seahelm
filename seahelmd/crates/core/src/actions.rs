@@ -145,7 +145,7 @@ pub fn typed(text: &str, agent: bool) -> Vec<u8> {
     out
 }
 
-fn runs_agent(core: &Core, id: &str) -> bool {
+pub(crate) fn runs_agent(core: &Core, id: &str) -> bool {
     core.pane_infos().iter().any(|(p, _)| p.id == id && p.agent_type.is_ai_agent())
 }
 

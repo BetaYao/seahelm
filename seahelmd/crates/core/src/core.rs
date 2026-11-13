@@ -953,7 +953,8 @@ impl Core {
         match answer? {
             Answer::Raised { .. } => Ok(json!({"ok": true, "raised": true})),
             Answer::Keys { pane, inputs, confirm_review } => {
-                let sent = press(&pane, &inputs);
+                let agent = crate::actions::runs_agent(self, &pane);
+                let sent = press(&pane, &inputs, agent);
                 if confirm_review {
                     confirm_question_review(pane);
                 }
@@ -2508,19 +2509,21 @@ fn raised(kind: CardKind) -> bool {
 }
 
 /// Type into a pane's session: each input a write of its own, a Return
-/// held back a beat after what came before it.
-fn press(pane: &str, inputs: &[Input]) -> Result<()> {
+/// held back a beat after what came before it. Prose for an AI agent is
+/// bracketed paste (`pane.run` / `pane.send_text`); key escapes stay raw.
+fn press(pane: &str, inputs: &[Input], agent: bool) -> Result<()> {
     for (i, input) in inputs.iter().enumerate() {
         let bytes = match input {
-            Input::Bytes(b) => b.clone(),
+            Input::Bytes(b) if agent && !b.starts_with('\u{1b}') => crate::actions::typed(b, true),
+            Input::Bytes(b) => b.as_bytes().to_vec(),
             Input::Submit => {
                 if i > 0 {
                     std::thread::sleep(SUBMIT_DELAY);
                 }
-                "\r".to_string()
+                b"\r".to_vec()
             }
         };
-        seahelmd::client::request(pane, &Msg::Send(bytes.into_bytes()))?;
+        seahelmd::client::request(pane, &Msg::Send(bytes))?;
     }
     Ok(())
 }

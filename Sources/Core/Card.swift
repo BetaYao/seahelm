@@ -96,8 +96,16 @@ final class CardDeck {
     private(set) var cards: [Card] = []
     private var observers: [Int: () -> Void] = [:]
     private var nextToken = 0
+    /// Card ids with an `cards.answer` still in flight. A second tap before the
+    /// first round-trip finishes would otherwise type the option again — Cursor
+    /// Agent queues that as a follow-up and leaves it in the composer after the
+    /// turn. Main thread.
+    private var answeringIDs: Set<String> = []
     /// A card this app raised was answered (`option` nil: dismissed).
     var onAnswered: ((_ card: [String: Any], _ option: String?) -> Void)?
+    /// Test seam: when set, called instead of the core socket. `done` must run
+    /// so the in-flight gate releases (sync or later).
+    var answerImpl: ((_ card: Card, _ label: String, _ done: @escaping () -> Void) -> Void)?
 
     func start() {
         CoreClient.shared.observe { [weak self] event in
@@ -132,11 +140,25 @@ final class CardDeck {
 
     /// Answer a card with one of its labels; the core acts on it (keys into
     /// the agent, an approval run, a raised card back to its owner) and sends
-    /// the cards again.
+    /// the cards again. Ignores a second answer for the same id while the first
+    /// is still in flight.
     func answer(_ card: Card, label: String) {
+        guard answeringIDs.insert(card.id).inserted else { return }
+        let done = { [weak self] in
+            let release = {
+                self?.answeringIDs.remove(card.id)
+                return
+            }
+            if Thread.isMainThread { release() } else { DispatchQueue.main.async(execute: release) }
+        }
+        if let answerImpl {
+            answerImpl(card, label, done)
+            return
+        }
         var params: [String: Any] = ["id": card.id]
         if let i = card.labels.firstIndex(of: label) { params["index"] = i } else { params["option"] = label }
         DispatchQueue.global(qos: .userInitiated).async {
+            defer { done() }
             if case .failure(let e) = CoreSocketClient.call("cards.answer", params) {
                 NSLog("[cards] answer \(card.id) failed: \(e)")
             }

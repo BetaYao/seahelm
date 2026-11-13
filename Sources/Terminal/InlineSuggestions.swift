@@ -151,6 +151,13 @@ final class InlineSuggestions {
 
     private func answer(cardID: String, index: Int) {
         guard let card = deck.card(id: cardID), card.labels.indices.contains(index) else { return }
+        // Drop the hit targets before the core round-trips. A second click on
+        // the still-drawn underline would otherwise answer again — Cursor Agent
+        // keeps that second typing as a follow-up in the composer.
+        if let station = station(for: card) {
+            station.view?.setSuggestionButtons(nil)
+            drawn.remove(station.id)
+        }
         deck.answer(card, label: card.labels[index])
     }
 }
