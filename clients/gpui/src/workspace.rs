@@ -844,12 +844,20 @@ impl Workspace {
         div().flex_1().min_h_0().flex().flex_row().child(nav).child(page).into_any_element()
     }
 
-    /// The header's folder (Files) and diff (Changes) buttons: open the side
-    /// panel on that tab, or close it if it is already showing it.
+    /// The header's folder button: open Files in the left column (Changes is
+    /// a tab inside that panel), or return to the fleet if Files is already up.
     fn toggle_side(&mut self, tab: SideTab, cx: &mut Context<Self>) {
         let next = if self.side_tab == Some(tab) { None } else { Some(tab) };
         notify::log("side_panel", serde_json::json!({"tab": format!("{next:?}")}));
         self.set_side(next, cx);
+    }
+
+    /// The header's fleet button: put the worktree list back in the left column.
+    fn show_fleet(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.side_tab.is_some() {
+            notify::log("side_panel", serde_json::json!({"tab": "None"}));
+            self.set_side(None, cx);
+        }
     }
 
     fn set_side(&mut self, tab: Option<SideTab>, cx: &mut Context<Self>) {
@@ -1785,18 +1793,19 @@ impl Workspace {
             .justify_end()
             .pr(px(8.))
             .gap(px(2.))
+            // Theme → Fleet → File → Settings → collapse.
             .child(chrome_icon("contrast", !theme::is_dark()).id("toggle-theme").on_click(cx.listener(Self::toggle_theme)))
-            .child(chrome_icon("settings", self.settings_open).id("toggle-settings").on_click(cx.listener(Self::toggle_settings)))
+            .child(
+                chrome_icon("ship-wheel", self.side_tab.is_none())
+                    .id("toggle-fleet")
+                    .on_click(cx.listener(Self::show_fleet)),
+            )
             .child(
                 chrome_icon("folder", self.side_tab == Some(SideTab::Files))
                     .id("toggle-files")
                     .on_click(cx.listener(|w, _: &ClickEvent, _, cx| w.toggle_side(SideTab::Files, cx))),
             )
-            .child(
-                chrome_icon("diff", self.side_tab == Some(SideTab::Changes))
-                    .id("toggle-changes")
-                    .on_click(cx.listener(|w, _: &ClickEvent, _, cx| w.toggle_side(SideTab::Changes, cx))),
-            )
+            .child(chrome_icon("settings", self.settings_open).id("toggle-settings").on_click(cx.listener(Self::toggle_settings)))
             .child(chrome_icon("panel-left", false).id("toggle-sidebar").on_click(cx.listener(Self::toggle_sidebar)))
     }
 
