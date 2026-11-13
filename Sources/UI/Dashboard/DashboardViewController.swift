@@ -453,14 +453,20 @@ class DashboardViewController: NSViewController {
 
         agents = newPanes
 
+        // First-run / screenshot empty state: both columns must agree. Feeding
+        // the overview real rows while the terminal slot shows the agent list
+        // left a selected fleet row over an install panel.
+        let showEmptyFleet = agents.isEmpty || DebugFlags.forceEmptyState
+        let fleetRows = showEmptyFleet ? [] : agents
+
         // Refresh the overview whenever the First Mate side column is on screen.
         // Without this check, an open First Mate sidebar showed the fleet frozen
         // at the state it had when opened.
         if firstMateSideOpen {
-            overviewView.selectedId = overviewSelectedId
+            overviewView.selectedId = showEmptyFleet ? "" : overviewSelectedId
             // A structure change (a worktree came or went) has to repaint every
             // row regardless of which one's status moved.
-            overviewView.update(agents, changedWorktreePath: structureChanged ? nil : changedWorktreePath)
+            overviewView.update(fleetRows, changedWorktreePath: structureChanged ? nil : changedWorktreePath)
             syncOverviewFocusCounts()
         }
 
@@ -469,8 +475,9 @@ class DashboardViewController: NSViewController {
             applyKeyboardFocusVisuals()
         }
 
-        // Show empty state when no agents
-        if agents.isEmpty || DebugFlags.forceEmptyState {
+        // Agents install list only while the fleet itself is empty — never over
+        // a selected worktree's terminal.
+        if showEmptyFleet {
             emptyStateView.reload()
             emptyStateView.isHidden = false
             terminalHostView.addSubview(emptyStateView) // keep above focus panel
