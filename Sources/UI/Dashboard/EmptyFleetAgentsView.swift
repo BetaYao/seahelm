@@ -14,6 +14,9 @@ final class EmptyFleetAgentsView: NSView {
     var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
     private var rows: [AgentRow] = []
+    /// Bumped on every PATH rescan so a slow `AgentDetector.scan` cannot paint
+    /// over a newer one (or a test-injected list).
+    private var scanGeneration = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -72,11 +75,38 @@ final class EmptyFleetAgentsView: NSView {
         reload()
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     required init?(coder: NSCoder) { fatalError() }
 
     /// Rebuild rows from a PATH scan (or an injected list for tests).
+    ///
+    /// `AgentDetector.scan` starts a login shell to resolve PATH — about a
+    /// second, and up to `ProcessRunner.lookupTimeout` when the shell is chatty.
+    /// That must never run on the main thread: this view lives for the life of
+    /// the dashboard and used to rescan on every `didBecomeActive`, which made
+    /// switching back to Seahelm beachball for several seconds even while the
+    /// empty state was hidden.
     func reload(agents: [AgentDetector.AgentInfo]? = nil) {
-        let infos = agents ?? AgentDetector.scan()
+        if let agents {
+            scanGeneration += 1
+            apply(agents)
+            return
+        }
+        scanGeneration += 1
+        let generation = scanGeneration
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let infos = AgentDetector.scan()
+            DispatchQueue.main.async {
+                guard let self, generation == self.scanGeneration else { return }
+                self.apply(infos)
+            }
+        }
+    }
+
+    private func apply(_ infos: [AgentDetector.AgentInfo]) {
         listStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         rows.removeAll()
 
@@ -95,7 +125,12 @@ final class EmptyFleetAgentsView: NSView {
         openURL(url)
     }
 
-    @objc private func appDidBecomeActive() { reload() }
+    @objc private func appDidBecomeActive() {
+        // Still attached (and still observing) while a real fleet is showing;
+        // skip the scan entirely unless this empty state is actually on screen.
+        guard window != nil, !isHiddenOrHasHiddenAncestor else { return }
+        reload()
+    }
 
     @objc private func paletteDidChange() { applyPalette() }
 

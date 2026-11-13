@@ -47,7 +47,7 @@ fn commands_on_path(bins: &[&str]) -> HashSet<String> {
     #[cfg(windows)]
     {
         let mut found = HashSet::new();
-        let Ok(paths) = std::env::var_os("PATH") else {
+        let Some(paths) = std::env::var_os("PATH") else {
             return found;
         };
         for bin in bins {
