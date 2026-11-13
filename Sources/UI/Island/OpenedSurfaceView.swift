@@ -1047,7 +1047,6 @@ enum IslandLanguage: String, Equatable {
     var commandFailed: String { isChinese ? "命令未能运行。" : "That command did not run." }
     var sendFailed: String { isChinese ? "First Mate 未收到消息——确认它正在运行。" : "First Mate did not get it — is it running?" }
     var stoppedWithError: String { isChinese ? "因错误而停止" : "Stopped with an error" }
-    var integration: String { isChinese ? "集成" : "integration" }
     func todoCount(_ count: Int) -> String { isChinese ? "待办 \(count)" : "To-do \(count)" }
     func hiddenMessages(_ count: Int) -> String { isChinese ? "··· \(count) 条消息" : "··· \(count) messages" }
     func moreSuggestions(_ count: Int) -> String { isChinese ? "更多建议（\(count)）" : "More suggestions (\(count))" }
@@ -1286,14 +1285,7 @@ private struct WaitingCardView: View {
     private var isQuestion: Bool {
         order.isAgentQuestion
     }
-    /// An integration round, which belongs to a repo rather than to a pane:
-    /// no agent raised it and there is no branch behind it.
-    private var isIntegration: Bool {
-        order.kind == .report
-    }
-
     private var icon: String {
-        if isIntegration { return "arrow.triangle.merge" }
         return isQuestion ? "questionmark.circle.fill" : "lightbulb.fill"
     }
 
@@ -1309,7 +1301,7 @@ private struct WaitingCardView: View {
                 HStack(spacing: 6) {
                     Image(systemName: icon)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(isIntegration ? .orange : (isSuggestion ? .white.opacity(0.5) : .yellow))
+                        .foregroundStyle(isSuggestion ? .white.opacity(0.5) : .yellow)
                     Text(sourceLabel.isEmpty ? order.project : sourceLabel)
                         .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(isSuggestion ? .white.opacity(0.58) : .white.opacity(0.82))

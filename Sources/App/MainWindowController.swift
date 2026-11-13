@@ -716,7 +716,6 @@ class MainWindowController: NSWindowController {
 
         // Create dashboard — single permanent LeftRight layout
         let dashboard = DashboardViewController()
-        dashboard.integrationEnabled = config.integrationEnabled
         dashboard.dashboardDelegate = self
 dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.splitContainerDelegate = self
@@ -778,16 +777,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.onRequestNewWorktree = { [weak self] in
             // Opens the Island's command line with `/new ` prefilled.
             self?.tabCoordinator.dashboardVC?.startNewCommand()
-        }
-        dashboard.onIntegrateProject = { [weak self] project in
-            guard let self, let repoPath = self.tabCoordinator.repoPath(forProject: project) else {
-                NSSound.beep()
-                return
-            }
-            self.runIntegration(repoPath: repoPath, mode: .excludeConflicting, force: false)
-        }
-        dashboard.onResetIntegration = { [weak self] checkoutPath in
-            self?.resetIntegration(checkoutPath: checkoutPath, force: false)
         }
         dashboard.onAddWorktreeToProject = { [weak self] project, rect, anchor in
             self?.presentAddWorktreePopover(project: project, rect: rect, anchor: anchor)
@@ -938,188 +927,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
         guard !query.isEmpty else { return pool }
         return pool.filter { $0.name.lowercased().contains(query) }
-    }
-
-    /// One `/integrate` round for the current repo.
-    ///
-    /// Snapshotting and merging shell out several times over, so it runs off
-    /// the main thread; only the report comes back. Nothing it does before the
-    /// final checkout can disturb a worktree, so an interrupted or failed round
-    /// simply leaves everything as it was.
-    private func runIntegration(mode: IntegrationConflictMode, force: Bool) {
-        guard let selected = tabCoordinator.config.selectedWorktreePath,
-              let repoPath = WorktreeDiscovery.findRepoRoot(from: selected) else {
-            NSSound.beep()
-            return
-        }
-        runIntegration(repoPath: repoPath, mode: mode, force: force)
-    }
-
-    private func runIntegration(repoPath: String, mode: IntegrationConflictMode, force: Bool) {
-        let integrationPath = IntegrationWorktreeStore.shared.worktreePath(forRepo: repoPath)
-            ?? IntegrationWorktree.defaultPath(forRepo: repoPath)
-        let project = tabCoordinator.repoName(forWorktree: repoPath)
-        guard config.integrationEnabled else {
-            enqueueIntegrationReport(
-                "Integration is turned off in Settings ▸ General ▸ Integration",
-                repoPath: repoPath,
-                checkoutPath: integrationPath
-            )
-            return
-        }
-        let worktrees = tabCoordinator.allWorktrees
-            .map(\.info)
-            .filter { WorktreeDiscovery.findRepoRoot(from: $0.path) == repoPath }
-        let lastPublished = IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: integrationPath)
-
-        dashboardVC?.setIntegratePending(project: project, pending: true)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let outcome: Result<IntegrationRunReport, Error>
-            do {
-                outcome = .success(try IntegrationRunner.run(
-                    repoPath: repoPath,
-                    integrationPath: integrationPath,
-                    worktrees: worktrees,
-                    mode: mode,
-                    force: force,
-                    lastPublished: lastPublished,
-                    isBusy: { Fleet.shared.hasRunningPane(inWorktree: $0) }
-                ))
-            } catch {
-                outcome = .failure(error)
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.dashboardVC?.setIntegratePending(project: project, pending: false)
-                switch outcome {
-                case .success(let report):
-                    // Record only once the round got far enough to have a
-                    // checkout, so a failed first run does not leave the store
-                    // pointing at a directory that was never created.
-                    IntegrationWorktreeStore.shared.set(report.integrationWorktreePath, forRepo: repoPath)
-                    IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
-                    if case .published(let commit) = report.outcome {
-                        IntegrationWorktreeStore.shared.recordPublished(
-                            commit, forCheckout: report.integrationWorktreePath)
-                    }
-                    // A round that published cleanly is meant to be invisible —
-                    // the integration worktree is simply current. Only speak up
-                    // when something was dropped or held back.
-                    if report.needsAttention {
-                        self?.enqueueIntegrationReport(
-                            report.summary,
-                            repoPath: repoPath,
-                            checkoutPath: report.integrationWorktreePath,
-                            options: report.cardOptions
-                        )
-                    }
-                case .failure(let error):
-                    // Recorded as well as reported. A round that threw wrote
-                    // nothing here, so First Mate went on showing the last good
-                    // round and read as an integration that was still current.
-                    IntegrationStatusStore.shared.set(
-                        .failed(error.localizedDescription), forWorktree: integrationPath)
-                    self?.enqueueIntegrationReport(
-                        "Integration failed: \(error.localizedDescription)",
-                        repoPath: repoPath,
-                        checkoutPath: integrationPath
-                    )
-                }
-            }
-        }
-    }
-
-    /// The row's "Reset to origin/main": fetch trunk and move the integration
-    /// checkout onto it, dropping whatever rounds had folded in. Same rules
-    /// as a round's publish — edits or commits made in the checkout by hand
-    /// hold it, and the sheet that follows names them; a confirmed reset
-    /// comes back through here with `force`.
-    private func resetIntegration(checkoutPath: String, force: Bool) {
-        guard let repoPath = IntegrationWorktreeStore.shared.repoPath(forCheckout: checkoutPath)
-            ?? WorktreeDiscovery.findRepoRoot(from: checkoutPath) else {
-            NSSound.beep()
-            return
-        }
-        let expectedHead = IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: checkoutPath)
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            // The fetch is the slow part; the forced retry has just done one.
-            guard let target = IntegrationWorktree.resetTarget(repoPath: repoPath, fetch: !force) else {
-                DispatchQueue.main.async {
-                    self?.presentIntegrationResetFailure("Could not find origin/main or origin/master to reset to.")
-                }
-                return
-            }
-            let outcome = IntegrationWorktree.reset(
-                to: target, at: checkoutPath, force: force, expectedHead: expectedHead)
-            DispatchQueue.main.async {
-                self?.handleIntegrationReset(outcome, target: target, checkoutPath: checkoutPath)
-            }
-        }
-    }
-
-    private func handleIntegrationReset(
-        _ outcome: IntegrationPublishOutcome,
-        target: IntegrationWorktree.ResetTarget,
-        checkoutPath: String
-    ) {
-        switch outcome {
-        case .published(let commit), .unchanged(let commit):
-            // The reset commit is seahelm's own, so the next round does not
-            // mistake it for work that arrived by hand.
-            IntegrationWorktreeStore.shared.recordPublished(commit, forCheckout: checkoutPath)
-            IntegrationStatusStore.shared.set(
-                IntegrationPanelState(
-                    line: "integration · reset to \(target.ref)",
-                    included: [], excluded: [], conflictedPaths: [], isHeld: false
-                ),
-                forWorktree: checkoutPath
-            )
-            // A held-round card was about the state that was just discarded.
-            tabCoordinator.cards.clear(worktreePath: checkoutPath)
-        case .held(let reason, _):
-            guard let window else { return }
-            let alert = NSAlert()
-            alert.alertStyle = .critical
-            alert.messageText = "Reset integration to \(target.ref)?"
-            alert.informativeText = reason.lossDescription
-            alert.addButton(withTitle: "Reset")
-            alert.addButton(withTitle: "Cancel")
-            alert.buttons[0].hasDestructiveAction = true
-            alert.beginSheetModal(for: window) { [weak self] response in
-                guard response == .alertFirstButtonReturn else { return }
-                self?.resetIntegration(checkoutPath: checkoutPath, force: true)
-            }
-        case .failed(let message):
-            presentIntegrationResetFailure(message)
-        }
-    }
-
-    private func presentIntegrationResetFailure(_ message: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .critical
-        alert.messageText = "Failed to reset integration worktree"
-        alert.informativeText = message
-        if let window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
-        }
-    }
-
-    /// One card per checkout (the core keys it by worktree and kind), so the
-    /// manual path and the automatic one address the same card and a later
-    /// round replaces an earlier one.
-    private func enqueueIntegrationReport(
-        _ message: String,
-        repoPath: String,
-        checkoutPath: String,
-        options: [String]? = nil
-    ) {
-        // A round with nothing to decide stays in the checkout's status.
-        guard let options, !options.isEmpty else { return }
-        tabCoordinator.cards.raise(kind: .report, worktreePath: checkoutPath,
-                                   project: tabCoordinator.repoName(forWorktree: repoPath),
-                                   message: message, options: options, payload: repoPath)
     }
 
     /// Outcome of an async Helm command, reported back so the caller can drop its
@@ -2148,9 +1955,6 @@ extension MainWindowController {
         tabCoordinator.cards.addObserver { [weak self] in
             self?.refreshIsland()
         }
-        tabCoordinator.cards.onAnswered = { [weak self] card, option in
-            self?.cardAnswered(card, option: option)
-        }
         // Push-driven: worktree status changes arrive via
         // tabCoordinatorRequestUpdateTitleBar. The timer is only a slow
         // fallback for async stragglers (e.g. title resolution finishing
@@ -2192,7 +1996,7 @@ extension MainWindowController {
     }
 
     private func revealFirstMateForNewSuggestions() {
-        let suggestions = tabCoordinator.cards.cards.filter { !$0.isFirstMates && $0.kind != .report }
+        let suggestions = tabCoordinator.cards.cards.filter { !$0.isFirstMates }
         let fresh = revealedSuggestions.absorb(suggestions)
         // Only while frontmost: in the background the island already pops, and
         // re-opening the sidebar on a suggestion the user never saw arrive would
@@ -2471,7 +2275,6 @@ extension MainWindowController: SettingsDelegate {
         terminalCoordinator.config = merged
         tabCoordinator.applyAutopilotConfig()
         updateCoordinator.config = merged
-        dashboardVC?.integrationEnabled = merged.integrationEnabled
         configuredIslandLanguage = IslandLanguage.readConfig()
         refreshIsland()
         normalizeBackendAvailabilityIfNeeded()
@@ -2559,19 +2362,6 @@ extension MainWindowController {
     /// `card.answered`), then sends the cards again.
     func handleSuggestionTapped(order card: Card, optionText: String) {
         tabCoordinator.cards.answer(card, label: optionText)
-    }
-
-    /// One of the app's own cards was answered: a held integration round's
-    /// discard is the only one that acts.
-    fileprivate func cardAnswered(_ card: [String: Any], option: String?) {
-        guard card["kind"] as? String == "report", let option, IntegrationRunReport.isDiscardOption(option) else { return }
-        // The repo travels on the card: its worktree is the checkout.
-        guard let repoPath = card["payload"] as? String
-            ?? IntegrationWorktreeStore.shared.repoPath(forCheckout: card["worktree_path"] as? String ?? "") else {
-            NSSound.beep()
-            return
-        }
-        runIntegration(repoPath: repoPath, mode: .excludeConflicting, force: true)
     }
 
     /// What the pane shows: the live surface's viewport, or for a pane whose tab

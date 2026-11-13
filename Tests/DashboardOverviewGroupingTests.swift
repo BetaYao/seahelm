@@ -191,214 +191,49 @@ final class DashboardOverviewGroupingTests: XCTestCase {
         }
     }
 
-    /// The integrate button is the feature's only announcement — without it,
-    /// `/integrate` is a command you have to already know exists.
-    func testProjectGroupsCarryAnIntegrateButtonOnlyWhereThereIsSomethingToFold() {
-        withDefaults { defaults in
-            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
-                                             defaults: defaults,
-                                             now: { self.now })
-            view.update([
-                // Need main + at least two other worktrees before folding is worth offering.
-                makePane(name: "one", project: "alpha", worktreePath: "/a1",
-                         paneStatuses: [.idle], isMainWorktree: true,
-                         lastActivityAt: now.addingTimeInterval(-100)),
-                makePane(name: "two", project: "alpha", worktreePath: "/a2",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-200)),
-                makePane(name: "three", project: "alpha", worktreePath: "/a3",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-250)),
-                // Two worktrees (main + one) is still below the threshold.
-                makePane(name: "pair-main", project: "charlie", worktreePath: "/c1",
-                         paneStatuses: [.idle], isMainWorktree: true,
-                         lastActivityAt: now.addingTimeInterval(-280)),
-                makePane(name: "pair-feat", project: "charlie", worktreePath: "/c2",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-290)),
-                // A single-worktree project has nothing to fold together.
-                makePane(name: "solo", project: "bravo", worktreePath: "/b1",
-                         paneStatuses: [.idle], isMainWorktree: true,
-                         lastActivityAt: now.addingTimeInterval(-300)),
-            ])
+    // MARK: - existing integration checkouts
 
-            XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"])
-
-            view.selectGroupingModeForTesting(.pane)
-            XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"])
-
-            // Status and time groups have no project header to hang it on, and
-            // the checkout is deliberately absent from those views anyway.
-            view.selectGroupingModeForTesting(.status)
-            XCTAssertEqual(view.integrateProjectsForTesting, [])
-            view.selectGroupingModeForTesting(.activityTime)
-            XCTAssertEqual(view.integrateProjectsForTesting, [])
-        }
+    private func fleetWithIntegration() -> [WorktreeRowInfo] {
+        [
+            makePane(name: "main", project: "alpha", worktreePath: "/alpha",
+                     paneStatuses: [.idle], isMainWorktree: true,
+                     lastActivityAt: now.addingTimeInterval(-100)),
+            makePane(name: "integration", project: "alpha", worktreePath: "/alpha-worktrees/integration",
+                     paneStatuses: [.idle], isMainWorktree: false,
+                     lastActivityAt: now.addingTimeInterval(-50)),
+            makePane(name: "feature", project: "alpha", worktreePath: "/alpha-worktrees/feature",
+                     paneStatuses: [.idle], isMainWorktree: false,
+                     lastActivityAt: now.addingTimeInterval(-10)),
+        ]
     }
 
-    /// Once a project already has an integration checkout, the header affordance
-    /// would only re-run a fold — hide it so the icon means "create".
-    func testIntegrateButtonHiddenWhenProjectAlreadyHasIntegrationCheckout() {
-        withDefaults { defaults in
-            let view = makeViewWithIntegration(defaults: defaults, status: "integration · 2 worktrees")
-            view.update(fleetWithIntegration())
-            XCTAssertEqual(view.integrateProjectsForTesting, [])
-
-            // A sibling project without a checkout still gets the button once it
-            // has enough worktrees to fold.
-            view.update(fleetWithIntegration() + [
-                makePane(name: "one", project: "bravo", worktreePath: "/b1",
-                         paneStatuses: [.idle], isMainWorktree: true,
-                         lastActivityAt: now.addingTimeInterval(-100)),
-                makePane(name: "two", project: "bravo", worktreePath: "/b2",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-200)),
-                makePane(name: "three", project: "bravo", worktreePath: "/b3",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-250)),
-            ])
-            XCTAssertEqual(view.integrateProjectsForTesting, ["bravo"])
-        }
-    }
-
-    /// A round takes wall-clock time; the merge glyph becomes a spinner so the
-    /// click does not read as a dead control.
-    func testIntegrateButtonShowsSpinnerWhilePending() {
-        withDefaults { defaults in
-            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
-                                             defaults: defaults,
-                                             now: { self.now })
-            view.update([
-                makePane(name: "one", project: "alpha", worktreePath: "/a1",
-                         paneStatuses: [.idle], isMainWorktree: true,
-                         lastActivityAt: now.addingTimeInterval(-100)),
-                makePane(name: "two", project: "alpha", worktreePath: "/a2",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-200)),
-                makePane(name: "three", project: "alpha", worktreePath: "/a3",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-250)),
-            ])
-            XCTAssertFalse(view.integrateButtonIsPendingForTesting("alpha"))
-
-            view.setIntegratePending("alpha", pending: true)
-            XCTAssertTrue(view.integrateButtonIsPendingForTesting("alpha"))
-            XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"],
-                           "pending keeps the control in place so a status poll does not drop it")
-
-            view.setIntegratePending("alpha", pending: false)
-            XCTAssertFalse(view.integrateButtonIsPendingForTesting("alpha"))
-        }
-    }
-
-    // MARK: - the integration banner
-
-    /// Status and time groupings leave the checkout out of the list on purpose,
-    /// so it needs somewhere else to be visible. The banner is that place, and
-    /// it must not appear in the modes that already show the checkout as a row.
-    func testBannerAppearsOnlyInStatusAndTimeGroupings() {
-        withDefaults { defaults in
-            let view = makeViewWithIntegration(defaults: defaults, status: "integration · 2 worktrees")
-            view.update(fleetWithIntegration())
-
-            XCTAssertEqual(view.integrationBannerLinesForTesting, [],
-                           "grouped by project the checkout is a pinned row, not a banner")
-
-            view.selectGroupingModeForTesting(.status)
-            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  alpha · integration · 2 worktrees"])
-
-            view.selectGroupingModeForTesting(.activityTime)
-            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  alpha · integration · 2 worktrees"])
-
-            view.selectGroupingModeForTesting(.pane)
-            XCTAssertEqual(view.integrationBannerLinesForTesting, [])
-        }
-    }
-
-    /// A checkout that exists but has never been built still says so, rather
-    /// than showing an empty strip.
-    func testBannerFallsBackWhenNoRoundHasRunYet() {
-        withDefaults { defaults in
-            let view = makeViewWithIntegration(defaults: defaults, status: nil)
-            view.update(fleetWithIntegration())
-            view.selectGroupingModeForTesting(.status)
-            XCTAssertEqual(view.integrationBannerLinesForTesting, ["⑃  alpha · integration · not built yet"])
-        }
-    }
-
-    func testNoBannerWithoutAnIntegrationCheckout() {
-        withDefaults { defaults in
-            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
-                                             defaults: defaults, now: { self.now },
-                                             isIntegrationWorktree: { _ in false },
-                                             integrationStatus: { _ in nil })
-            view.update(fleetWithIntegration())
-            view.selectGroupingModeForTesting(.status)
-            XCTAssertEqual(view.integrationBannerLinesForTesting, [])
-        }
-    }
-
-    private func makeViewWithIntegration(defaults: UserDefaults, status: String?,
-                                        state: IntegrationPanelState? = nil) -> DashboardOverviewView {
+    private func makeViewWithIntegrationCheckout(defaults: UserDefaults) -> DashboardOverviewView {
         DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
                               defaults: defaults, now: { self.now },
-                              isIntegrationWorktree: { $0 == "/alpha-worktrees/integration" },
-                              integrationStatus: { _ in status },
-                              integrationState: { _ in state })
+                              isIntegrationWorktree: { $0 == "/alpha-worktrees/integration" })
     }
 
-    /// A round that dropped work, or never ran, is marked — glyph and colour —
-    /// rather than reading like any other line in a dim list.
-    func testBannerMarksARoundThatNeedsSomeone() {
+    /// A checkout that already exists is still recognised: it pins directly
+    /// below main, and the status grouping still shows it (no banner does any
+    /// more). Nothing on screen offers to run an integration.
+    func testExistingCheckoutStillPinsBelowMainAndStaysInStatusGroups() {
         withDefaults { defaults in
-            let held = IntegrationPanelState(line: "integration · 2 worktrees · held · local edits",
-                                             included: ["a", "b"], excluded: [], conflictedPaths: [],
-                                             isHeld: true)
-            let view = makeViewWithIntegration(defaults: defaults, status: held.line, state: held)
+            let view = makeViewWithIntegrationCheckout(defaults: defaults)
             view.update(fleetWithIntegration())
+            XCTAssertEqual(view.orderedRows.map(\.path),
+                           ["/alpha", "/alpha-worktrees/integration", "/alpha-worktrees/feature"])
+
             view.selectGroupingModeForTesting(.status)
-
-            XCTAssertEqual(view.integrationBannerLinesForTesting,
-                           ["!  alpha · integration · 2 worktrees · held · local edits"])
-            XCTAssertEqual(view.integrationBannerAttentionForTesting, [true])
+            XCTAssertTrue(view.orderedRows.map(\.path).contains("/alpha-worktrees/integration"))
         }
     }
 
-    /// The checkout's own row carries the state, so the modes that give it a row
-    /// need no banner — and the dot there is the integration's, not a shell's.
-    func testTheCheckoutRowShowsTheIntegrationState() {
+    /// The row shows an ordinary status dot — no integration state glyph.
+    func testExistingCheckoutRowShowsAnOrdinaryStatusDot() {
         withDefaults { defaults in
-            let failed = IntegrationPanelState.failed("no base ref")
-            let view = makeViewWithIntegration(defaults: defaults, status: failed.line, state: failed)
+            let view = makeViewWithIntegrationCheckout(defaults: defaults)
             view.update(fleetWithIntegration())
-
-            for mode in [WorktreeGroupingMode.repository, .pane] {
-                view.selectGroupingModeForTesting(mode)
-                XCTAssertEqual(view.rowGlyphsForTesting["/alpha-worktrees/integration"], "✕",
-                               "grouping \(mode) left the checkout reading as an agent")
-                // An ordinary worktree's dot still means what it always did.
-                XCTAssertEqual(view.rowGlyphsForTesting["/alpha"], AgentStatus.idle.glyph)
-                XCTAssertEqual(view.integrationBannerLinesForTesting, [],
-                               "grouping \(mode) said it twice")
-            }
-        }
-    }
-
-    /// Every state the checkout can be in reads differently at a glance.
-    func testEachIntegrationStateGetsItsOwnDot() {
-        let excluded = IntegrationPanelState(
-            line: "l", included: ["a"],
-            excluded: [.init(label: "b", paths: ["f.swift"])],
-            conflictedPaths: [], isHeld: false)
-        let clean = IntegrationPanelState(line: "l", included: ["a"], excluded: [],
-                                          conflictedPaths: [], isHeld: false)
-        for (state, glyph) in [(nil as IntegrationPanelState?, "◌"), (clean, "\u{2443}"),
-                               (excluded, "!"), (IntegrationPanelState.failed("x"), "✕")] {
-            withDefaults { defaults in
-                let view = makeViewWithIntegration(defaults: defaults, status: "l", state: state)
-                view.update(fleetWithIntegration())
-                XCTAssertEqual(view.rowGlyphsForTesting["/alpha-worktrees/integration"], glyph)
-            }
+            XCTAssertEqual(view.rowGlyphsForTesting["/alpha-worktrees/integration"], AgentStatus.idle.glyph)
         }
     }
 
@@ -426,109 +261,6 @@ final class DashboardOverviewGroupingTests: XCTestCase {
             stale.isCleanupCandidate = false
             view.update([stale, fresh])
             XCTAssertEqual(view.rowGlyphsForTesting["/a/stale"], AgentStatus.idle.glyph)
-        }
-    }
-
-    /// The checkout's dot reports the integration, and a running pane spins,
-    /// whatever a stale flag says.
-    func testTheMarkNeverHidesAnIntegrationOrRunningDot() {
-        withDefaults { defaults in
-            let view = makeViewWithIntegration(defaults: defaults, status: "l",
-                                               state: .failed("x"))
-            var fleet = fleetWithIntegration()
-            fleet[1].isCleanupCandidate = true
-            var running = makePane(name: "busy", project: "alpha", worktreePath: "/alpha-worktrees/busy",
-                                   paneStatuses: [.running], isMainWorktree: false,
-                                   lastActivityAt: now.addingTimeInterval(-3 * 86_400))
-            running.isCleanupCandidate = true
-            view.update(fleet + [running])
-
-            XCTAssertEqual(view.rowGlyphsForTesting["/alpha-worktrees/integration"], "✕")
-            XCTAssertEqual(view.rowGlyphsForTesting["/alpha-worktrees/busy"], "◐")
-        }
-    }
-
-    private func fleetWithIntegration() -> [WorktreeRowInfo] {
-        [
-            makePane(name: "main", project: "alpha", worktreePath: "/alpha",
-                     paneStatuses: [.idle], isMainWorktree: true,
-                     lastActivityAt: now.addingTimeInterval(-100)),
-            makePane(name: "integration", project: "alpha", worktreePath: "/alpha-worktrees/integration",
-                     paneStatuses: [.idle], isMainWorktree: false,
-                     lastActivityAt: now.addingTimeInterval(-50)),
-        ]
-    }
-
-    // MARK: - the master switch
-
-    /// Off means the feature is not there: no button, no banner, and the
-    /// checkout stops being pinned — it just sorts as an ordinary worktree.
-    func testDisablingIntegrationHidesEverySurface() {
-        withDefaults { defaults in
-            // Three worktrees (main + two), no checkout yet — the button is present
-            // until the master switch turns the feature off.
-            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
-                                             defaults: defaults, now: { self.now },
-                                             isIntegrationWorktree: { _ in false },
-                                             integrationStatus: { _ in nil })
-            view.update([
-                makePane(name: "one", project: "alpha", worktreePath: "/a1",
-                         paneStatuses: [.idle], isMainWorktree: true,
-                         lastActivityAt: now.addingTimeInterval(-100)),
-                makePane(name: "two", project: "alpha", worktreePath: "/a2",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-200)),
-                makePane(name: "three", project: "alpha", worktreePath: "/a3",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-250)),
-            ])
-            XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"])
-
-            view.integrationEnabled = false
-            XCTAssertEqual(view.integrateProjectsForTesting, [])
-
-            // Banner path: with a checkout present, off also clears the banner.
-            let withCheckout = makeViewWithIntegration(defaults: defaults, status: "integration · 2 worktrees")
-            withCheckout.update(fleetWithIntegration())
-            withCheckout.selectGroupingModeForTesting(.status)
-            XCTAssertFalse(withCheckout.integrationBannerLinesForTesting.isEmpty)
-            withCheckout.integrationEnabled = false
-            XCTAssertEqual(withCheckout.integrationBannerLinesForTesting, [])
-        }
-    }
-
-    /// Turning it back on restores them without needing new pane data — the
-    /// structure signature does not describe the flag, so the view has to force
-    /// a full render itself.
-    func testReEnablingIntegrationRestoresTheSurfacesWithoutNewData() {
-        withDefaults { defaults in
-            let view = DashboardOverviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 600),
-                                             defaults: defaults, now: { self.now },
-                                             isIntegrationWorktree: { _ in false },
-                                             integrationStatus: { _ in nil })
-            view.update([
-                makePane(name: "one", project: "alpha", worktreePath: "/a1",
-                         paneStatuses: [.idle], isMainWorktree: true,
-                         lastActivityAt: now.addingTimeInterval(-100)),
-                makePane(name: "two", project: "alpha", worktreePath: "/a2",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-200)),
-                makePane(name: "three", project: "alpha", worktreePath: "/a3",
-                         paneStatuses: [.idle], isMainWorktree: false,
-                         lastActivityAt: now.addingTimeInterval(-250)),
-            ])
-            view.integrationEnabled = false
-            XCTAssertEqual(view.integrateProjectsForTesting, [])
-
-            view.integrationEnabled = true
-            XCTAssertEqual(view.integrateProjectsForTesting, ["alpha"])
-
-            let withCheckout = makeViewWithIntegration(defaults: defaults, status: "integration · 2 worktrees")
-            withCheckout.update(fleetWithIntegration())
-            withCheckout.integrationEnabled = false
-            withCheckout.integrationEnabled = true
-            withCheckout.selectGroupingModeForTesting(.status)
-            XCTAssertEqual(withCheckout.integrationBannerLinesForTesting, ["⑃  alpha · integration · 2 worktrees"])
         }
     }
 

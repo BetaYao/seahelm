@@ -34,9 +34,8 @@ struct WorktreeGroupingItem: Equatable {
     let lastActivityAt: Date?
     let isMainWorktree: Bool
     let creationDate: Date
-    /// The repo's integration checkout rather than a fleet member. It has no
-    /// agent, so its status and activity describe a shell, not work — see
-    /// `groups(_:mode:now:calendar:)` for what that changes.
+    /// A leftover integration checkout rather than a fleet member: pinned under
+    /// main in repository grouping, and never offered `/return`.
     let isIntegration: Bool
     /// When the row's focused pane started its current round, while it runs.
     /// Not used for grouping — carried so a remote list can show the same timer.
@@ -122,14 +121,13 @@ enum WorktreeGrouping {
             // just under main rather than sorted among the agents.
             return repositoryGroups(items)
         case .status:
-            // Status groups answer "what needs me now" and time buckets answer
-            // "what has been happening". The integration checkout is neither: it
-            // has no agent, so its status is a shell's and its activity is
-            // terminal output. Including it would only dilute both views. It is
-            // surfaced separately instead.
-            return statusGroups(items.filter { !$0.isIntegration })
+            // A leftover integration checkout is grouped like any row here.
+            // These modes used to leave it to a separate banner; the banner went
+            // with the integration feature, and filtering it out now would make
+            // the checkout (and its Delete) unreachable.
+            return statusGroups(items)
         case .activityTime:
-            return activityGroups(items.filter { !$0.isIntegration }, now: now, calendar: calendar)
+            return activityGroups(items, now: now, calendar: calendar)
         }
     }
 

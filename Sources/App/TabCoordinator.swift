@@ -28,9 +28,6 @@ class TabCoordinator {
     /// owned by `StationManager`, not by this list, and a worktree can be between
     /// trees — a pane move unkeys the source's before its replacement is built.
     var allWorktrees: [(info: WorktreeInfo, tree: SplitTree?)] = []
-    /// Keeps each repo's integration checkout current as agents finish turns.
-    /// Nil until `init` builds it; only acts on repos that already have one.
-    private var integration: IntegrationCoordinator?
     var worktreeRepoCache: [String: String] = [:]
     /// First Mate: the LLM pane rules wake up.
     let firstMate = FirstMateLink()
@@ -106,52 +103,8 @@ class TabCoordinator {
 
     init(config: Config) {
         self.config = config
-        integration = IntegrationCoordinator(
-            isEnabled: { [weak self] in
-                guard let self else { return false }
-                return self.config.integrationEnabled && self.config.autoIntegrate
-            },
-            // Same reason as `worktrees` below: a worktree we already track
-            // names its repo without asking git. The fallback covers a path
-            // discovery has not filed yet.
-            repoRoot: { [weak self] path in
-                self?.workspaceManager.tabs
-                    .first(where: { $0.worktrees.contains(where: { $0.path == path }) })?.repoPath
-                    ?? WorktreeDiscovery.findRepoRoot(from: path)
-            },
-            // `workspaceManager` already files every worktree under the repo it
-            // belongs to, so answering from it is both exact and free. Asking
-            // git instead — once per worktree, on the main thread, every
-            // integration round — is what pinned the main thread at 78% inside
-            // `posix_spawn`, and each worktree on an unreachable volume added a
-            // full `gitTimeout` to that.
-            worktrees: { [weak self] repo in
-                self?.workspaceManager.tabs.first(where: { $0.repoPath == repo })?.worktrees ?? []
-            },
-            integrationPath: { IntegrationWorktreeStore.shared.worktreePath(forRepo: $0) },
-            isCheckoutBusy: { Fleet.shared.hasRunningPane(inWorktree: $0) },
-            isWorktreeBusy: { Fleet.shared.hasRunningPane(inWorktree: $0) },
-            lastPublished: { IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: $0) },
-            onReport: { [weak self] report, repo in
-                IntegrationStatusStore.shared.set(report.panelState, forWorktree: report.integrationWorktreePath)
-                if case .published(let commit) = report.outcome {
-                    IntegrationWorktreeStore.shared.recordPublished(
-                        commit, forCheckout: report.integrationWorktreePath)
-                }
-                guard report.needsAttention else { return }
-                // One card per checkout: the core keeps the latest round's
-                // (its key is worktree and kind), as the side panel does.
-                guard let options = report.cardOptions, !options.isEmpty else { return }
-                self?.cards.raise(kind: .report, worktreePath: report.integrationWorktreePath,
-                                  project: self?.repoName(forWorktree: report.integrationWorktreePath) ?? "",
-                                  message: report.summary, options: options,
-                                  // The repo to re-run against: the card's path is the checkout.
-                                  payload: repo)
-            }
-        )
         Fleet.shared.onChange = { [weak self] outcome in
             guard let self else { return }
-            self.integration?.handle(outcome)
             // Completions and notices are the core's to decide: `pane.notice`
             // (handleCoreNotice).
             // The worktree rows roll up their panes' statuses.

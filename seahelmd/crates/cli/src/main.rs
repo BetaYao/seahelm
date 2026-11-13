@@ -36,7 +36,7 @@ fn main() {
         args.drain(..2);
     }
     let Some((group, rest)) = args.split_first() else {
-        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|integration|worktree|habit|schedule> ...", 2)
+        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|worktree|habit|schedule> ...", 2)
     };
     let cli = Cli { note };
     cli.run(group, rest);
@@ -70,23 +70,6 @@ impl Cli {
                 pretty(&self.call("session.snapshot", json!({}), 40.0, &[])["panes"].take_or_array())
             }
             "events" => self.events(a),
-            "integration" => {
-                if let Some(sub) = first(a) {
-                    if sub != "status" {
-                        die(&format!("unknown integration subcommand: {sub}"), 2);
-                    }
-                }
-                let rest = a.get(1..).unwrap_or_default();
-                // The cwd's repo by default: an agent asking "did my work get
-                // folded in?" is asking about the repo it is standing in.
-                let path = match rest.first() {
-                    Some(p) if !p.starts_with("--") => Some(p.clone()),
-                    _ if has(rest, "--all") => None,
-                    _ => std::env::current_dir().ok().map(|d| d.to_string_lossy().into_owned()),
-                };
-                let params = path.map(|p| json!({"path": p})).unwrap_or_else(|| json!({}));
-                pretty(&self.call("integration.status", params, 40.0, &[])["checkouts"].take_or_array());
-            }
             "layout" => self.layout(a),
             "wait" => self.wait(a),
             "worktree" => self.worktree(a),

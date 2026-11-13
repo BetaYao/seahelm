@@ -120,15 +120,6 @@ class DashboardViewController: NSViewController {
     /// The "+" on a project group header was clicked. Args: the project title and
     /// the rect + view to anchor the create popover to.
     var onAddWorktreeToProject: ((String, NSRect, NSView) -> Void)?
-    /// Fold this project's worktrees into its integration checkout. Equivalent
-    /// to typing `/integrate` with that repo selected.
-    var onIntegrateProject: ((String) -> Void)?
-    /// Move an integration checkout (by path) back onto origin/main.
-    var onResetIntegration: ((String) -> Void)?
-    /// Master switch for the integration feature, forwarded to the fleet view.
-    var integrationEnabled: Bool = true {
-        didSet { overviewView.integrationEnabled = integrationEnabled }
-    }
     /// The fleet header "+" was clicked: open the folder picker to add a repo.
     var onRequestAddRepo: (() -> Void)?
 
@@ -365,9 +356,6 @@ class DashboardViewController: NSViewController {
         overviewView.onReturnWorktree = { [weak self] path in
             self?.dashboardDelegate?.dashboardDidRequestReturnWorktree(path: path)
         }
-        overviewView.onResetIntegration = { [weak self] path in
-            self?.onResetIntegration?(path)
-        }
         overviewView.onCloseProject = { [weak self] project in
             self?.dashboardDelegate?.dashboardDidRequestCloseRepo(project)
         }
@@ -379,9 +367,6 @@ class DashboardViewController: NSViewController {
         // "+" on a project group header: the anchored create form, scoped to that
         // project. The window owns the create itself (it holds the repo map and the
         // worktree-create path), so forward the click with its anchor view.
-        overviewView.onIntegrate = { [weak self] project in
-            self?.onIntegrateProject?(project)
-        }
         overviewView.onAddWorktree = { [weak self] project, rect, anchor in
             self?.onAddWorktreeToProject?(project, rect, anchor)
         }
@@ -429,11 +414,6 @@ class DashboardViewController: NSViewController {
     /// else on screen.
     func setWorktreePending(path: String, pending: Bool) {
         overviewView.setWorktreePending(path, pending: pending)
-    }
-
-    /// Spin the project-header integrate control while a round is in flight.
-    func setIntegratePending(project: String, pending: Bool) {
-        overviewView.setIntegratePending(project, pending: pending)
     }
 
     /// `changedWorktreePath` narrows the in-place refresh to one card when the

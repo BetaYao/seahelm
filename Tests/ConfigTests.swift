@@ -489,24 +489,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.agents[0].rules[0].patterns, ["working"])
     }
 
-    /// Both integration flags default on, so a config written before they
-    /// existed keeps the feature exactly as it behaved.
-    func testIntegrationFlagsDefaultOnForOlderConfigs() throws {
-        let json = Data("{}".utf8)
-        let config = try JSONDecoder().decode(Config.self, from: json)
-        XCTAssertTrue(config.integrationEnabled)
-        XCTAssertTrue(config.autoIntegrate)
-    }
-
-    func testIntegrationFlagsRoundTrip() throws {
-        var config = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
-        config.integrationEnabled = false
-        config.autoIntegrate = false
-        let decoded = try JSONDecoder().decode(Config.self, from: try JSONEncoder().encode(config))
-        XCTAssertFalse(decoded.integrationEnabled)
-        XCTAssertFalse(decoded.autoIntegrate)
-    }
-
     /// The legacy remote-access keys belong to seahelm-gateway now, which
     /// imports them once (docs/seahelm-gateway-plan.md); the app neither
     /// reads nor writes them, so its next save drops them.
@@ -520,5 +502,28 @@ final class ConfigTests: XCTestCase {
         for key in ["\"mqtt\"", "\"telegram\"", "\"host_gateway\"", "\"gmail_mail\""] {
             XCTAssertFalse(out.contains(key), out)
         }
+    }
+
+    // MARK: - retired integration feature
+
+    func testIntegrationTurnedOffIsReadFromTheLeftoverKey() {
+        XCTAssertTrue(IntegrationWorktreeStore.featureWasTurnedOff(configData: Data(#"{"integration_enabled":false}"#.utf8)))
+        XCTAssertFalse(IntegrationWorktreeStore.featureWasTurnedOff(configData: Data(#"{"integration_enabled":true}"#.utf8)))
+        XCTAssertFalse(IntegrationWorktreeStore.featureWasTurnedOff(configData: Data("{}".utf8)))
+        XCTAssertFalse(IntegrationWorktreeStore.featureWasTurnedOff(configData: nil))
+    }
+
+    func testRetiringIntegrationStateRemovesOnlyTheObsoleteFiles() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("seahelm-retire-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for name in IntegrationWorktreeStore.obsoleteFileNames + ["integration-worktrees.json"] {
+            try Data("{}".utf8).write(to: dir.appendingPathComponent(name))
+        }
+
+        IntegrationWorktreeStore.retireObsoleteState(configDir: dir)
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        XCTAssertEqual(left, ["integration-worktrees.json"])
     }
 }

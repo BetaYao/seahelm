@@ -3,66 +3,70 @@ import Foundation
 /// Remembers which worktree is a repo's integration checkout, keyed by repo
 /// path. One per repo.
 ///
-/// Identity is recorded rather than inferred from the path: the directory name
-/// is a convention, and a convention is not something the rest of the app
-/// should have to re-derive every time it needs to know whether a worktree is
-/// a fleet member or the place they get combined.
+/// The integration feature no longer runs, but existing checkouts stay on disk
+/// and stay recorded here so the fleet / First Mate can still recognize them
+/// (not PR work, not cleanup candidates) without recreating or updating them.
+/// Nothing adds an entry any more; one leaves when its checkout is deleted, or
+/// all of them at launch if the user had the feature switched off.
 final class IntegrationWorktreeStore {
     static let shared = IntegrationWorktreeStore()
 
     private let store = PersistedStringMap(fileName: "integration-worktrees.json")
-    /// Checkout path → the commit seahelm last published there. Provenance,
-    /// not display: `IntegrationWorktree.publish` compares it against the
-    /// checkout's real HEAD to notice work that arrived by hand.
-    private let published = PersistedStringMap(fileName: "integration-published.json")
     /// Membership cache. `isIntegrationWorktree` is asked once per pane per
     /// render, on a two-second poll, so it must not rebuild a set each time.
     private var knownPaths: Set<String>
     private let lock = NSLock()
 
     private init() {
+        Self.retireObsoleteState(configDir: Config.configDir)
+        if Self.featureWasTurnedOff(configData: try? Data(contentsOf: Config.configPath)) {
+            for repo in store.entries.keys { store.remove(forKey: repo) }
+        }
         knownPaths = store.values
+    }
+
+    /// Files only the removed integration feature read: the commit last
+    /// published into each checkout, and each checkout's round status. Nothing
+    /// reads them now, and worktree paths get reused, so they go.
+    static let obsoleteFileNames = ["integration-published.json", "integration-status.json"]
+
+    static func retireObsoleteState(configDir: URL) {
+        for name in obsoleteFileNames {
+            let url = configDir.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Whether the user had switched the feature off (`integration_enabled:
+    /// false`, which `Config.save` keeps as a foreign key). With it off the
+    /// checkout was an ordinary worktree — every grouping, `/return` allowed —
+    /// and there is no setting left to say so, so its record is dropped instead.
+    static func featureWasTurnedOff(configData: Data?) -> Bool {
+        guard let configData,
+              let object = try? JSONSerialization.jsonObject(with: configData) as? [String: Any]
+        else { return false }
+        return object["integration_enabled"] as? Bool == false
     }
 
     func worktreePath(forRepo repoPath: String) -> String? {
         store[WorktreeDiscovery.canonicalPath(repoPath)]?.nonEmptyTrimmed
     }
 
-    func set(_ worktreePath: String, forRepo repoPath: String) {
-        store.set(
-            WorktreeDiscovery.canonicalPath(worktreePath),
-            forKey: WorktreeDiscovery.canonicalPath(repoPath)
-        )
-        refreshCache()
-    }
-
     /// Every repo's checkout, keyed by repo path.
     var checkoutsByRepo: [String: String] { store.entries }
 
     /// Which repo a checkout belongs to. The reverse lookup, for the paths that
-    /// arrive as a checkout — a card, a CLI call from inside one.
+    /// arrive as a checkout.
     func repoPath(forCheckout path: String) -> String? {
         let canonical = WorktreeDiscovery.canonicalPath(path)
         return store.entries.first { $0.value == canonical }?.key
-    }
-
-    /// The commit seahelm last checked out there, or nil if it never has.
-    func lastPublishedCommit(forCheckout path: String) -> String? {
-        published[WorktreeDiscovery.canonicalPath(path)]?.nonEmptyTrimmed
-    }
-
-    func recordPublished(_ commit: String, forCheckout path: String) {
-        published.set(commit, forKey: WorktreeDiscovery.canonicalPath(path))
     }
 
     /// Drops everything remembered about a repo's checkout. Worktree paths get
     /// reused, so a stale entry would answer for whatever lands there next.
     func forget(repoPath: String) {
         let key = WorktreeDiscovery.canonicalPath(repoPath)
-        if let checkout = store[key] {
-            published.remove(forKey: checkout)
-            IntegrationStatusStore.shared.forget(worktreePath: checkout)
-        }
         store.remove(forKey: key)
         refreshCache()
     }
@@ -73,7 +77,7 @@ final class IntegrationWorktreeStore {
     }
 
     /// Whether this path is some repo's integration worktree. Used to keep it
-    /// out of the fleet groupings, so it is asked often and must not touch disk.
+    /// out of PR / cleanup treatment, so it is asked often and must not touch disk.
     func isIntegrationWorktree(_ path: String) -> Bool {
         lock.lock(); let known = knownPaths; lock.unlock()
         guard !known.isEmpty else { return false }

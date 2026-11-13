@@ -26,14 +26,6 @@ struct Config: Codable {
     /// from agent hook events; used to relaunch the agent (e.g. `claude
     /// --resume <id>`) when a backend session is recreated instead of falling
     /// back to a plain shell.
-    /// Whether the integration checkout exists as a concept at all: its button,
-    /// its banner, its panel, `/integrate`, and the automatic rounds. Off hides
-    /// the feature entirely without deleting any checkout already on disk.
-    var integrationEnabled: Bool
-    /// Keep the integration checkout current as agents finish turns. Only ever
-    /// acts on a repo that already has one — running `/integrate` once is what
-    /// opts a repo in, so this is the off switch, not the on switch.
-    var autoIntegrate: Bool
     /// Vibe-island style notch overlay showing notifications + suggestions.
     var islandEnabled: Bool
     /// First Mate: off until the user turns it on.
@@ -105,8 +97,6 @@ struct Config: Codable {
         case enabledHookAgents = "enabled_hook_agents"
         case notificationSound = "notification_sound"
         case confirmBeforeQuit = "confirm_before_quit"
-        case integrationEnabled = "integration_enabled"
-        case autoIntegrate = "auto_integrate"
         case agentMemoryGuard = "agent_memory_guard"
         case autoSleep = "auto_sleep"
     }
@@ -143,8 +133,6 @@ struct Config: Codable {
         enabledHookAgents = []
         notificationSound = "default"
         confirmBeforeQuit = true
-        integrationEnabled = true
-        autoIntegrate = true
         agentMemoryGuard = .default
         autoSleep = .default
     }
@@ -192,8 +180,6 @@ struct Config: Codable {
         enabledHookAgents = try container.decodeIfPresent([String].self, forKey: .enabledHookAgents) ?? []
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound) ?? "default"
         confirmBeforeQuit = try container.decodeIfPresent(Bool.self, forKey: .confirmBeforeQuit) ?? true
-        integrationEnabled = try container.decodeIfPresent(Bool.self, forKey: .integrationEnabled) ?? true
-        autoIntegrate = try container.decodeIfPresent(Bool.self, forKey: .autoIntegrate) ?? true
         agentMemoryGuard = try container.decodeIfPresent(AgentMemoryGuardConfig.self, forKey: .agentMemoryGuard) ?? .default
         autoSleep = try container.decodeIfPresent(AutoSleepConfig.self, forKey: .autoSleep) ?? .default
     }

@@ -665,13 +665,9 @@ class TerminalCoordinator {
             return
         }
 
-        // The integration checkout is detached and its commits are throwaway
-        // builds, so "what would be lost" is a different question there: only
-        // work that arrived by hand counts, which is what its hold logic knows.
+        // A leftover integration checkout's commits are throwaway builds, so
+        // "what would be lost" is only work that arrived by hand.
         let isIntegration = IntegrationWorktreeStore.shared.isIntegrationWorktree(info.path)
-        let expectedHead = isIntegration
-            ? IntegrationWorktreeStore.shared.lastPublishedCommit(forCheckout: info.path)
-            : nil
 
         onPendingChange?(true)
         // Several synchronous git subprocesses (up to a 5s timeout each on a
@@ -680,7 +676,7 @@ class TerminalCoordinator {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let repoPath = WorktreeDiscovery.findRepoRoot(from: info.path) ?? info.path
             let assessment = isIntegration
-                ? IntegrationWorktree.assessDeletion(path: info.path, repoPath: repoPath, expectedHead: expectedHead)
+                ? WorktreeDeleter.assessIntegrationDeletion(worktreePath: info.path, repoPath: repoPath)
                 : WorktreeDeleter.assessDeletion(worktreePath: info.path, repoPath: repoPath,
                                                  branchName: info.branch, refreshBase: true)
             DispatchQueue.main.async {
@@ -836,10 +832,9 @@ class TerminalCoordinator {
         config.focusedPaneIds.removeValue(forKey: info.path)
         config.save()
         stationManager.removeTree(forPath: info.path)
-        // Deleting the integration checkout is opting the repo back out:
-        // automatic rounds already stop on a missing directory, and leaving
-        // the record behind would show a stale status line for a checkout that
-        // no longer exists. `/integrate` recreates and re-records it.
+        // Deleting an existing integration checkout drops its record: worktree
+        // paths get reused, and a stale entry would answer for whatever lands
+        // there next.
         if let repo = IntegrationWorktreeStore.shared.repoPath(forCheckout: info.path) {
             IntegrationWorktreeStore.shared.forget(repoPath: repo)
         }

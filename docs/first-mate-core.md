@@ -21,7 +21,6 @@ keyed `worktree#kind[#pane][#payload]`.
 | Agent question (AskUserQuestion) | `.question` hook event | arrow keys + Return in the dialog; multi-select ticks; follow-up questions; review page confirm |
 | Screen choice (permission prompt) | `.question` from the viewport scan | arrow keys relative to the selected row |
 | Suggestion (`seahelm-suggest`) | `.suggest` event | the option typed into the pane + Enter |
-| Integration report | `/integrate` | "discard" runs integration again, anything else clears |
 | First Mate approval | `AutopilotCoordinator.gate` (`ask`) | approve runs the held call, reject tells First Mate |
 | First Mate proposal | `seahelm propose` | the option's action runs as approved; "Not now" runs nothing |
 
@@ -225,7 +224,8 @@ ported from `MessageEvent`, `PaneMessageProjector`, `MessageStreamHub` /
    `cards.list`, the island, the dock, Telegram cards and the gateway read
    cards from the core and answer through it; `PendingOrdersQueue` becomes a
    mirror. Integration reports stay app-raised but go into the core's queue
-   (`cards.raise`, app only).
+   (`cards.raise`, app only). (Later removed with the integration feature;
+   the app now dismisses any leftover `report` card.)
 4. **GPUI First Mate.** The ⎈ dock row at the foot of the fleet (state
    colour, amber with a count), First Mate's pane in the focus area with its
    cards above the terminal, number keys 1–9 to answer, Esc for "Not now"; an

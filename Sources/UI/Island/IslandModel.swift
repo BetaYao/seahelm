@@ -139,10 +139,9 @@ final class IslandModel {
     /// answering, or the control channel held by another instance.
     var warning: IslandWarning?
 
-    /// The cards the island draws, newest first. A report only when it has
-    /// something to decide; routine rounds stay in the checkout's status.
+    /// The cards the island draws, newest first.
     static func newestSuggestions(from cards: [Card]) -> [Card] {
-        Array(cards.filter { $0.kind != .report || !$0.options.isEmpty }.reversed())
+        Array(cards.reversed())
     }
 
     /// Whether newly-arrived cards are worth opening the island for: one with
