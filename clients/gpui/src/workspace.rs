@@ -12,6 +12,7 @@ use gpui::{
     Rgba, SharedString, Subscription, Transformation, Window, WindowControlArea,
 };
 
+use crate::agents::{self, AgentInfo};
 use crate::assets::icon;
 use crate::core_client::{self, WorktreeState};
 use crate::notify;
@@ -225,6 +226,8 @@ pub struct Workspace {
     preview_tabs: HashMap<String, preview_tabs::PreviewTabs>,
     /// The worktree and leaf shown alone (zoomed), if any.
     zoomed: Option<(String, LeafId)>,
+    /// AI agents for the empty right panel (PATH scan; refreshed on activate).
+    agents: Vec<AgentInfo>,
 }
 
 
@@ -285,6 +288,7 @@ impl Workspace {
             presence: HashMap::new(),
             zoomed: None,
             preview_tabs: HashMap::new(),
+            agents: agents::scan(),
         };
         Self::poll_pane_facts(cx);
         Self::poll_core(cx);
@@ -1632,6 +1636,10 @@ impl Render for Workspace {
                 let active = window.is_window_active();
                 notify::log(if active { "activate" } else { "deactivate" }, serde_json::json!({}));
                 w.window_active = active;
+                if active {
+                    w.agents = agents::scan();
+                    cx.notify();
+                }
                 w.report_visible(active, cx);
             })
             .detach();
@@ -2044,7 +2052,7 @@ impl Workspace {
             .when(!platform::MAC, |d| d.child(caption_buttons(maximized)));
         let body = match body {
             Some(b) => b,
-            None => div().flex_1().bg(theme::rgb(theme::bg())).into_any_element(),
+            None => self.empty_agents_body(cx).into_any_element(),
         };
         div()
             .flex_1()
@@ -2056,6 +2064,93 @@ impl Workspace {
             .child(header)
             .children(cards)
             .child(body)
+    }
+
+    /// Empty right panel: every supported AI agent, lit when on PATH.
+    fn empty_agents_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut list = div().id("empty-agents-list").flex().flex_col().gap(px(4.)).w(px(280.));
+        for (i, info) in self.agents.iter().enumerate() {
+            let url = info.install_url().unwrap_or("").to_string();
+            let detected = info.detected;
+            let glyph = info.glyph();
+            let name: SharedString = info.agent.display_name().into();
+            let status: SharedString = if detected { "Installed".into() } else { "Not installed".into() };
+            let bright = if detected { 1.0 } else { 0.42 };
+            let row = div()
+                .id(("empty-agent", i))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.))
+                .px(px(10.))
+                .py(px(7.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .hover(|s| s.bg(tokens::alpha(tokens::accent(), 0.12)))
+                .on_click(cx.listener(move |_w, _: &ClickEvent, _, cx| {
+                    if !url.is_empty() {
+                        cx.open_url(&url);
+                    }
+                }))
+                .child(
+                    div()
+                        .font_family(MONO)
+                        .text_size(px(13.))
+                        .text_color(tokens::alpha(if detected { tokens::ink() } else { tokens::ink_dim() }, bright))
+                        .child(glyph),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .font_family(MONO)
+                        .text_size(px(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(tokens::alpha(if detected { tokens::ink() } else { tokens::ink_dim() }, bright))
+                        .child(name),
+                )
+                .child(
+                    div()
+                        .font_family(MONO)
+                        .text_size(px(11.))
+                        .text_color(tokens::alpha(tokens::ink_dim(), if detected { 0.85 } else { 0.4 }))
+                        .child(status),
+                );
+            list = list.child(row);
+        }
+
+        div()
+            .id("empty-agents")
+            .flex_1()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .bg(theme::rgb(theme::bg()))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(10.))
+                    .max_w(px(340.))
+                    .px(px(24.))
+                    .child(
+                        div()
+                            .font_family(MONO)
+                            .text_size(px(14.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(tokens::ink())
+                            .child("Agents"),
+                    )
+                    .child(
+                        div()
+                            .font_family(MONO)
+                            .text_size(px(11.))
+                            .text_color(tokens::ink_dim())
+                            .child("Installed agents are ready to use. Click any agent to open its install page."),
+                    )
+                    .child(list),
+            )
     }
 
     /// No width of its own: a 16pt strip over the seam, a 1pt line in it.

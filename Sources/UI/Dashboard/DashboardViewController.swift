@@ -314,8 +314,8 @@ class DashboardViewController: NSViewController {
     /// coalesce a fast key-repeat burst, short enough to feel live.
     private static let previewDebounce: TimeInterval = 0.12
 
-    // Empty state
-    private let emptyStateView = HelmWatermarkView()
+    // Empty state — supported agents (bright when on PATH, dim + click-to-install otherwise)
+    private let emptyStateView = EmptyFleetAgentsView()
 
     // MARK: - First responder
 
@@ -471,6 +471,7 @@ class DashboardViewController: NSViewController {
 
         // Show empty state when no agents
         if agents.isEmpty || DebugFlags.forceEmptyState {
+            emptyStateView.reload()
             emptyStateView.isHidden = false
             terminalHostView.addSubview(emptyStateView) // keep above focus panel
             leftRightContainer.isHidden = true
@@ -799,9 +800,10 @@ class DashboardViewController: NSViewController {
 
     // MARK: - Setup: Empty State
 
-    /// With no worktrees the terminal side shows only a faint dot-matrix helm —
-    /// the fleet's "Add project" tile is the whole first-run UI. The view covers
-    /// the focus panel's slot so nothing stale shows through.
+    /// With no worktrees the terminal side lists every supported AI agent —
+    /// lit when on PATH, dimmed otherwise; any row opens that agent's install
+    /// page. The fleet's "Add project" tile remains the left-side first-run
+    /// entry. The view covers the focus panel's slot so nothing stale shows through.
     private func setupEmptyState() {
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
         emptyStateView.isHidden = true

@@ -198,6 +198,37 @@ enum AgentType: String, Codable, CaseIterable {
         }
     }
 
+    /// Vendor page that explains how to install this agent. Used by the empty
+    /// fleet panel so a missing agent opens its install docs in the browser.
+    var installURL: URL? {
+        switch self {
+        case .claudeCode:
+            return URL(string: "https://code.claude.com/docs/en/setup")
+        case .codex:
+            return URL(string: "https://developers.openai.com/codex/cli")
+        case .openCode:
+            return URL(string: "https://opencode.ai")
+        case .gemini:
+            return URL(string: "https://geminicli.com/docs/get-started/installation/")
+        case .cline:
+            return URL(string: "https://docs.cline.bot/getting-started/installing-cline")
+        case .goose:
+            return URL(string: "https://block.github.io/goose/docs/getting-started/installation/")
+        case .amp:
+            return URL(string: "https://ampcode.com")
+        case .aider:
+            return URL(string: "https://aider.chat")
+        case .cursor:
+            return URL(string: "https://cursor.com/docs/cli/installation")
+        case .kiro:
+            return URL(string: "https://kiro.dev/docs/getting-started/installation/")
+        case .pi:
+            return URL(string: "https://pi.dev/docs/latest/quickstart")
+        default:
+            return nil
+        }
+    }
+
     var isShellTask: Bool {
         !isAIAgent && self != .unknown
     }

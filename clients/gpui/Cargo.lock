@@ -4689,6 +4689,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
 
 [[package]]
+name = "seahelm-core-types"
+version = "0.0.1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "seahelm-gpui"
 version = "0.0.1"
 dependencies = [
@@ -4697,6 +4704,7 @@ dependencies = [
  "gpui",
  "keep-vt",
  "libc",
+ "seahelm-core-types",
  "seahelmd",
  "serde",
  "serde_json",

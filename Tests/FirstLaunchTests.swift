@@ -80,6 +80,20 @@ final class AgentDetectorTests: XCTestCase {
     }
 }
 
+final class AgentInstallURLTests: XCTestCase {
+    func testEveryAIAgentHasAnInstallURL() {
+        for type in AgentType.allCases where type.isAIAgent {
+            XCTAssertNotNil(type.installURL, "\(type.rawValue) needs an installURL")
+            XCTAssertEqual(type.installURL?.scheme, "https")
+        }
+    }
+
+    func testNonAIAgentsHaveNoInstallURL() {
+        XCTAssertNil(AgentType.brew.installURL)
+        XCTAssertNil(AgentType.unknown.installURL)
+    }
+}
+
 final class GhosttyConfigImporterTests: XCTestCase {
     func testParseFontSettings() {
         let conf = """

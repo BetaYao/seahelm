@@ -209,6 +209,66 @@ impl AgentType {
         matches!(self, ClaudeCode | Codex | OpenCode | Gemini | Cline | Goose | Amp | Aider | Cursor | Kiro | Pi)
     }
 
+    /// Every AI agent Seahelm can launch, in picker / empty-fleet order.
+    pub fn ai_agents() -> &'static [AgentType] {
+        use AgentType::*;
+        &[ClaudeCode, Codex, OpenCode, Gemini, Cline, Goose, Amp, Aider, Cursor, Kiro, Pi]
+    }
+
+    /// CLI binary on PATH that launches this agent (`claude`, `agent`, …).
+    pub fn launch_bin(self) -> Option<&'static str> {
+        use AgentType::*;
+        match self {
+            ClaudeCode => Some("claude"),
+            Codex => Some("codex"),
+            OpenCode => Some("opencode"),
+            Gemini => Some("gemini"),
+            Cline => Some("cline"),
+            Goose => Some("goose"),
+            Amp => Some("amp"),
+            Aider => Some("aider"),
+            // Cursor Agent CLI — not the `cursor` IDE shim.
+            Cursor => Some("agent"),
+            Kiro => Some("kiro"),
+            Pi => Some("pi"),
+            _ => None,
+        }
+    }
+
+    /// Vendor page that explains how to install this agent (empty-fleet panel).
+    pub fn install_url(self) -> Option<&'static str> {
+        use AgentType::*;
+        match self {
+            ClaudeCode => Some("https://code.claude.com/docs/en/setup"),
+            Codex => Some("https://developers.openai.com/codex/cli"),
+            OpenCode => Some("https://opencode.ai"),
+            Gemini => Some("https://geminicli.com/docs/get-started/installation/"),
+            Cline => Some("https://docs.cline.bot/getting-started/installing-cline"),
+            Goose => Some("https://block.github.io/goose/docs/getting-started/installation/"),
+            Amp => Some("https://ampcode.com"),
+            Aider => Some("https://aider.chat"),
+            Cursor => Some("https://cursor.com/docs/cli/installation"),
+            Kiro => Some("https://kiro.dev/docs/getting-started/installation/"),
+            Pi => Some("https://pi.dev/docs/latest/quickstart"),
+            _ => None,
+        }
+    }
+
+    /// Short glyph before a worktree / agent row title.
+    pub fn tab_glyph(self) -> Option<&'static str> {
+        use AgentType::*;
+        match self {
+            ClaudeCode => Some("✻"),
+            Codex => Some("⟡"),
+            OpenCode => Some("◇"),
+            Gemini => Some("✦"),
+            Pi => Some("π"),
+            Unknown => None,
+            other if other.is_ai_agent() => Some("◆"),
+            _ => Some("❯"),
+        }
+    }
+
     pub fn is_shell_task(self) -> bool {
         !self.is_ai_agent() && self != AgentType::Unknown
     }
@@ -486,6 +546,17 @@ mod tests {
         assert_eq!(AgentType::detect_from_command(""), AgentType::Unknown);
         assert_eq!(AgentType::from_hook_source("claude-code"), AgentType::ClaudeCode);
         assert_eq!(AgentType::from_hook_source("opencode"), AgentType::OpenCode);
+    }
+
+    #[test]
+    fn every_ai_agent_has_install_url_and_launch_bin() {
+        for agent in AgentType::ai_agents() {
+            assert!(agent.launch_bin().is_some(), "{agent:?}");
+            let url = agent.install_url().expect("install_url");
+            assert!(url.starts_with("https://"), "{agent:?}: {url}");
+        }
+        assert!(AgentType::Brew.install_url().is_none());
+        assert!(AgentType::Unknown.launch_bin().is_none());
     }
 
     #[test]

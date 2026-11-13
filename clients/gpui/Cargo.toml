@@ -17,6 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 gpui = "0.2.2"
 keep-vt = { path = "../../seahelmd/crates/keep-vt" }
+seahelm-core-types = { path = "../../seahelmd/crates/core-types" }
 seahelmd = { path = "../../seahelmd/crates/seahelmd" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
