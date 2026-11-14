@@ -160,6 +160,7 @@
 		62E1DFF3457248FF5F30594F /* DiffReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27293C9549D95350D5CA8E80 /* DiffReviewView.swift */; };
 		62FF9B7688CD065BE7DEBF35 /* TodoStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC2859D1D589D68F33F0552 /* TodoStoreTests.swift */; };
 		646692CC7C11231CC40284EC /* Array+SafeIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27117C2D2A6DF78BFACD7E05 /* Array+SafeIndex.swift */; };
+		656688DDE12F8ADA4B5D6B06 /* CompactMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20F1D0C7F3AD7371C0CDF07 /* CompactMode.swift */; };
 		65BBAC7799C70383810BFEE3 /* TabSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC183C3A20588D380EF62682 /* TabSelectionTests.swift */; };
 		66F21BB6936AC45D96193515 /* PaneSharing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0782B385EA6187E987762963 /* PaneSharing.swift */; };
 		67534BADE19F84A44C2CE74E /* UsageReadoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574B7FE2D9B877BB71343689 /* UsageReadoutTests.swift */; };
@@ -250,6 +251,7 @@
 		93EFC966AC0956AF645C3B0E /* DialogPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54362D573E93E8E8D59A1517 /* DialogPage.swift */; };
 		941E3795FB078FC9CED82586 /* DoubleTapDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AED437248085E95F18B204F /* DoubleTapDetector.swift */; };
 		964D05E6C8C5D093CB6633E2 /* ThemedBackgroundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A25DADE8C435CBAA6E78BAB /* ThemedBackgroundView.swift */; };
+		96CB074C59C121D66543FEE2 /* CompactModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0281BEB5EEB47651CFAD588A /* CompactModeTests.swift */; };
 		96D02ABDBB3C8FCFC141C130 /* FileChangeWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4509A8F3AD1752AD8AA26FD3 /* FileChangeWatcher.swift */; };
 		96FB337140FCDE0A9E6EEF7C /* ScratchHome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3332644F4D0B1C5B2774B35C /* ScratchHome.swift */; };
 		974524513181FB73444C332C /* Fleet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CACB64102E52932A55C79B2F /* Fleet.swift */; };
@@ -454,6 +456,7 @@
 /* Begin PBXFileReference section */
 		00C7F59E202B984E1E81797E /* DashboardOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardOverviewView.swift; sourceTree = "<group>"; };
 		0105E0FAF9CFF482771DB785 /* WindowChromeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowChromeController.swift; sourceTree = "<group>"; };
+		0281BEB5EEB47651CFAD588A /* CompactModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactModeTests.swift; sourceTree = "<group>"; };
 		03C5A891709AE9B5E02D084E /* SeahelmSuggestInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSuggestInstallerTests.swift; sourceTree = "<group>"; };
 		03EF8621D5464BAE7F393215 /* WrappedPathAtClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedPathAtClickTests.swift; sourceTree = "<group>"; };
 		04AB034D22AB8AD81A9FA9DD /* IslandShapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandShapes.swift; sourceTree = "<group>"; };
@@ -738,6 +741,7 @@
 		B18B71C7A49633D6D41985CC /* WorktreeFileIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeFileIndex.swift; sourceTree = "<group>"; };
 		B1F8F0872016D6CEB27B9039 /* SessionLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLabel.swift; sourceTree = "<group>"; };
 		B208C9B21DDBB1295501B307 /* ProgramStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStatusTests.swift; sourceTree = "<group>"; };
+		B20F1D0C7F3AD7371C0CDF07 /* CompactMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactMode.swift; sourceTree = "<group>"; };
 		B23013F94D18B13BF7E17DCA /* SeahelmHookInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmHookInstaller.swift; sourceTree = "<group>"; };
 		B279C16584685A92BC4AB782 /* SplitContainerDropTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitContainerDropTests.swift; sourceTree = "<group>"; };
 		B3A006C6498F7AD6AC5AA0E6 /* WorktreeLabelStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeLabelStore.swift; sourceTree = "<group>"; };
@@ -1282,6 +1286,7 @@
 				DEFC2B75DCC01AF5F766AF1B /* ClaudeHooksSetupTests.swift */,
 				72216A51E95B79080610E0C6 /* ClaudeStatuslineBridgeInstallerTests.swift */,
 				20D815BD3789070197196037 /* CodexHooksSetupTests.swift */,
+				0281BEB5EEB47651CFAD588A /* CompactModeTests.swift */,
 				B6FB4D2DD742AEB0FE3B944B /* ConfigTests.swift */,
 				E3DDE0729431F92F8C7852E0 /* ControlMessageSnapshotTests.swift */,
 				4AC1BAD4A2F2FD577B157E07 /* ControlRouterTests.swift */,
@@ -1552,6 +1557,7 @@
 				34B653BECE0F1476C0850355 /* ChromeIconClusterView.swift */,
 				F11134E3FD389088A2D35EEE /* ChromeLayoutMetrics.swift */,
 				3C63D5B14013E417D6AC3E33 /* ChromeLayoutState.swift */,
+				B20F1D0C7F3AD7371C0CDF07 /* CompactMode.swift */,
 				E87485817A45D71BCA83E094 /* SharePopoverController.swift */,
 				FEC6CEDF0BAE28FF326D89F9 /* SidebarHeaderView.swift */,
 				D4654BF3F481B948A5543307 /* TerminalHeaderView.swift */,
@@ -1829,6 +1835,7 @@
 				862DDEDAF094D4C2523B632F /* ClaudeHooksSetupTests.swift in Sources */,
 				6A163C3D07926CCCE88526ED /* ClaudeStatuslineBridgeInstallerTests.swift in Sources */,
 				2F081A963842FF92DB2D1568 /* CodexHooksSetupTests.swift in Sources */,
+				96CB074C59C121D66543FEE2 /* CompactModeTests.swift in Sources */,
 				E3B3F5D302481F3DF776ED95 /* ConfigTests.swift in Sources */,
 				34AE46DA40319613EF29433D /* ControlMessageSnapshotTests.swift in Sources */,
 				C66B5A4B5074F80C20AEA90E /* ControlRouterTests.swift in Sources */,
@@ -2032,6 +2039,7 @@
 				2F5B5EC7F0428265CC344717 /* CodexHooksSetup.swift in Sources */,
 				88B92AB262C827A4DB7D008F /* CommandReply.swift in Sources */,
 				7D04C2A61105F5AD7BD48E3F /* CommandSpec.swift in Sources */,
+				656688DDE12F8ADA4B5D6B06 /* CompactMode.swift in Sources */,
 				D9E27613FC5F0C4932A8237F /* Config.swift in Sources */,
 				5565D8E023C238A5639D04C4 /* ControlProtocol.swift in Sources */,
 				9B514345DDCEC1506E944A51 /* ControlSocketServer.swift in Sources */,

@@ -60,10 +60,12 @@ final class TerminalHeaderView: NSView {
     /// all the frames still looked correct. Owning them removes that failure mode.
     let editTerminalStrip = EditTabStripView()
     let editPreviewStrip = EditTabStripView()
-    private var editStripsActive = false
+    private var stripMode: HeaderStripMode = .none
     private var stripConstraints: [NSLayoutConstraint] = []
     /// The two constants that track the column divider (terminal trailing, preview leading).
     private var stripSeamConstraints: [NSLayoutConstraint] = []
+    /// Compact terminal-only: strip fills through to the trailing buttons.
+    private var terminalStripFullTrailing: NSLayoutConstraint?
     private var stripRatio: CGFloat = 0.5
     private var stripLeadingCollapsed: NSLayoutConstraint?
     private var stripLeadingExpanded: NSLayoutConstraint?
@@ -311,6 +313,9 @@ final class TerminalHeaderView: NSView {
         let terminalTrailing = editTerminalStrip.trailingAnchor.constraint(equalTo: leadingAnchor)
         let previewLeading = editPreviewStrip.leadingAnchor.constraint(equalTo: leadingAnchor)
         stripSeamConstraints = [terminalTrailing, previewLeading]
+        terminalStripFullTrailing = editTerminalStrip.trailingAnchor.constraint(
+            equalTo: editModeButton.leadingAnchor, constant: -8)
+        terminalStripFullTrailing?.isActive = false
 
         stripLeadingCollapsed = editTerminalStrip.leadingAnchor.constraint(
             equalTo: collapsedLeadingStack.trailingAnchor, constant: 10)
@@ -610,34 +615,54 @@ final class TerminalHeaderView: NSView {
         applyTitleText()
     }
 
-    // MARK: - Hoisted edit-mode tab strips
+    // MARK: - Hoisted tab strips (edit mode + compact)
 
-    /// Adopt edit mode's two column tab strips onto this row, so the columns don't
-    /// need a second strip row below an otherwise near-empty header.
-    ///
-    /// The header and the edit container both fill the terminal column, so they
-    /// share a width — the seam is computed with the same formula rather than
-    /// converting coordinates. The left strip still starts after the traffic
-    /// lights and icons (that space is not ours to take), but the seam between
-    /// the two strips lands exactly on the column divider.
+    /// Edit-mode compatibility: both strips when active, none when not.
     func setEditStripsActive(_ active: Bool, ratio: CGFloat) {
-        stripRatio = ratio
-        guard active != editStripsActive else { applyStripSeam(); return }
-        editStripsActive = active
-        editTerminalStrip.isHidden = !active
-        editPreviewStrip.isHidden = !active
-        if active { applyStripSeam() }
+        setHoistedStrips(active ? .edit(ratio: ratio) : .none)
+    }
+
+    /// Compact uses `.terminalOnly`; edit mode uses `.edit(ratio:)`.
+    func setHoistedStrips(_ mode: HeaderStripMode) {
+        let previous = stripMode
+        if case .edit(let ratio) = mode { stripRatio = ratio }
+        guard mode != previous else {
+            if case .edit = mode { applyStripSeam() }
+            return
+        }
+        stripMode = mode
+        switch mode {
+        case .none:
+            editTerminalStrip.isHidden = true
+            editPreviewStrip.isHidden = true
+            terminalStripFullTrailing?.isActive = false
+            stripSeamConstraints.forEach { $0.isActive = true }
+        case .terminalOnly:
+            editTerminalStrip.isHidden = false
+            editPreviewStrip.isHidden = true
+            stripSeamConstraints.forEach { $0.isActive = false }
+            terminalStripFullTrailing?.isActive = true
+        case .edit:
+            editTerminalStrip.isHidden = false
+            editPreviewStrip.isHidden = false
+            terminalStripFullTrailing?.isActive = false
+            stripSeamConstraints.forEach { $0.isActive = true }
+            applyStripSeam()
+        }
         applyTitleText()
     }
 
     /// Follow the column divider while it is dragged.
     func setEditStripRatio(_ ratio: CGFloat) {
-        guard editStripsActive else { return }
+        guard case .edit = stripMode else { return }
         stripRatio = ratio
         applyStripSeam()
     }
 
-    private var hasHoistedStrips: Bool { editStripsActive }
+    private var hasHoistedStrips: Bool {
+        if case .none = stripMode { return false }
+        return true
+    }
 
     /// Minimum width a hoisted strip keeps before the seam stops tracking the
     /// divider — enough for a truncated tab, never a negative width.

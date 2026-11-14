@@ -234,8 +234,38 @@ class DashboardViewController: NSViewController {
     /// chrome instead of two). The dashboard drives their contents and selection
     /// but does not own the views.
     var editStripsProvider: (() -> (terminal: EditTabStripView, preview: EditTabStripView)?)?
-    var onEditModeStripsActive: ((_ active: Bool, _ ratio: CGFloat) -> Void)?
+    /// Compact / edit: which header strip mode to show.
+    var onHoistedStripsChange: ((HeaderStripMode) -> Void)?
     var onEditStripRatioChange: ((CGFloat) -> Void)?
+
+    /// Narrow-window compact presentation (fleet collapsed + optional pane tabs).
+    private(set) var isCompactActive = false
+
+    /// Apply compact from the window width observer. Presentation-only.
+    func setCompactActive(_ active: Bool) {
+        guard isCompactActive != active else { return }
+        isCompactActive = active
+        refreshCompactPresentationIfNeeded()
+    }
+
+    /// Re-apply zoom / pane tab strip after split, close, or focus changes.
+    func refreshCompactPresentationIfNeeded() {
+        if let split = activeSplitContainer {
+            finalizeEditLayout(focusTerminal: false, tree: split.tree)
+        } else {
+            syncHoistedStrips()
+        }
+    }
+
+    /// True when the terminal column is presenting panes as tabs (edit or compact).
+    var wantsPaneTabFocus: Bool {
+        let leafCount = activeSplitContainer?.tree?.allLeaves.count ?? 0
+        return CompactMode.shouldShowPaneTabs(
+            compactActive: isCompactActive,
+            leafCount: leafCount,
+            editMode: isEditModeActive
+        )
+    }
 
     /// True once the chrome's strips have had their callbacks wired to this VC.
     private var editStripCallbacksWired = false
@@ -968,30 +998,55 @@ class DashboardViewController: NSViewController {
     }
 
     /// Shared tail for `embedSplitContainerForSelectedPane`: applies zoom + tab
-    /// strips in edit mode (or restores the spatial split in focus mode), then
-    /// takes keyboard focus when asked. Never re-enters embed (no recursion).
+    /// strips in edit/compact (or restores the spatial split), then takes keyboard
+    /// focus when asked. Never re-enters embed (no recursion).
     private func finalizeEditLayout(focusTerminal: Bool, tree: SplitTree? = nil) {
         let editMode = editLayoutContainer?.superview != nil
-        if editMode {
+        let leafCount = (tree ?? activeSplitContainer?.tree)?.allLeaves.count ?? 0
+        let paneTabs = CompactMode.shouldShowPaneTabs(
+            compactActive: isCompactActive,
+            leafCount: leafCount,
+            editMode: editMode
+        )
+        if paneTabs {
             applyZoomToFocusedLeaf()
-            refreshEditModeTabs()
-            updatePreviewContent()
+            refreshPaneTabs()
+            if editMode { updatePreviewContent() }
         } else if let container = activeSplitContainer, container.zoomedLeafId != nil {
-            // Leaving edit mode: drop the zoom so the spatial split is restored.
+            // Leaving tab presentation: drop the zoom so the spatial split returns.
             container.zoomedLeafId = nil
             container.layoutTree()
         }
+        syncHoistedStrips()
         notifyEditModeState()
 
         // Focus the active leaf — defer to let the view hierarchy settle.
         // Skipped during nav preview so the dashboard VC keeps first responder.
         guard focusTerminal else { return }
 
-        if editMode {
+        if paneTabs {
             focusZoomedLeaf()
         } else {
             focusActiveTerminalLeaf(tree: tree)
         }
+    }
+
+    private func syncHoistedStrips() {
+        let editMode = editLayoutContainer?.superview != nil
+        let leafCount = activeSplitContainer?.tree?.allLeaves.count ?? 0
+        let mode: HeaderStripMode
+        if editMode {
+            mode = .edit(ratio: editLayoutContainer?.currentRatio ?? 0.5)
+        } else if CompactMode.shouldShowPaneTabs(
+            compactActive: isCompactActive,
+            leafCount: leafCount,
+            editMode: false
+        ) {
+            mode = .terminalOnly
+        } else {
+            mode = .none
+        }
+        onHoistedStripsChange?(mode)
     }
 
     /// Make the active split leaf's Ghostty view first responder (immediate +
@@ -1474,9 +1529,7 @@ extension DashboardViewController {
                 edit.autoresizingMask = [.width, .height]
                 container.addSubview(edit)
             }
-            onEditModeStripsActive?(true, edit.currentRatio)
         } else if let edit = editLayoutContainer {
-            onEditModeStripsActive?(false, edit.currentRatio)
             edit.removeFromSuperview()
             editLayoutContainer = nil
         }
@@ -1517,7 +1570,7 @@ extension DashboardViewController {
               tree.allLeaves.contains(where: { $0.id == leafId }) else { return }
         tree.focusedId = leafId
         split.setZoom(leafId: leafId, on: true)
-        refreshEditModeTabs()
+        refreshPaneTabs()
         focusZoomedLeaf()
     }
 
@@ -1550,7 +1603,7 @@ extension DashboardViewController {
         guard let wt = currentWorktreePath else { return }
         previewSets.setActive(path, for: wt)
         updatePreviewContent()
-        refreshEditModeTabs()
+        refreshPaneTabs()
     }
 
     func editModeCyclePreviewTab(forward: Bool) {
@@ -1579,7 +1632,7 @@ extension DashboardViewController {
             embedSplitContainerForSelectedPane(focusTerminal: true)
         } else {
             updatePreviewContent()
-            refreshEditModeTabs()
+            refreshPaneTabs()
         }
         notifyEditModeState()
     }
@@ -1699,8 +1752,8 @@ extension DashboardViewController {
 
     // MARK: Tab strip refresh
 
-    private func refreshEditModeTabs() {
-        guard editLayoutContainer != nil, let wt = currentWorktreePath else { return }
+    private func refreshPaneTabs() {
+        guard wantsPaneTabFocus, let wt = currentWorktreePath else { return }
 
         let tree = activeSplitContainer?.tree
         let leaves = tree?.allLeaves ?? []
@@ -1714,6 +1767,7 @@ extension DashboardViewController {
         }
         chromeEditStrips()?.terminal.apply(items: termItems, selectedId: selectedLeaf)
 
+        guard isEditModeActive else { return }
         let files = previewSets.files(for: wt)
         let previewItems = files.map { path in
             EditTabStripView.Item(
@@ -1733,11 +1787,10 @@ extension DashboardViewController {
         return leaf.paneSessionKey
     }
 
-    /// Called by the status/title refresh path so edit-mode terminal tabs track
-    /// pane titles without churning the view tree (the strip diffs internally).
+    /// Status/title refresh path: keep pane tab labels current without rebuilding views.
     func refreshEditModeTabsIfActive() {
-        guard isEditModeActive else { return }
-        refreshEditModeTabs()
+        guard wantsPaneTabFocus else { return }
+        refreshPaneTabs()
     }
 }
 

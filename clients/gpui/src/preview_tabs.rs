@@ -233,7 +233,7 @@ impl Workspace {
     }
 }
 
-fn tab_chip(id: impl Into<SharedString>, title: &str, active: bool, close: Option<gpui::Stateful<gpui::Div>>) -> gpui::Stateful<gpui::Div> {
+pub(super) fn tab_chip(id: impl Into<SharedString>, title: &str, active: bool, close: Option<gpui::Stateful<gpui::Div>>) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id.into())
         .h(px(26.))
