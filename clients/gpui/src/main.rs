@@ -13,6 +13,7 @@
 
 mod agents;
 mod assets;
+mod compact;
 mod core_client;
 mod fleet;
 mod fonts;

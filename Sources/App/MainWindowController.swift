@@ -70,6 +70,12 @@ class MainWindowController: NSWindowController {
         collapsed: false,
         activePane: .firstMate
     )
+    /// User's preferred sidebar collapse (`config.sidebar_collapsed`). Compact may
+    /// force the chrome collapsed without writing this.
+    private var userSidebarCollapsed = false
+    /// Narrow-window compact presentation (not persisted).
+    private var compactActive = false
+    private var compactEvaluateWorkItem: DispatchWorkItem?
 
     private var dashboardVC: DashboardViewController?
     /// First Mate's view while it is the center overlay; nil otherwise.
@@ -487,6 +493,7 @@ class MainWindowController: NSWindowController {
     /// ⌘B — chrome collapse is the only layout collapse signal.
     @objc func toggleChromeCollapsed() {
         chromeState.toggleCollapsed()
+        userSidebarCollapsed = chromeState.isCollapsed
         applyChromeState(animated: true)
     }
 
@@ -498,10 +505,10 @@ class MainWindowController: NSWindowController {
 
     func setChromeCollapsed(_ collapsed: Bool) {
         guard chromeState.isCollapsed != collapsed else {
-            // Still refresh dashboard content / keyboard when already in sync.
             dashboardVC?.adoptChromeCollapse(collapsed, activePane: chromeState.activePane)
             return
         }
+        userSidebarCollapsed = collapsed
         chromeState.setCollapsed(collapsed)
         applyChromeState(animated: true)
     }
@@ -509,6 +516,7 @@ class MainWindowController: NSWindowController {
     /// Header / keymap pane icons — uses `selectPane` (re-click collapses).
     func selectChromePane(_ pane: ChromeLeftPane) {
         chromeState.selectPane(pane)
+        userSidebarCollapsed = chromeState.isCollapsed
         applyChromeState(animated: true)
     }
 
@@ -527,15 +535,31 @@ class MainWindowController: NSWindowController {
         }
     }
 
+    /// Apply chrome visuals without treating collapse as a new user preference write
+    /// beyond whatever `userSidebarCollapsed` already holds.
+    private func applyChromeVisual(animated: Bool) {
+        windowChrome?.applyState(chromeState, animated: animated)
+        positionStandardWindowButtons()
+        dashboardVC?.adoptChromeCollapse(chromeState.isCollapsed,
+                                         activePane: chromeState.activePane,
+                                         animated: animated)
+        refreshChromeWorktreeContextEnabled()
+        refreshRegionAvailability()
+        if regionFocus.current == .titlebar {
+            applyRegionFocus()
+        }
+    }
+
     /// Write sidebar width / collapse / active pane into config.
+    /// Collapse persistence is the user preference, not compact's forced state.
     private func persistChromeLayout() {
         var changed = false
         if abs(chromeState.width - config.sidebarWidth) > 0.5 {
             config.sidebarWidth = chromeState.width
             changed = true
         }
-        if config.sidebarCollapsed != chromeState.isCollapsed {
-            config.sidebarCollapsed = chromeState.isCollapsed
+        if config.sidebarCollapsed != userSidebarCollapsed {
+            config.sidebarCollapsed = userSidebarCollapsed
             changed = true
         }
         if let pane = chromeState.activePane, config.sidebarActivePane != pane.rawValue {
@@ -544,6 +568,43 @@ class MainWindowController: NSWindowController {
         }
         guard changed else { return }
         saveConfig()
+    }
+
+    // MARK: - Compact mode (narrow window)
+
+    private func scheduleCompactEvaluation() {
+        compactEvaluateWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.evaluateCompactMode()
+        }
+        compactEvaluateWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+    }
+
+    private func evaluateCompactMode() {
+        let width = window?.contentView?.bounds.width
+            ?? window?.frame.width
+            ?? 0
+        guard width > 0 else { return }
+        let next = CompactMode.shouldBeActive(width: width, currentlyActive: compactActive)
+        guard next != compactActive else { return }
+        let entered = next && !compactActive
+        let exited = !next && compactActive
+        compactActive = next
+        dashboardVC?.setCompactActive(next)
+        if entered {
+            // Force collapse without writing the user preference.
+            if !chromeState.isCollapsed {
+                chromeState.setCollapsed(true)
+                applyChromeVisual(animated: true)
+            }
+        } else if exited {
+            // Restore the user's preferred collapse.
+            if chromeState.isCollapsed != userSidebarCollapsed {
+                chromeState.setCollapsed(userSidebarCollapsed)
+                applyChromeVisual(animated: true)
+            }
+        }
     }
 
     private func refreshChromeWorktreeContextEnabled() {
@@ -757,11 +818,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
         dashboard.onEditModeStateChange = { [weak self] available, isOn in
             self?.windowChrome?.setEditMode(available: available, isOn: isOn)
         }
-        // Edit mode's column tab strips live on the chrome header row: the two
-        // columns then cost one row of chrome instead of two.
+        // Edit / compact pane tab strips live on the chrome header row.
         dashboard.editStripsProvider = { [weak self] in self?.windowChrome?.editStrips }
-        dashboard.onEditModeStripsActive = { [weak self] active, ratio in
-            self?.windowChrome?.setEditStripsActive(active, ratio: ratio)
+        dashboard.onHoistedStripsChange = { [weak self] mode in
+            self?.windowChrome?.setHoistedStrips(mode)
         }
         dashboard.onEditStripRatioChange = { [weak self] ratio in
             self?.windowChrome?.setEditStripRatio(ratio)
@@ -1127,6 +1187,7 @@ dashboard.stationManager = terminalCoordinator.stationManager
                 chrome.view.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
             ])
 
+            userSidebarCollapsed = config.sidebarCollapsed
             chromeState = ChromeLayoutState(
                 width: config.sidebarWidth,
                 collapsed: config.sidebarCollapsed,
@@ -1162,18 +1223,18 @@ dashboard.stationManager = terminalCoordinator.stationManager
         positionStandardWindowButtons()
         refreshChromeWorktreeContextEnabled()
         refreshRegionAvailability()
+        evaluateCompactMode()
     }
 
     private func handleChromeStateChange(_ state: ChromeLayoutState) {
         let collapseChanged = state.isCollapsed != chromeState.isCollapsed
         let paneChanged = state.activePane != chromeState.activePane
         chromeState = state
+        // Width drag only — collapse preference is owned by explicit toggles.
         persistChromeLayout()
         positionStandardWindowButtons()
         if collapseChanged || paneChanged {
             dashboardVC?.adoptChromeCollapse(state.isCollapsed, activePane: state.activePane)
-            if collapseChanged {
-                }
         }
     }
 
@@ -1461,20 +1522,22 @@ dashboard.stationManager = terminalCoordinator.stationManager
 
     func splitFocusedPane(axis: SplitAxis) {
         terminalCoordinator.splitFocusedPane(axis: axis)
+        dashboardVC?.refreshCompactPresentationIfNeeded()
     }
 
     func closeFocusedPane() {
         terminalCoordinator.closeFocusedPane()
+        dashboardVC?.refreshCompactPresentationIfNeeded()
     }
 
     func moveFocus(_ axis: SplitAxis, positive: Bool) {
         // In edit mode the terminal split is presented as tabs, so spatial focus
         // movement becomes tab cycling: horizontal walks the terminal tabs, and
         // vertical walks the preview tabs on the right.
-        if let dashboard = tabCoordinator.dashboardVC, dashboard.isEditModeActive {
+        if let dashboard = tabCoordinator.dashboardVC, dashboard.wantsPaneTabFocus {
             if axis == .horizontal {
                 dashboard.editModeCycleTerminalTab(forward: positive)
-            } else {
+            } else if dashboard.isEditModeActive {
                 dashboard.editModeCyclePreviewTab(forward: positive)
             }
             return
@@ -1521,6 +1584,7 @@ extension MainWindowController: NSPopoverDelegate {
 extension MainWindowController: NSWindowDelegate {
     func windowDidResize(_ notification: Notification) {
         positionStandardWindowButtons()
+        scheduleCompactEvaluation()
         // A live drag ends in windowDidEndLiveResize; anything else (full
         // screen, the zoom button, a programmatic frame) has no end of its own.
         if window?.inLiveResize == false { scheduleSurfaceSyncAfterResize() }
@@ -1547,6 +1611,8 @@ extension MainWindowController: NSWindowDelegate {
             station.syncSize()
         }
         positionStandardWindowButtons()
+        compactEvaluateWorkItem?.cancel()
+        evaluateCompactMode()
     }
 
     func windowDidChangeScreen(_ notification: Notification) {
@@ -1591,7 +1657,7 @@ extension MainWindowController: NSWindowDelegate {
         dashboardVC?.flushPendingPreviewForPersistence()
         tabCoordinator.saveSelectedWorktree()
         config.selectedWorktreePath = tabCoordinator.config.selectedWorktreePath
-        config.sidebarCollapsed = chromeState.isCollapsed
+        config.sidebarCollapsed = userSidebarCollapsed
         config.sidebarWidth = chromeState.width
         if let pane = chromeState.activePane {
             config.sidebarActivePane = pane.rawValue
@@ -1796,6 +1862,9 @@ extension MainWindowController: SplitContainerDelegate {
         // Paint from cached state immediately, then force a poll so a pane whose
         // title changed since the last cycle refreshes on click rather than in ~2s.
         updateChromeTitle()
+        if dashboardVC?.wantsPaneTabFocus == true {
+            dashboardVC?.refreshCompactPresentationIfNeeded()
+        }
     }
 
     func splitContainer(_ view: SplitContainerView, didRequestSplit axis: SplitAxis) {
@@ -1807,6 +1876,7 @@ extension MainWindowController: SplitContainerDelegate {
         // routing through the active container's focused leaf can hit a
         // different worktree's pane or nothing at all.
         terminalCoordinator.closePane(leafId: leafId, in: view)
+        dashboardVC?.refreshCompactPresentationIfNeeded()
     }
 
     func splitContainer(_ view: SplitContainerView, didRequestSleepPane leafId: String) {
@@ -1848,6 +1918,7 @@ extension MainWindowController: SplitContainerDelegate {
     func splitContainerDidChangeLayout(_ view: SplitContainerView) {
         guard let tree = view.tree else { return }
         terminalCoordinator.saveSplitLayout(tree)
+        dashboardVC?.refreshCompactPresentationIfNeeded()
     }
 }
 

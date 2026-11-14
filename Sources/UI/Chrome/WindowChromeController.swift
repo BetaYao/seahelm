@@ -189,6 +189,10 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setEditStripsActive(active, ratio: ratio)
     }
 
+    func setHoistedStrips(_ mode: HeaderStripMode) {
+        terminalHeader.setHoistedStrips(mode)
+    }
+
     func setEditStripRatio(_ ratio: CGFloat) {
         terminalHeader.setEditStripRatio(ratio)
     }

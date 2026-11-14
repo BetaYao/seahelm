@@ -162,7 +162,12 @@ pub struct Workspace {
     /// (`client.activity`, at most once a minute; only that, never what).
     activity_reported: Option<Instant>,
     sidebar_width: f32,
+    /// Live sidebar visibility (may be forced off by compact).
     sidebar_visible: bool,
+    /// User preference for the sidebar; compact enter/exit does not overwrite this.
+    user_sidebar_visible: bool,
+    /// Narrow-window compact presentation (not persisted).
+    compact_active: bool,
     dragging_divider: bool,
     divider_hover: bool,
     focus: FocusHandle,
@@ -253,6 +258,8 @@ impl Workspace {
             activity_reported: None,
             sidebar_width: SIDEBAR_DEFAULT,
             sidebar_visible: true,
+            user_sidebar_visible: true,
+            compact_active: false,
             dragging_divider: false,
             divider_hover: false,
             focus: cx.focus_handle(),
@@ -1274,6 +1281,11 @@ impl Workspace {
 
     fn focus_pane(&mut self, dir: Direction, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else { return };
+        if self.wants_compact_pane_tabs(&id) {
+            let forward = matches!(dir, Direction::Right | Direction::Down);
+            self.cycle_pane_tab(forward, window, cx);
+            return;
+        }
         let Some(next) = self.panes.get(&id).and_then(|p| p.tree.neighbour(dir)) else { return };
         if let Some(p) = self.panes.get_mut(&id) {
             p.tree.focused = next;
@@ -1299,7 +1311,7 @@ impl Workspace {
     fn panes_body(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let (_, _, w, h) = self.body_bounds(window);
         let tree = self.panes.entry(id.to_string()).or_default().tree.clone();
-        let zoomed = self.zoomed_leaf(id);
+        let zoomed = self.display_zoomed_leaf(id);
         let several = tree.len() > 1 && zoomed.is_none();
         let mut body = div().relative().flex_1().min_h_0().bg(theme::rgb(theme::bg()));
         let frames: Vec<(LeafId, Rect)> = match zoomed {
@@ -1580,7 +1592,131 @@ impl Workspace {
 
     fn toggle_sidebar(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.sidebar_visible = !self.sidebar_visible;
+        self.user_sidebar_visible = self.sidebar_visible;
         cx.notify();
+    }
+
+    /// Apply compact from the window width (edge-triggered sidebar, like AppKit).
+    /// Called at the start of `render` so the same frame uses the new mode.
+    fn evaluate_compact(&mut self, window: &Window) {
+        let width = f32::from(window.viewport_size().width);
+        if width <= 0.0 {
+            return;
+        }
+        let next = crate::compact::should_be_active(width, self.compact_active);
+        if next == self.compact_active {
+            return;
+        }
+        let entered = next && !self.compact_active;
+        let exited = !next && self.compact_active;
+        self.compact_active = next;
+        if entered && self.sidebar_visible {
+            self.sidebar_visible = false;
+        } else if exited {
+            self.sidebar_visible = self.user_sidebar_visible;
+        }
+    }
+
+    /// Compact pane tabs for this worktree (not while a preview file tab is up).
+    fn wants_compact_pane_tabs(&self, id: &str) -> bool {
+        if self.preview_active(id) {
+            return false;
+        }
+        let leaf_count = self.panes.get(id).map(|p| p.tree.len()).unwrap_or(0);
+        crate::compact::should_show_pane_tabs(self.compact_active, leaf_count)
+    }
+
+    /// Zoom used for layout: compact forces the focused leaf; otherwise manual zoom.
+    fn display_zoomed_leaf(&self, id: &str) -> Option<LeafId> {
+        if self.wants_compact_pane_tabs(id) {
+            return self.panes.get(id).map(|p| p.tree.focused);
+        }
+        self.zoomed_leaf(id)
+    }
+
+    fn select_pane_tab(&mut self, id: &str, leaf: LeafId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(p) = self.panes.get_mut(id) {
+            if !p.tree.leaves().contains(&leaf) {
+                return;
+            }
+            p.tree.focused = leaf;
+        }
+        self.save_layouts();
+        if let Some(v) = self.view_for(id, leaf, window, cx) {
+            window.focus(&v.focus_handle(cx));
+        }
+        cx.notify();
+    }
+
+    fn cycle_pane_tab(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.clone() else { return };
+        let Some(panes) = self.panes.get(&id) else { return };
+        let leaves = panes.tree.leaves();
+        if leaves.len() < 2 {
+            return;
+        }
+        let idx = leaves.iter().position(|l| *l == panes.tree.focused).unwrap_or(0);
+        let next = if forward {
+            leaves[(idx + 1) % leaves.len()]
+        } else {
+            leaves[(idx + leaves.len() - 1) % leaves.len()]
+        };
+        self.select_pane_tab(&id, next, window, cx);
+    }
+
+    /// Pane tab strip under the header while compact (2+ leaves, terminals visible).
+    fn compact_pane_strip(&self, id: &str, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if !self.wants_compact_pane_tabs(id) {
+            return None;
+        }
+        let panes = self.panes.get(id)?;
+        let leaves = panes.tree.leaves();
+        let focused = panes.tree.focused;
+        let mut strip = div()
+            .id("compact-pane-strip")
+            .flex_none()
+            .h(px(30.))
+            .px(px(8.))
+            .flex()
+            .flex_row()
+            .items_end()
+            .gap(px(2.))
+            .overflow_x_scroll()
+            .border_b_1()
+            .border_color(tokens::hairline())
+            .bg(tokens::sidebar_tint())
+            .font_family(SYSTEM)
+            .text_size(px(12.));
+        for leaf in leaves {
+            let title = self.pane_tab_title(id, leaf);
+            let row = id.to_string();
+            strip = strip.child(
+                preview_tabs::tab_chip(
+                    SharedString::from(format!("pane-tab-{id}-{leaf}")),
+                    &title,
+                    leaf == focused,
+                    None,
+                )
+                .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
+                    w.select_pane_tab(&row, leaf, window, cx)
+                })),
+            );
+        }
+        Some(strip.into_any_element())
+    }
+
+    fn pane_tab_title(&self, id: &str, leaf: LeafId) -> String {
+        let session = pane_session(id, leaf);
+        let facts = self.pane_facts.get(&session);
+        match facts {
+            Some(f) => match (f.handle, f.custom_title.as_deref().or(f.display_title.as_deref())) {
+                (Some(n), Some(t)) if !t.is_empty() => format!("#{n} · {t}"),
+                (Some(n), _) => format!("#{n}"),
+                (_, Some(t)) if !t.is_empty() => t.to_string(),
+                _ => format!("Pane {leaf}"),
+            },
+            None => format!("Pane {leaf}"),
+        }
     }
 }
 
@@ -1621,6 +1757,7 @@ impl Focusable for Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.evaluate_compact(window);
         let selected = self.selected.clone().filter(|id| self.fleet.find(id).is_some());
         let body = if self.settings_open {
             Some(self.settings_body(cx))
@@ -1632,9 +1769,20 @@ impl Render for Workspace {
                     Some(p) => p,
                     None => self.panes_body(id, window, cx),
                 };
-                match self.preview_strip(id, cx) {
-                    Some(strip) => div().flex_1().min_h_0().flex().flex_col().child(strip).child(content).into_any_element(),
-                    None => content,
+                let preview = self.preview_strip(id, cx);
+                let pane_tabs = self.compact_pane_strip(id, cx);
+                match (preview, pane_tabs) {
+                    (None, None) => content,
+                    (preview, pane_tabs) => {
+                        let mut col = div().flex_1().min_h_0().flex().flex_col();
+                        if let Some(s) = preview {
+                            col = col.child(s);
+                        }
+                        if let Some(s) = pane_tabs {
+                            col = col.child(s);
+                        }
+                        col.child(content).into_any_element()
+                    }
                 }
             })
         };
@@ -1691,6 +1839,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &PrevWorktree, window, cx| w.step_worktree(-1, window, cx)))
             .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
                 w.sidebar_visible = !w.sidebar_visible;
+                w.user_sidebar_visible = w.sidebar_visible;
                 cx.notify();
             }))
             .on_action(cx.listener(|w, _: &ToggleFirstMate, window, cx| w.toggle_first_mate(window, cx)))
@@ -2055,6 +2204,16 @@ impl Workspace {
                         icon_button("columns-2", tokens::alpha(fg, 0.55))
                             .id("split-right")
                             .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.split(Axis::Horizontal, window, cx))),
+                    ),
+                )
+            })
+            // Expand fleet when collapsed (compact or ⌘B), as the macOS terminal header does.
+            .when(!self.sidebar_visible, |d| {
+                d.child(
+                    div().mr(px(8.)).child(
+                        chrome_icon("panel-left", false)
+                            .id("expand-sidebar")
+                            .on_click(cx.listener(Self::toggle_sidebar)),
                     ),
                 )
             })
