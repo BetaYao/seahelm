@@ -112,7 +112,7 @@ Focus / keyboard: pane tab cycle can mirror edit mode’s next-terminal-tab if o
 | Concern | Hook |
 |---------|------|
 | Width observation | `Workspace` on window resize / `render` size |
-| Collapse | `sidebar_visible` — auto toggle must keep a separate `user_sidebar_visible` (or only flip visibility when entering/exiting without clobbering a stored preference; add persistence later if macOS already has it) |
+| Collapse | `sidebar_visible` is the live state, `user_sidebar_visible` the preference; compact enter/exit and every toggle while compact leave the preference alone. Expanded while compact, the sidebar is a drawer (`drawer_open`): it floats over the terminals at their full width behind a dim, and the dim, ⌘B, picking a worktree or opening a file close it |
 | Zoom | New presentation flag on the terminal column: when compact and >1 leaf, draw only the focused leaf’s frame as full body (do not rewrite `SplitTree`). Selecting another pane tab sets `tree.focused` and repaints |
 | Strip UI | New small tab strip above `panes_body` / in terminal header; not worktree-scoped fleet tabs |
 | Preview | Unchanged; `preview_tabs` wins over pane body |

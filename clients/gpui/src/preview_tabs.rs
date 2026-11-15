@@ -148,7 +148,7 @@ impl Workspace {
         let mut strip = div()
             .id("preview-strip")
             .flex_none()
-            .h(px(30.))
+            .h(px(super::STRIP_H))
             .px(px(8.))
             .flex()
             .flex_row()
