@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     KeyDownEvent,
-    actions, div, percentage, prelude::*, px, svg, App, ClickEvent, Context, Entity,
+    actions, div, percentage, prelude::*, px, relative, svg, App, ClickEvent, Context, Entity,
     FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathPromptOptions,
-    Rgba, SharedString, Subscription, Transformation, Window, WindowControlArea,
+    Pixels, Rgba, SharedString, Subscription, Transformation, Window, WindowControlArea,
 };
 
 use crate::agents::{self, AgentInfo};
@@ -41,6 +41,10 @@ use crate::tokens::{self, MONO, SYSTEM};
 const SIDEBAR_DEFAULT: f32 = 300.0;
 const SIDEBAR_MIN: f32 = 200.0;
 const HEADER_H: f32 = 40.0;
+/// Height of a tab strip above the panes (`preview_strip`, `compact_pane_strip`).
+const STRIP_H: f32 = 30.0;
+/// Compact drawer: sidebar width cap as a share of the window.
+const DRAWER_MAX_SHARE: f32 = 0.85;
 /// A split divider's grab strip, centred on its 1pt line.
 const DIVIDER_HIT: f32 = 16.0;
 
@@ -168,6 +172,8 @@ pub struct Workspace {
     user_sidebar_visible: bool,
     /// Narrow-window compact presentation (not persisted).
     compact_active: bool,
+    /// The panes' body as last laid out (window coordinates), for divider drags.
+    body_rect: std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<Pixels>>>>,
     dragging_divider: bool,
     divider_hover: bool,
     focus: FocusHandle,
@@ -242,7 +248,11 @@ impl Workspace {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let side_panel = cx.new(SidePanel::new);
         let side_closed = cx.subscribe(&side_panel, |w, _, _: &side_panel::CloseRequested, cx| w.set_side(None, cx));
-        cx.subscribe(&side_panel, |w, _, e: &side_panel::OpenRequested, cx| w.open_preview(e.0.clone(), cx)).detach();
+        cx.subscribe(&side_panel, |w, _, e: &side_panel::OpenRequested, cx| {
+            w.close_drawer();
+            w.open_preview(e.0.clone(), cx)
+        })
+        .detach();
         let this = Self {
             fleet: Snapshot::default(),
             git: HashMap::new(),
@@ -260,6 +270,7 @@ impl Workspace {
             sidebar_visible: true,
             user_sidebar_visible: true,
             compact_active: false,
+            body_rect: Default::default(),
             dragging_divider: false,
             divider_hover: false,
             focus: cx.focus_handle(),
@@ -1146,6 +1157,7 @@ impl Workspace {
         self.set_gateway_open(false, cx);
         self.settings_open = false;
         self.selected = Some(id.clone());
+        self.close_drawer();
         self.side_follow(cx);
         // On screen in a frontmost window: a turn that ends here is seen.
         self.report_visible(window.is_window_active(), cx);
@@ -1299,9 +1311,19 @@ impl Workspace {
 
     /// The terminal body's place in the window: right of the fleet column,
     /// under the header.
+    /// The panes' body in window coordinates: as last laid out (it sits under
+    /// the header and whatever strips are up), else estimated from the window.
     fn body_bounds(&self, window: &Window) -> (f32, f32, f32, f32) {
+        if let Some(b) = self.body_rect.get() {
+            return (
+                f32::from(b.origin.x),
+                f32::from(b.origin.y),
+                f32::from(b.size.width).max(1.0),
+                f32::from(b.size.height).max(1.0),
+            );
+        }
         let size = window.viewport_size();
-        let x = if self.sidebar_visible { self.sidebar_width } else { 0.0 };
+        let x = if self.sidebar_docked() { self.sidebar_width } else { 0.0 };
         (x, HEADER_H, (f32::from(size.width) - x).max(1.0), (f32::from(size.height) - HEADER_H).max(1.0))
     }
 
@@ -1309,11 +1331,23 @@ impl Workspace {
     /// their dividers and, when there are several, a wash over all but the
     /// focused one.
     fn panes_body(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let (_, _, w, h) = self.body_bounds(window);
         let tree = self.panes.entry(id.to_string()).or_default().tree.clone();
         let zoomed = self.display_zoomed_leaf(id);
         let several = tree.len() > 1 && zoomed.is_none();
-        let mut body = div().relative().flex_1().min_h_0().bg(theme::rgb(theme::bg()));
+        // Panes are placed as fractions of the body, not px from the window:
+        // the card, preview and pane-tab strips above it change its height,
+        // and px sizes made from the window ran the bottom rows off screen.
+        let measured = self.body_rect.clone();
+        let mut body = div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .bg(theme::rgb(theme::bg()))
+            .child(
+                gpui::canvas(move |bounds, _, _| measured.set(Some(bounds)), |_, _, _, _| ())
+                    .absolute()
+                    .size_full(),
+            );
         let frames: Vec<(LeafId, Rect)> = match zoomed {
             Some(leaf) => vec![(leaf, Rect { x: 0.0, y: 0.0, w: 1.0, h: 1.0 })],
             None => tree.frames(),
@@ -1324,10 +1358,10 @@ impl Workspace {
                 body = body.child(
                     div()
                         .absolute()
-                        .left(px(r.x * w))
-                        .top(px(r.y * h))
-                        .w(px(r.w * w))
-                        .h(px(r.h * h))
+                        .left(relative(r.x))
+                        .top(relative(r.y))
+                        .w(relative(r.w))
+                        .h(relative(r.h))
                         .flex()
                         .flex_col()
                         .items_center()
@@ -1359,10 +1393,10 @@ impl Workspace {
             let Some(view) = self.view_for(id, leaf, window, cx) else { continue };
             let mut pane = div()
                 .absolute()
-                .left(px(r.x * w))
-                .top(px(r.y * h))
-                .w(px(r.w * w))
-                .h(px(r.h * h))
+                .left(relative(r.x))
+                .top(relative(r.y))
+                .w(relative(r.w))
+                .h(relative(r.h))
                 .child(view);
             if several && leaf != tree.focused {
                 pane = pane.child(div().absolute().inset_0().bg(tokens::inactive_wash()));
@@ -1381,20 +1415,22 @@ impl Workspace {
             let strip = match d.axis {
                 Axis::Horizontal => div()
                     .absolute()
-                    .left(px(d.at * w - DIVIDER_HIT / 2.))
-                    .top(px(d.area.y * h))
+                    .left(relative(d.at))
+                    .ml(px(-DIVIDER_HIT / 2.))
+                    .top(relative(d.area.y))
                     .w(px(DIVIDER_HIT))
-                    .h(px(d.area.h * h))
+                    .h(relative(d.area.h))
                     .flex()
                     .justify_center()
                     .cursor_col_resize()
                     .child(line.w(px(1.)).h_full()),
                 Axis::Vertical => div()
                     .absolute()
-                    .top(px(d.at * h - DIVIDER_HIT / 2.))
-                    .left(px(d.area.x * w))
+                    .top(relative(d.at))
+                    .mt(px(-DIVIDER_HIT / 2.))
+                    .left(relative(d.area.x))
                     .h(px(DIVIDER_HIT))
-                    .w(px(d.area.w * w))
+                    .w(relative(d.area.w))
                     .flex()
                     .flex_col()
                     .justify_center()
@@ -1591,9 +1627,37 @@ impl Workspace {
     }
 
     fn toggle_sidebar(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.sidebar_visible = !self.sidebar_visible;
-        self.user_sidebar_visible = self.sidebar_visible;
+        self.flip_sidebar();
         cx.notify();
+    }
+
+    /// ⌘B / the header button. While compact the sidebar is only peeked at, so
+    /// the preference stays what the user chose while wide (as on macOS); else
+    /// a peek-and-close in a narrow window hid the fleet for good once wide.
+    fn flip_sidebar(&mut self) {
+        self.sidebar_visible = !self.sidebar_visible;
+        if !self.compact_active {
+            self.user_sidebar_visible = self.sidebar_visible;
+        }
+    }
+
+    /// The sidebar as a column beside the terminals (wide windows).
+    fn sidebar_docked(&self) -> bool {
+        self.sidebar_visible && !self.compact_active
+    }
+
+    /// Compact: the sidebar floats over the terminals as a drawer, which keep
+    /// their full width (no reflow just to glance at the fleet).
+    fn drawer_open(&self) -> bool {
+        self.sidebar_visible && self.compact_active
+    }
+
+    /// A pick in the drawer (a worktree, a file) slides it shut so the
+    /// terminals are uncovered again; the stored preference is untouched.
+    fn close_drawer(&mut self) {
+        if self.drawer_open() {
+            self.sidebar_visible = false;
+        }
     }
 
     /// Apply compact from the window width (edge-triggered sidebar, like AppKit).
@@ -1675,7 +1739,7 @@ impl Workspace {
         let mut strip = div()
             .id("compact-pane-strip")
             .flex_none()
-            .h(px(30.))
+            .h(px(STRIP_H))
             .px(px(8.))
             .flex()
             .flex_row()
@@ -1818,6 +1882,7 @@ impl Render for Workspace {
         let mut root = div()
             .id("workspace")
             .track_focus(&self.focus)
+            .relative()
             .size_full()
             .flex()
             .flex_row()
@@ -1838,8 +1903,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &NextWorktree, window, cx| w.step_worktree(1, window, cx)))
             .on_action(cx.listener(|w, _: &PrevWorktree, window, cx| w.step_worktree(-1, window, cx)))
             .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
-                w.sidebar_visible = !w.sidebar_visible;
-                w.user_sidebar_visible = w.sidebar_visible;
+                w.flip_sidebar();
                 cx.notify();
             }))
             .on_action(cx.listener(|w, _: &ToggleFirstMate, window, cx| w.toggle_first_mate(window, cx)))
@@ -1864,7 +1928,7 @@ impl Render for Workspace {
             root = root.cursor_col_resize();
         }
 
-        if self.sidebar_visible {
+        if self.sidebar_docked() {
             root = root.child(self.sidebar(width, window, cx));
         }
         if self.split_drag.as_ref().is_some_and(|d| d.axis == Axis::Vertical) {
@@ -1899,8 +1963,40 @@ impl Render for Workspace {
             );
         }
         root = root.child(self.terminal_column(title, cards, body, window.is_maximized(), cx));
-        if self.sidebar_visible {
+        if self.sidebar_docked() {
             root = root.child(self.divider(width, cx));
+        }
+        if self.drawer_open() {
+            let viewport = f32::from(window.viewport_size().width);
+            let drawer_w = width.min(viewport * DRAWER_MAX_SHARE).max(SIDEBAR_MIN.min(viewport));
+            root = root
+                .child(
+                    div()
+                        .id("drawer-dim")
+                        .absolute()
+                        .inset_0()
+                        .bg(gpui::rgba(0x00000047))
+                        .occlude()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|w, _: &MouseDownEvent, _, cx| {
+                                w.close_drawer();
+                                w.needs_focus = true;
+                                cx.notify();
+                            }),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("drawer")
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .h_full()
+                        .occlude()
+                        .shadow_lg()
+                        .child(self.sidebar(drawer_w, window, cx)),
+                );
         }
         if let Some(overlay) = self.overlays(cx) {
             root = root.child(overlay);
@@ -2139,7 +2235,7 @@ impl Workspace {
             .items_center()
             .bg(theme::rgb(theme::bg()))
             .child(drag_area())
-            .when(platform::MAC && !self.sidebar_visible, |d| d.pl(px(82.)))
+            .when(platform::MAC && !self.sidebar_docked(), |d| d.pl(px(82.)))
             // A link to the focused pane, as the macOS header's share button
             // makes one; the popover leads on to Settings ▸ Pairing.
             .child(
