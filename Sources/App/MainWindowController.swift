@@ -493,8 +493,18 @@ class MainWindowController: NSWindowController {
     /// ⌘B — chrome collapse is the only layout collapse signal.
     @objc func toggleChromeCollapsed() {
         chromeState.toggleCollapsed()
-        userSidebarCollapsed = chromeState.isCollapsed
+        recordUserSidebarCollapse()
         applyChromeState(animated: true)
+    }
+
+    /// The live collapse becomes the stored preference — except in compact, where
+    /// the left column is a drawer: opening it to pick a row and having the pick
+    /// slide it shut must not decide what the window looks like once it is wide
+    /// again. Before this, one trip through the drawer stored "collapsed" and a
+    /// widened window kept the fleet hidden for good.
+    private func recordUserSidebarCollapse() {
+        guard !compactActive else { return }
+        userSidebarCollapsed = chromeState.isCollapsed
     }
 
     /// Cmd+Esc / Cmd+E: leave the focused terminal chrome for the fleet list.
@@ -508,15 +518,15 @@ class MainWindowController: NSWindowController {
             dashboardVC?.adoptChromeCollapse(collapsed, activePane: chromeState.activePane)
             return
         }
-        userSidebarCollapsed = collapsed
         chromeState.setCollapsed(collapsed)
+        recordUserSidebarCollapse()
         applyChromeState(animated: true)
     }
 
     /// Header / keymap pane icons — uses `selectPane` (re-click collapses).
     func selectChromePane(_ pane: ChromeLeftPane) {
         chromeState.selectPane(pane)
-        userSidebarCollapsed = chromeState.isCollapsed
+        recordUserSidebarCollapse()
         applyChromeState(animated: true)
     }
 
@@ -593,16 +603,25 @@ class MainWindowController: NSWindowController {
         compactActive = next
         dashboardVC?.setCompactActive(next)
         if entered {
-            // Force collapse without writing the user preference.
+            // Float first so the enter-collapse (if any) overlays instead of
+            // pushing — terminal width stays put and skips the pinHeight suppress.
+            windowChrome?.setFloatsSidebarOverTerminal(true)
             if !chromeState.isCollapsed {
                 chromeState.setCollapsed(true)
                 applyChromeVisual(animated: true)
+            } else {
+                // Already collapsed: still force a grid sync — zoom + strip may
+                // have changed the visible leaf's frame under a prior pin.
+                scheduleSurfaceSyncAfterResize()
             }
         } else if exited {
-            // Restore the user's preferred collapse.
+            // Leave float before restoring push layout / preferred collapse.
+            windowChrome?.setFloatsSidebarOverTerminal(false)
             if chromeState.isCollapsed != userSidebarCollapsed {
                 chromeState.setCollapsed(userSidebarCollapsed)
                 applyChromeVisual(animated: true)
+            } else {
+                scheduleSurfaceSyncAfterResize()
             }
         }
     }
@@ -1201,6 +1220,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
             chrome.onStateChange = { [weak self] state in
                 self?.handleChromeStateChange(state)
             }
+            chrome.onDismissFloatingSidebar = { [weak self] in
+                self?.setChromeCollapsed(true)
+            }
+            chrome.setFloatsSidebarOverTerminal(compactActive)
         }
 
         // Keep dashboard.view in the window (below chrome) for first-responder
@@ -1535,10 +1558,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
         // movement becomes tab cycling: horizontal walks the terminal tabs, and
         // vertical walks the preview tabs on the right.
         if let dashboard = tabCoordinator.dashboardVC, dashboard.wantsPaneTabFocus {
-            if axis == .horizontal {
-                dashboard.editModeCycleTerminalTab(forward: positive)
-            } else if dashboard.isEditModeActive {
+            if axis == .vertical, dashboard.isEditModeActive {
                 dashboard.editModeCyclePreviewTab(forward: positive)
+            } else {
+                // Compact has only the pane strip: either axis walks it.
+                dashboard.editModeCycleTerminalTab(forward: positive)
             }
             return
         }

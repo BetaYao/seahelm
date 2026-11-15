@@ -19,8 +19,11 @@ final class EditTabStripView: NSView {
 
     private let scroll = NonScrollingClipScrollView()
     private let stack = NSStackView()
+    private let overflowButton = NSButton()
     private var items: [Item] = []
     private var selectedId: String?
+    private var scrollTrailingToEdge: NSLayoutConstraint?
+    private var scrollTrailingToOverflow: NSLayoutConstraint?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -40,6 +43,10 @@ final class EditTabStripView: NSView {
         scroll.hasVerticalScroller = false
         scroll.horizontalScrollElasticity = .allowed
         scroll.verticalScrollElasticity = .none
+        scroll.scrollerStyle = .overlay
+        // Keep trackpad gestures on the predominant axis so a slight vertical
+        // component cannot walk the clip origin off the tab row.
+        scroll.usesPredominantAxisScrolling = true
         addSubview(scroll)
 
         stack.orientation = .horizontal
@@ -52,12 +59,27 @@ final class EditTabStripView: NSView {
         doc.addSubview(stack)
         scroll.documentView = doc
 
+        configureOverflowButton()
+        addSubview(overflowButton)
+
+        let trailingEdge = scroll.trailingAnchor.constraint(equalTo: trailingAnchor)
+        let trailingOverflow = scroll.trailingAnchor.constraint(
+            equalTo: overflowButton.leadingAnchor, constant: -2)
+        scrollTrailingToEdge = trailingEdge
+        scrollTrailingToOverflow = trailingOverflow
+        trailingOverflow.isActive = false
+
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Self.stripHeight),
             scroll.topAnchor.constraint(equalTo: topAnchor),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            trailingEdge,
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            overflowButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+            overflowButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            overflowButton.heightAnchor.constraint(equalToConstant: 22),
+            overflowButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 28),
 
             stack.topAnchor.constraint(equalTo: doc.topAnchor),
             stack.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
@@ -65,6 +87,20 @@ final class EditTabStripView: NSView {
             stack.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
             doc.heightAnchor.constraint(equalTo: scroll.heightAnchor),
         ])
+    }
+
+    private func configureOverflowButton() {
+        overflowButton.bezelStyle = .recessed
+        overflowButton.isBordered = false
+        overflowButton.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        overflowButton.target = self
+        overflowButton.action = #selector(overflowClicked(_:))
+        overflowButton.isHidden = true
+        overflowButton.translatesAutoresizingMaskIntoConstraints = false
+        overflowButton.setAccessibilityIdentifier("chrome.tabs.overflow")
+        overflowButton.setAccessibilityLabel("More panes")
+        overflowButton.wantsLayer = true
+        overflowButton.layer?.cornerRadius = 5
     }
 
     /// The strip scrolls horizontally only — its content height always equals the
@@ -78,6 +114,7 @@ final class EditTabStripView: NSView {
     override func layout() {
         super.layout()
         pinVerticalScroll()
+        updateOverflowAffordance()
     }
 
     /// Sitting in the chrome header puts the strip in window-drag territory: with
@@ -97,6 +134,9 @@ final class EditTabStripView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
         guard bounds.contains(local) else { return nil }
+        if !overflowButton.isHidden, overflowButton.frame.contains(local) {
+            return overflowButton
+        }
         for case let tab as TabButton in stack.arrangedSubviews {
             guard tab.convert(tab.bounds, to: self).contains(local) else { continue }
             guard let tabSuper = tab.superview else { return tab }
@@ -154,6 +194,7 @@ final class EditTabStripView: NSView {
                 }
             }
         }
+        needsLayout = true
     }
 
     private func rebuild() {
@@ -169,13 +210,84 @@ final class EditTabStripView: NSView {
         }
     }
 
+    /// Called after a wheel remaps / settles so the `+N` chip tracks the clip.
+    fileprivate func noteScrollSettled() {
+        pinVerticalScroll()
+        updateOverflowAffordance()
+    }
+
+    /// Tabs that don't fit the visible clip — shown as `+N` and listed in a menu.
+    private func updateOverflowAffordance() {
+        let contentW = stack.fittingSize.width
+        let show = items.count > 1 && contentW > bounds.width + 0.5
+        let wasShowing = !overflowButton.isHidden
+        if show != wasShowing {
+            overflowButton.isHidden = !show
+            scrollTrailingToEdge?.isActive = !show
+            scrollTrailingToOverflow?.isActive = show
+            // Constraint flip changes the clip; recount on the next pass.
+            needsLayout = true
+        }
+        guard show, let doc = scroll.documentView else {
+            if !show { overflowButton.isHidden = true }
+            return
+        }
+        let visible = scroll.documentVisibleRect
+        var hidden = 0
+        for case let tab as TabButton in stack.arrangedSubviews {
+            let frame = tab.convert(tab.bounds, to: doc)
+            if !visible.intersects(frame.insetBy(dx: 1, dy: 0)) {
+                hidden += 1
+            }
+        }
+        // At least 1 when the chip is up — content overflowed even if every tab
+        // still intersects after a partial scroll.
+        overflowButton.title = "+\(max(hidden, 1))"
+        refreshOverflowAppearance()
+    }
+
+    @objc private func overflowClicked(_ sender: NSButton) {
+        let menu = NSMenu()
+        for item in items {
+            let entry = NSMenuItem(title: item.title, action: #selector(overflowPicked(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = item.id
+            entry.state = item.id == selectedId ? .on : .off
+            menu.addItem(entry)
+        }
+        let point = NSPoint(x: 0, y: sender.bounds.height + 2)
+        menu.popUp(positioning: nil, at: point, in: sender)
+    }
+
+    @objc private func overflowPicked(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        scrollTabIntoView(id)
+        onSelect?(id)
+    }
+
+    private func scrollTabIntoView(_ id: String) {
+        guard let tab = stack.arrangedSubviews.first(where: {
+            ($0 as? TabButton)?.itemId == id
+        }) else { return }
+        tab.scrollToVisible(tab.bounds)
+        pinVerticalScroll()
+        updateOverflowAffordance()
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         refreshBackground()
+        refreshOverflowAppearance()
     }
 
     private func refreshBackground() {
         layer?.backgroundColor = GhosttyBridge.shared.terminalChromeBackground.cgColor
+    }
+
+    private func refreshOverflowAppearance() {
+        let fg = GhosttyBridge.shared.terminalChromeForeground
+        overflowButton.contentTintColor = fg
+        overflowButton.layer?.backgroundColor = fg.withAlphaComponent(0.16).cgColor
     }
 }
 
@@ -280,7 +392,41 @@ private final class FlippedDocumentView: NSView {
 }
 
 /// Scroll view that lets horizontal wheel/trackpad scroll through but never grabs
-/// keyboard focus away from the terminal.
+/// keyboard focus away from the terminal. Vertical wheel motion is remapped to
+/// horizontal so the tab row cannot scroll out of view.
 private final class NonScrollingClipScrollView: NSScrollView {
     override var acceptsFirstResponder: Bool { false }
+
+    override func scrollWheel(with event: NSEvent) {
+        let dx = event.scrollingDeltaX
+        let dy = event.scrollingDeltaY
+        if abs(dy) >= abs(dx), let cg = event.cgEvent?.copy() {
+            // Axis1 = vertical, Axis2 = horizontal in AppKit's CGEvent fields.
+            cg.setDoubleValueField(.scrollWheelEventDeltaAxis1, value: 0)
+            cg.setDoubleValueField(
+                .scrollWheelEventDeltaAxis2,
+                value: Double(dy)
+            )
+            if event.hasPreciseScrollingDeltas {
+                cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: 0)
+                cg.setDoubleValueField(
+                    .scrollWheelEventPointDeltaAxis2,
+                    value: Double(dy)
+                )
+            }
+            if let redirected = NSEvent(cgEvent: cg) {
+                super.scrollWheel(with: redirected)
+            } else {
+                super.scrollWheel(with: event)
+            }
+        } else {
+            super.scrollWheel(with: event)
+        }
+        let origin = contentView.bounds.origin
+        if origin.y != 0 {
+            contentView.setBoundsOrigin(NSPoint(x: origin.x, y: 0))
+            reflectScrolledClipView(contentView)
+        }
+        (superview as? EditTabStripView)?.noteScrollSettled()
+    }
 }

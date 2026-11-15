@@ -1266,6 +1266,13 @@ class DashboardViewController: NSViewController {
             .cycleKeyboardRegion(forward: forward)
     }
 
+    /// Compact drawer: after a fleet/file pick, slide the overlay shut so the
+    /// terminal keeps the full width (the click already switched content).
+    private func dismissCompactDrawerIfNeeded() {
+        guard isCompactActive, !isLeftColumnCollapsed else { return }
+        onRequestSetChromeCollapsed?(true)
+    }
+
     /// Click on a fleet row:
     /// - different row: switch worktrees and hand the keyboard to the active pane
     /// - already-selected row: reclaim terminal keyboard focus (sidebar stays open)
@@ -1285,12 +1292,21 @@ class DashboardViewController: NSViewController {
     private func handlePaneRowClick(path: String, stationId: String) {
         enterWorktree(byWorktreePath: path)
         guard let container = activeSplitContainer, let tree = container.tree,
-              let leaf = tree.allLeaves.first(where: { $0.stationId == stationId }) else { return }
+              let leaf = tree.allLeaves.first(where: { $0.stationId == stationId }) else {
+            dismissCompactDrawerIfNeeded()
+            return
+        }
         tree.focusedId = leaf.id
-        container.layoutTree()
+        if wantsPaneTabFocus {
+            // Panes are tabs: show the picked one, not just focus it behind the zoom.
+            refreshCompactPresentationIfNeeded()
+        } else {
+            container.layoutTree()
+        }
         DispatchQueue.main.async { [weak self] in
             self?.focusActiveTerminalLeaf(tree: tree)
         }
+        dismissCompactDrawerIfNeeded()
     }
 
     private func handleWorktreeRowClick(path: String) {
@@ -1303,6 +1319,7 @@ class DashboardViewController: NSViewController {
         guard let i = overviewView.orderedRows.firstIndex(where: { $0.path == path }) else {
             // Not a fleet row (orders card path, stale list) — drill in as before.
             enterWorktree(byWorktreePath: path)
+            dismissCompactDrawerIfNeeded()
             return
         }
         let row = overviewView.orderedRows[i]
@@ -1317,9 +1334,11 @@ class DashboardViewController: NSViewController {
         // reject typing until a second click.
         if row.id == overviewSelectedId, activeSplitWorktreePath == path {
             focusActiveTerminalLeaf()
+            dismissCompactDrawerIfNeeded()
             return
         }
         enterWorktree(byWorktreePath: path)
+        dismissCompactDrawerIfNeeded()
     }
 
     /// Coalesce live-follow previews while the user walks the fleet list.
@@ -1550,15 +1569,21 @@ extension DashboardViewController {
 
     // MARK: Terminal tabs (LEFT column)
 
+    /// The focused leaf is the tab on show. Focus moves without going through the
+    /// strip — a split focuses its new pane, a fleet pane row or `seahelm pane
+    /// focus` sets `focusedId` — and preferring the old zoom there put focus back
+    /// on the previous tab while the keyboard went to a pane nobody could see.
     private func applyZoomToFocusedLeaf() {
         guard let split = activeSplitContainer, let tree = split.tree else { return }
-        let id = split.zoomedLeafId ?? tree.focusedId
-        guard tree.allLeaves.contains(where: { $0.id == id }) else {
-            // Focused leaf gone (pane closed): fall back to the first leaf.
-            if let first = tree.allLeaves.first {
-                tree.focusedId = first.id
-                split.setZoom(leafId: first.id, on: true)
-            }
+        let leaves = tree.allLeaves
+        let id: String
+        if leaves.contains(where: { $0.id == tree.focusedId }) {
+            id = tree.focusedId
+        } else if let zoomed = split.zoomedLeafId, leaves.contains(where: { $0.id == zoomed }) {
+            id = zoomed
+        } else if let first = leaves.first {
+            id = first.id
+        } else {
             return
         }
         tree.focusedId = id
@@ -1799,6 +1824,7 @@ extension DashboardViewController {
 extension DashboardViewController: WorktreeSidePanelDelegate {
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectFile path: String) {
         openFile(path: path)
+        dismissCompactDrawerIfNeeded()
     }
 
     /// Open a file through the same viewer path as selecting it in the Files tab:

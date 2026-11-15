@@ -27,7 +27,7 @@ Widen past a higher exit threshold and leave compact: restore spatial splits and
 |----------|--------|
 | Tab grain | **Pane tabs only** |
 | Fleet in compact | Auto-collapse; switch worktrees via ⌘B / header expand (existing), not via tabs |
-| Exit fleet policy | Respect user `sidebar_collapsed` / GPUI `sidebar_visible` preference at exit — auto-collapse does **not** overwrite that preference |
+| Exit fleet policy | Respect user `sidebar_collapsed` / GPUI `sidebar_visible` preference at exit — neither auto-collapse nor drawer use while compact overwrites that preference |
 | Split shortcuts in compact | Still allowed; new leaf appears as a tab and becomes active |
 | Edit mode (AppKit) | Share the same zoom + terminal tab strip; do not stack a second strip |
 
@@ -45,7 +45,7 @@ paneTabSelection: LeafId?    // which pane tab is shown; defaults to focused lea
 
 - **Enter compact:** force chrome collapsed **without** writing `userSidebarCollapsed`.
 - **Exit compact:** restore chrome to `userSidebarCollapsed`.
-- **Explicit ⌘B / header pane toggle:** updates `userSidebarCollapsed` and the live chrome; expanding while compact is allowed (peek). Re-entering the enter threshold does nothing until an exit/enter cycle.
+- **Explicit ⌘B / header pane toggle:** outside compact, updates `userSidebarCollapsed` and the live chrome. While compact the left column is a drawer: ⌘B, the header icons, a row pick and the dim all open/close it without touching `userSidebarCollapsed` (AppKit `recordUserSidebarCollapse`), so a trip through the drawer cannot hide the fleet once the window is wide again.
 
 Steady-state intent remains `compact ∨ user preference` on auto transitions; continuous enforcement of that OR would block peek.
 
@@ -123,7 +123,7 @@ GPUI today has no `setZoom`; compact introduces **view-only zoom** (render filte
 
 | Feature | Behaviour in compact |
 |---------|----------------------|
-| ⌘B | Toggles **user** preference and effective visibility. Expanding while compact is allowed (peek at fleet); collapsing again is fine. Exiting compact does not force-hide if the user expanded during compact and we treat that expand as `userSidebarCollapsed = false` — **rule:** any explicit ⌘B / header toggle updates the user preference; auto enter/exit only adjusts effective visibility |
+| ⌘B | Opens / closes the fleet as a drawer floating over the terminal (dim behind it; clicking the dim or picking a row closes it). Does **not** write the user preference while compact — on exit the column returns to whatever the user chose while wide |
 | Files / Changes | Header icons still open left panes (expand left column). Closing them returns to fleet pane tag but `effectiveCollapsed` follows compact again if still narrow |
 | Island (AppKit) | Unaffected |
 | First Mate / Settings (GPUI) | Still replace the right main area; pane tabs irrelevant until those close |
