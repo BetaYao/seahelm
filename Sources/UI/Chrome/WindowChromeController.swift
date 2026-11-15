@@ -36,9 +36,22 @@ final class WindowChromeController: NSViewController {
     private let terminalContentHost = NSView()
 
     private var sidebarWidthConstraint: NSLayoutConstraint!
+    /// Push layout: terminal leads off the sidebar's trailing edge.
+    private var terminalLeadingPinned: NSLayoutConstraint!
+    /// Overlay (compact peek): terminal stays full-bleed; sidebar floats above.
+    private var terminalLeadingFullBleed: NSLayoutConstraint!
+    /// Dim hit-target over the terminal while the compact drawer is open.
+    private let drawerDim = DrawerDimView()
     /// Bumped per collapse animation so a superseded one's completion is a no-op.
     private var collapseGeneration = 0
     private var colorSchemeObserver: NSObjectProtocol?
+
+    /// Compact mode: expanding the left column floats over the terminal instead
+    /// of pushing it. Set by MainWindow whenever `compactActive` flips.
+    private(set) var floatsSidebarOverTerminal = false
+
+    /// Fired when the user dismisses the compact drawer by clicking the dim.
+    var onDismissFloatingSidebar: (() -> Void)?
 
     /// Last pane/repo title from the live terminal. Restored when an overlay closes.
     private var lastPaneTitle = ""
@@ -197,6 +210,20 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setEditStripRatio(ratio)
     }
 
+    /// Compact: sidebar peeks as a left drawer over the terminal (no push).
+    /// Does not restart a collapse animation — MainWindow flips this around the
+    /// enter/exit collapse so the terminal leading mode updates without a snap.
+    func setFloatsSidebarOverTerminal(_ floats: Bool) {
+        guard floatsSidebarOverTerminal != floats else { return }
+        floatsSidebarOverTerminal = floats
+        applyTerminalLeadingMode()
+        settleDrawerDim(visible: floats && !state.isCollapsed)
+        refreshSidebarShadow()
+        if !state.isCollapsed {
+            view.layoutSubtreeIfNeeded()
+        }
+    }
+
     /// View that owns `Region.titlebar` keyboard focus for the current collapse state.
     func titlebarRegionFocusTarget() -> NSView {
         state.isCollapsed ? terminalHeader : sidebarHeader
@@ -242,9 +269,10 @@ final class WindowChromeController: NSViewController {
         sidebarHeader.delegate = headerDelegate
         terminalHeader.delegate = headerDelegate
 
-        // Divider last so its hit strip sits above both columns without a layout gap.
-        view.addSubview(sidebarColumn)
+        // Terminal first so a floating sidebar + dim can sit above it.
         view.addSubview(terminalColumn)
+        view.addSubview(drawerDim)
+        view.addSubview(sidebarColumn)
         view.addSubview(divider)
 
         sidebarColumn.addSubview(sidebarHeader)
@@ -252,11 +280,29 @@ final class WindowChromeController: NSViewController {
 
         terminalColumn.addSubview(terminalHeader)
         terminalColumn.addSubview(terminalContentHost)
+
+        drawerDim.translatesAutoresizingMaskIntoConstraints = false
+        drawerDim.isHidden = true
+        drawerDim.alphaValue = 0
+        drawerDim.onClick = { [weak self] in
+            self?.onDismissFloatingSidebar?()
+        }
+        drawerDim.setAccessibilityIdentifier("chrome.drawerDim")
+
+        // Soft edge when the sidebar floats over the terminal.
+        sidebarColumn.wantsLayer = true
+        sidebarColumn.shadow = NSShadow()
+        sidebarColumn.layer?.masksToBounds = false
     }
 
     private func setupConstraints() {
         sidebarWidthConstraint = sidebarColumn.widthAnchor.constraint(
             equalToConstant: ChromeLayoutMetrics.defaultSidebarWidth)
+        terminalLeadingPinned = terminalColumn.leadingAnchor.constraint(
+            equalTo: sidebarColumn.trailingAnchor)
+        terminalLeadingFullBleed = terminalColumn.leadingAnchor.constraint(
+            equalTo: view.leadingAnchor)
+        terminalLeadingFullBleed.isActive = false
 
         NSLayoutConstraint.activate([
             sidebarColumn.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -273,8 +319,8 @@ final class WindowChromeController: NSViewController {
             sidebarContentHost.topAnchor.constraint(equalTo: sidebarHeader.bottomAnchor),
             sidebarContentHost.bottomAnchor.constraint(equalTo: sidebarColumn.bottomAnchor),
 
-            // Columns meet flush — no reserved gutter for the divider.
-            terminalColumn.leadingAnchor.constraint(equalTo: sidebarColumn.trailingAnchor),
+            // Push mode by default — overlay mode swaps the leading constraint.
+            terminalLeadingPinned,
             terminalColumn.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             terminalColumn.topAnchor.constraint(equalTo: view.topAnchor),
             terminalColumn.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -288,12 +334,39 @@ final class WindowChromeController: NSViewController {
             terminalContentHost.topAnchor.constraint(equalTo: terminalHeader.bottomAnchor),
             terminalContentHost.bottomAnchor.constraint(equalTo: terminalColumn.bottomAnchor),
 
+            drawerDim.leadingAnchor.constraint(equalTo: terminalColumn.leadingAnchor),
+            drawerDim.trailingAnchor.constraint(equalTo: terminalColumn.trailingAnchor),
+            drawerDim.topAnchor.constraint(equalTo: terminalColumn.topAnchor),
+            drawerDim.bottomAnchor.constraint(equalTo: terminalColumn.bottomAnchor),
+
             // 1px line centered on the seam; wider hit target overlays both sides.
             divider.centerXAnchor.constraint(equalTo: sidebarColumn.trailingAnchor),
             divider.topAnchor.constraint(equalTo: view.topAnchor),
             divider.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             divider.widthAnchor.constraint(equalToConstant: ChromeLayoutMetrics.dividerHitWidth),
         ])
+    }
+
+    private func applyTerminalLeadingMode() {
+        let overlay = floatsSidebarOverTerminal
+        terminalLeadingPinned.isActive = !overlay
+        terminalLeadingFullBleed.isActive = overlay
+        // Divider drag is meaningless while floating (terminal is not beside it).
+        divider.isHidden = overlay || state.isCollapsed
+        refreshSidebarShadow()
+    }
+
+    private func refreshSidebarShadow() {
+        let floating = floatsSidebarOverTerminal && !state.isCollapsed
+        if floating {
+            sidebarColumn.shadow?.shadowColor = NSColor.black.withAlphaComponent(0.35)
+            sidebarColumn.shadow?.shadowBlurRadius = 18
+            sidebarColumn.shadow?.shadowOffset = NSSize(width: 4, height: 0)
+        } else {
+            sidebarColumn.shadow?.shadowColor = nil
+            sidebarColumn.shadow?.shadowBlurRadius = 0
+            sidebarColumn.shadow?.shadowOffset = .zero
+        }
     }
 
     // MARK: - Layout
@@ -312,17 +385,23 @@ final class WindowChromeController: NSViewController {
         let generation = collapseGeneration
 
         let collapsed = state.isCollapsed
+        let floating = floatsSidebarOverTerminal
         let targetSidebarWidth = collapsed
             ? 0
             : ChromeLayoutMetrics.clampWidth(state.width, windowWidth: windowWidthForClamp())
+
+        applyTerminalLeadingMode()
 
         // Icons live in the collapsed terminal header, so the sidebar header is
         // hidden while collapsed — but only once the slide is over, or it
         // vanishes at frame 0 and the hand-off looks like a pop rather than a move.
         if !collapsed {
             sidebarColumn.isHidden = false
-            divider.isHidden = false
+            divider.isHidden = floating
             sidebarHeader.isHidden = false
+            if floating {
+                prepareDrawerDim(visible: true)
+            }
         }
 
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -330,12 +409,20 @@ final class WindowChromeController: NSViewController {
             ? 0
             : ChromeLayoutMetrics.collapseAnimationDuration
 
+        // Overlay peeks do not change the terminal column width — skip the
+        // live-resize pin that would otherwise suppress the next real sync.
+        let pinsTerminal = !floating
+
         if duration == 0 {
+            let widthChanged = abs(sidebarWidthConstraint.constant - targetSidebarWidth) > 0.5
             sidebarWidthConstraint.constant = targetSidebarWidth
             sidebarColumn.alphaValue = 1
             divider.alphaValue = 1
             settle(collapsed: collapsed)
             view.layoutSubtreeIfNeeded()
+            if pinsTerminal && widthChanged {
+                GhosttyBridge.shared.resyncAfterWindowResize()
+            }
             return
         }
 
@@ -343,7 +430,11 @@ final class WindowChromeController: NSViewController {
         // opaque right up to the clipping edge, so the panel read as guillotined
         // rather than dismissed.
         sidebarColumn.alphaValue = collapsed ? 1 : 0
-        divider.alphaValue = collapsed ? 1 : 0
+        divider.alphaValue = (collapsed || floating) ? 1 : 0
+        if floating {
+            drawerDim.alphaValue = collapsed ? 1 : 0
+            drawerDim.isHidden = false
+        }
 
         // Defer PTY set_size for the whole slide — otherwise every animation
         // frame reflows the terminal grid (SIGWINCH storm) while the sidebar moves.
@@ -355,13 +446,20 @@ final class WindowChromeController: NSViewController {
         // frame. (Collapse snapped outright; expand only appeared to move.)
         sidebarWidthConstraint.constant = targetSidebarWidth
 
-        GhosttyBridge.shared.beginLiveResize(pinHeight: true)
+        if pinsTerminal {
+            GhosttyBridge.shared.beginLiveResize(pinHeight: true)
+        }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = duration
             context.timingFunction = ChromeLayoutMetrics.collapseTimingFunction
             context.allowsImplicitAnimation = true
             self.sidebarColumn.animator().alphaValue = collapsed ? 0 : 1
-            self.divider.animator().alphaValue = collapsed ? 0 : 1
+            if !floating {
+                self.divider.animator().alphaValue = collapsed ? 0 : 1
+            }
+            if floating {
+                self.drawerDim.animator().alphaValue = collapsed ? 0 : 1
+            }
             self.view.layoutSubtreeIfNeeded()
         }, completionHandler: nil)
 
@@ -372,11 +470,18 @@ final class WindowChromeController: NSViewController {
         // animation and snaps the sidebar shut. Collapse looked instant; expand
         // survived only because its settle happens to be a no-op.
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
-            // Unconditional: every beginLiveResize needs its end, including the
-            // one belonging to a slide that a newer ⌘B has already superseded.
-            GhosttyBridge.shared.endLiveResize()
+            if pinsTerminal {
+                // Unconditional: every beginLiveResize needs its end, including the
+                // one belonging to a slide that a newer ⌘B has already superseded.
+                GhosttyBridge.shared.endLiveResize()
+            }
             guard let self, self.collapseGeneration == generation else { return }
             self.settle(collapsed: collapsed)
+            // pinHeight endLiveResize suppresses grid sync — the terminal just
+            // gained/lost the sidebar's width, so force a real resync now.
+            if pinsTerminal {
+                GhosttyBridge.shared.resyncAfterWindowResize()
+            }
         }
     }
 
@@ -385,10 +490,29 @@ final class WindowChromeController: NSViewController {
     /// sidebar out of layout and hit-testing.
     private func settle(collapsed: Bool) {
         sidebarColumn.isHidden = collapsed
-        divider.isHidden = collapsed
+        divider.isHidden = collapsed || floatsSidebarOverTerminal
         sidebarHeader.isHidden = collapsed
         sidebarColumn.alphaValue = 1
         divider.alphaValue = 1
+        refreshSidebarShadow()
+        settleDrawerDim(visible: floatsSidebarOverTerminal && !collapsed)
+    }
+
+    private func prepareDrawerDim(visible: Bool) {
+        guard visible else { return }
+        drawerDim.isHidden = false
+        view.addSubview(drawerDim, positioned: .below, relativeTo: sidebarColumn)
+    }
+
+    private func settleDrawerDim(visible: Bool) {
+        if visible {
+            drawerDim.isHidden = false
+            drawerDim.alphaValue = 1
+            view.addSubview(drawerDim, positioned: .below, relativeTo: sidebarColumn)
+        } else {
+            drawerDim.alphaValue = 0
+            drawerDim.isHidden = true
+        }
     }
 
     private func handleDividerDragBegan() {
@@ -397,7 +521,7 @@ final class WindowChromeController: NSViewController {
     }
 
     private func handleDividerDrag(deltaX: CGFloat) {
-        guard !state.isCollapsed else { return }
+        guard !state.isCollapsed, !floatsSidebarOverTerminal else { return }
         let next = ChromeLayoutMetrics.clampWidth(
             state.width + deltaX,
             windowWidth: windowWidthForClamp()
@@ -488,4 +612,28 @@ private final class ChromeRootView: NSView {
         super.viewDidChangeEffectiveAppearance()
         onAppearanceChange?()
     }
+}
+
+/// Click-catcher over the terminal while the compact fleet/files drawer is open.
+private final class DrawerDimView: NSView {
+    var onClick: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onClick?()
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
 }

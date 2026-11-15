@@ -83,6 +83,23 @@ final class TerminalHeaderViewTests: XCTestCase {
         XCTAssertFalse(header.isTitleHiddenForTesting, "the row goes back to the title")
     }
 
+    /// Compact's single pane strip leaves the fork controls on the header; edit
+    /// mode's two strips run over them, so they step aside there.
+    func testCompactStripKeepsForkControls() {
+        let header = makeHeader()
+        header.setForkTarget("@feature")
+        header.setForkedInto(title: "#7", toolTip: "Forked into #7")
+
+        header.setHoistedStrips(.terminalOnly)
+        header.layoutSubtreeIfNeeded()
+        XCTAssertTrue(header.forkButtonIsVisibleForTesting)
+        XCTAssertTrue(header.forkedBadgeIsVisibleForTesting)
+
+        header.setHoistedStrips(.edit(ratio: 0.5))
+        XCTAssertFalse(header.forkButtonIsVisibleForTesting)
+        XCTAssertFalse(header.forkedBadgeIsVisibleForTesting)
+    }
+
     /// The seam has to land on the column divider, computed from the same width.
     func testSeamTracksTheDividerRatio() {
         let header = makeHeader()

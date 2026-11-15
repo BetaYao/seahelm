@@ -313,8 +313,9 @@ final class TerminalHeaderView: NSView {
         let terminalTrailing = editTerminalStrip.trailingAnchor.constraint(equalTo: leadingAnchor)
         let previewLeading = editPreviewStrip.leadingAnchor.constraint(equalTo: leadingAnchor)
         stripSeamConstraints = [terminalTrailing, previewLeading]
+        // forkedBadge → forkButton → editModeButton chain; hidden ones are 0 wide.
         terminalStripFullTrailing = editTerminalStrip.trailingAnchor.constraint(
-            equalTo: editModeButton.leadingAnchor, constant: -8)
+            equalTo: forkedBadge.leadingAnchor, constant: -8)
         terminalStripFullTrailing?.isActive = false
 
         stripLeadingCollapsed = editTerminalStrip.leadingAnchor.constraint(
@@ -544,7 +545,7 @@ final class TerminalHeaderView: NSView {
     /// Edit mode's strips run up to the edit-mode button, so the fork button
     /// steps aside while they are up.
     private func applyForkVisibility() {
-        let visible = forkTargetName != nil && !hasHoistedStrips && !firstMateMode
+        let visible = forkTargetName != nil && !stripsCoverForkControls && !firstMateMode
         forkButton.isHidden = !visible
         forkButtonWidth?.constant = visible ? 26 : 0
     }
@@ -591,7 +592,7 @@ final class TerminalHeaderView: NSView {
     var forkedBadgeTitleForTesting: String { forkedBadge.title }
 
     private func applyForkedBadgeVisibility() {
-        let visible = forkedBadgeTitle != nil && !hasHoistedStrips && !firstMateMode
+        let visible = forkedBadgeTitle != nil && !stripsCoverForkControls && !firstMateMode
         forkedBadge.isHidden = !visible
         forkedBadgeWidth?.constant = visible ? ceil(forkedBadge.intrinsicContentSize.width) + 10 : 0
     }
@@ -662,6 +663,13 @@ final class TerminalHeaderView: NSView {
     private var hasHoistedStrips: Bool {
         if case .none = stripMode { return false }
         return true
+    }
+
+    /// Edit mode's strips run up to the edit-mode button; compact's single pane
+    /// strip stops short of the fork controls, which stay on the header there.
+    private var stripsCoverForkControls: Bool {
+        if case .edit = stripMode { return true }
+        return false
     }
 
     /// Minimum width a hoisted strip keeps before the seam stops tracking the
