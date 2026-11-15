@@ -1,12 +1,12 @@
-//! The inline suggestion marker an agent ends its reply with
-//! (`StopHookResponder.swift`).
+//! The inline suggestion marker an agent ends its reply with (once the
+//! app's `StopHookResponder.swift`).
 //!
 //! Stop is an observation hook: it reports the final response and never
 //! blocks the agent into another one. Options used to be reported by having
 //! the agent run `seahelm-suggest` as its last action, which made its real
 //! answer "text between tool calls" — exactly what Claude Code's TUI drops.
-//! Now they ride the reply itself, on a line starting with [`SENTINEL`], so
-//! the turn ends on plain text and nothing is lost.
+//! Now they ride the reply itself, on its last line, starting with
+//! [`SENTINEL`], so the turn ends on plain text and nothing is lost.
 
 use serde_json::Value;
 
@@ -18,25 +18,45 @@ pub const SENTINEL: &str = "::seahelm-suggest::";
 /// At most this many options make it onto a card.
 const MAX_OPTIONS: usize = 5;
 
-/// The declared options in `message`, or None when no line carries the
-/// sentinel (or it lists nothing). Tolerant of the backticks or code fences
-/// an agent may wrap the line in.
+/// The declared options in `message`, or None when it does not end on a
+/// marker line (or that line lists nothing). Tolerant of the backticks or
+/// code fences an agent may wrap the line in.
 pub fn parse_suggestions(message: &str) -> Option<Vec<String>> {
-    let line = message.split('\n').find(|l| l.contains(SENTINEL))?;
-    let after = &line[line.find(SENTINEL)? + SENTINEL.len()..];
+    let lines: Vec<&str> = message.split('\n').collect();
+    let line = lines[marker_line(&lines)?];
+    let after = &line.trim_start_matches(MARKER_PAD)[SENTINEL.len()..];
     let options: Vec<String> = after
         .split('|')
-        .map(|o| o.trim_matches([' ', '\t', '`']).to_string())
+        .map(|o| o.trim_matches(MARKER_PAD).to_string())
         .filter(|o| !o.is_empty())
         .take(MAX_OPTIONS)
         .collect();
     (!options.is_empty()).then_some(options)
 }
 
-/// The prose with the sentinel line removed: the summary shown above the
-/// option buttons, so the card shows the answer and not the marker.
+/// The prose with the marker line removed: the summary shown above the
+/// option buttons, so the card shows the answer and not the marker. Only
+/// the real marker line goes — prose that merely mentions the marker stays.
 pub fn strip_sentinel(message: &str) -> String {
-    message.split('\n').filter(|l| !l.contains(SENTINEL)).collect::<Vec<_>>().join("\n").trim().to_string()
+    let mut lines: Vec<&str> = message.split('\n').collect();
+    if let Some(i) = marker_line(&lines) {
+        lines.remove(i);
+    }
+    lines.join("\n").trim().to_string()
+}
+
+/// What may sit around the marker on its line: indentation, the backticks of
+/// inline code, a stray carriage return.
+const MARKER_PAD: [char; 4] = [' ', '\t', '`', '\r'];
+
+/// The marker line: the reply's last line with any text, past closing code
+/// fences, when it starts with [`SENTINEL`]. Searching from the top for any
+/// line containing it made a reply that *quoted* the marker in its prose turn
+/// that sentence into buttons, ignore the real line at the end, and lose the
+/// quoting sentence from the card's summary.
+fn marker_line(lines: &[&str]) -> Option<usize> {
+    let i = lines.iter().rposition(|l| !l.trim_matches(MARKER_PAD).is_empty())?;
+    lines[i].trim_start_matches(MARKER_PAD).starts_with(SENTINEL).then_some(i)
 }
 
 /// What an agent is told so it ends its replies with the marker: handed to
@@ -89,7 +109,10 @@ mod tests {
         assert_eq!(session_start_output("opencode"), None);
         assert_eq!(session_start_output(""), None);
         // The example line in the guidance parses as the real thing would.
-        assert_eq!(parse_suggestions(GUIDANCE), Some(vec!["first option".into(), "second option".into()]));
+        let example = GUIDANCE.lines().find(|l| l.contains(SENTINEL)).unwrap();
+        assert_eq!(parse_suggestions(example), Some(vec!["first option".into(), "second option".into()]));
+        // The guidance itself only quotes the marker, mid-text: no buttons.
+        assert_eq!(parse_suggestions(GUIDANCE), None);
     }
 
     #[test]
@@ -111,6 +134,39 @@ mod tests {
     #[test]
     fn test_parse_suggestions_absent_returns_nil() {
         assert_eq!(parse_suggestions("Just a normal answer with no options."), None);
+    }
+
+    #[test]
+    fn test_marker_quoted_in_prose_is_not_the_marker() {
+        let msg = format!(
+            "That row of buttons ({SENTINEL}), shot for real.\n\
+             The last line ({SENTINEL} one | two). Stop hands it on.\n\
+             {SENTINEL} fix it | ship it"
+        );
+        assert_eq!(parse_suggestions(&msg), Some(vec!["fix it".into(), "ship it".into()]));
+        assert_eq!(
+            strip_sentinel(&msg),
+            format!("That row of buttons ({SENTINEL}), shot for real.\nThe last line ({SENTINEL} one | two). Stop hands it on.")
+        );
+    }
+
+    #[test]
+    fn test_marker_must_be_the_last_line() {
+        let msg = format!("{SENTINEL} a | b\nand then more prose.");
+        assert_eq!(parse_suggestions(&msg), None);
+        assert_eq!(strip_sentinel(&msg), msg);
+    }
+
+    #[test]
+    fn test_marker_line_past_fence_and_blank_lines() {
+        let msg = format!("Done.\n```\n  {SENTINEL} a | b\n```\n\n");
+        assert_eq!(parse_suggestions(&msg), Some(vec!["a".into(), "b".into()]));
+        assert_eq!(strip_sentinel(&msg), "Done.\n```\n```");
+    }
+
+    #[test]
+    fn test_marker_mid_line_at_the_end_is_not_the_marker() {
+        assert_eq!(parse_suggestions(&format!("Use the {SENTINEL} a | b line")), None);
     }
 
     #[test]
