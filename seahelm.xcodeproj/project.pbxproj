@@ -183,7 +183,6 @@
 		708FA82605788117E6142639 /* NotificationHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B96BFA805FFD64725FFB924 /* NotificationHistory.swift */; };
 		71937D0C72752C62DFBB63C1 /* WorktreeAgentTypeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 999DBD13511B3A8C4F4D4B8E /* WorktreeAgentTypeStore.swift */; };
 		72EA963BA7948ECBF5DABF5C /* ChoiceOptionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFC7E1231F33AA739B410611 /* ChoiceOptionParser.swift */; };
-		7366EFB1C4C5E0E8A0B31FBA /* StopHookResponderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AD4898C898C52B4C1DDEEC0 /* StopHookResponderTests.swift */; };
 		73AD1B9CB4727CC7D40DB028 /* PaneInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C3D3984EB87D6ED65A3312A /* PaneInfo.swift */; };
 		73B16CF9CCB46AADB3214B8F /* WorktreeSidePanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2BF20167E8DC36DDF09077 /* WorktreeSidePanelViewController.swift */; };
 		73F49C74243F62BBA37A2D6B /* ChromeTitlebarRegionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75EE0AFE306266CD4A4EE940 /* ChromeTitlebarRegionTests.swift */; };
@@ -272,7 +271,6 @@
 		9F3608916964651FE502DAD3 /* ChoiceOptionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E88C517CE4270179492479E /* ChoiceOptionParserTests.swift */; };
 		9F5D2E6010FDB991FA2F0B32 /* HTMLPreviewResourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF22C41D6F582FFD30D8BD2D /* HTMLPreviewResourceTests.swift */; };
 		9F9D60884BFD0AAA1A738DFA /* WorktreeTitleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70189637B0B7BCD249901040 /* WorktreeTitleResolver.swift */; };
-		9FA0C6130443BF763BA2BE24 /* StopHookResponder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B1A2AE485F12ED562023B0 /* StopHookResponder.swift */; };
 		9FADB6AAE8EBE8A998DFF459 /* MessageEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 460C8DB05326195FB83F2CF3 /* MessageEvent.swift */; };
 		9FB87117B233D150F2A05BD0 /* EditLayoutContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25346A39BB85A9E74B496865 /* EditLayoutContainerView.swift */; };
 		A02B7AE16DE638F82673C1ED /* EditTabStripViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4897B4E1D168C012F56E8C79 /* EditTabStripViewTests.swift */; };
@@ -494,7 +492,6 @@
 		20E7934A548F91E1E9FB161C /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
 		2230C586651F0975429B2DDD /* OpenCodePluginInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodePluginInstallerTests.swift; sourceTree = "<group>"; };
 		22314B62F8F244CAE44DE94D /* UsageSummaryFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryFormatterTests.swift; sourceTree = "<group>"; };
-		22B1A2AE485F12ED562023B0 /* StopHookResponder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StopHookResponder.swift; sourceTree = "<group>"; };
 		22DBAC51DE05D73135AD2889 /* WorktreeDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeDiscoveryTests.swift; sourceTree = "<group>"; };
 		23B112FAA14CF6135A4F7202 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		24FA210B040689FDAD15DD71 /* UntrustedURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UntrustedURL.swift; sourceTree = "<group>"; };
@@ -663,7 +660,6 @@
 		7A32006D6149A8DB956CF11B /* DashboardPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardPage.swift; sourceTree = "<group>"; };
 		7A43BFEA80D85BEB85CE0125 /* ActivityFeedRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedRendererTests.swift; sourceTree = "<group>"; };
 		7A4DC3FC06EC4D5EFE6BFA7F /* TabCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabCoordinator.swift; sourceTree = "<group>"; };
-		7AD4898C898C52B4C1DDEEC0 /* StopHookResponderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StopHookResponderTests.swift; sourceTree = "<group>"; };
 		7B3EAA643D3A58E42AE2B7CD /* SeahelmSkillInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeahelmSkillInstaller.swift; sourceTree = "<group>"; };
 		7BE708AEC9451A9A8135976C /* ProcessProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessProbeTests.swift; sourceTree = "<group>"; };
 		7C1D507BEBD483B978CC2DBC /* seahelm.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = seahelm.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -993,7 +989,6 @@
 				6EB916D0EB73B7F23E1CB4C0 /* ShellRunIntegration.swift */,
 				30F9565C3156144526A74B08 /* StationManager.swift */,
 				532D40CAB3DC6BC206BB94C4 /* StationRegistry.swift */,
-				22B1A2AE485F12ED562023B0 /* StopHookResponder.swift */,
 				3D90518E8BFCA59E2D344513 /* TerminalEnvironment.swift */,
 				9B4569535EF5A858CD9D1E70 /* TerminalLinkPolicy.swift */,
 				8F029A5E271BDEEF49A54B1E /* TerminalTranscript.swift */,
@@ -1376,7 +1371,6 @@
 				6D9670C14DA62CDEE9828F5C /* StationRegistryConcurrencyTests.swift */,
 				EB9C0192916DE1D56E68048E /* StationReparentTests.swift */,
 				9AE5BD47EE63FB2486087AA2 /* StationSeahelmdAttachCommandTests.swift */,
-				7AD4898C898C52B4C1DDEEC0 /* StopHookResponderTests.swift */,
 				300BF0C990100B9C582BBB82 /* SuggestionSeenSetTests.swift */,
 				FA963F492D125CC81F07D6C8 /* SuggestLineLocatorTests.swift */,
 				BF2913334B3D03D7CCD3E80D /* TabCoordinatorTests.swift */,
@@ -1925,7 +1919,6 @@
 				6C822061BD36C74213F5D43B /* StationRegistryConcurrencyTests.swift in Sources */,
 				004A9A98C4F160DD44D877A1 /* StationReparentTests.swift in Sources */,
 				5F5D18EBBB709ED5369A382A /* StationSeahelmdAttachCommandTests.swift in Sources */,
-				7366EFB1C4C5E0E8A0B31FBA /* StopHookResponderTests.swift in Sources */,
 				CA453E071C7DC7E82EACDA39 /* SuggestLineLocatorTests.swift in Sources */,
 				AA20697D1C5A53598DEF9CE9 /* SuggestionSeenSetTests.swift in Sources */,
 				2215E8F6A1F2571870A122F6 /* TabCoordinatorTests.swift in Sources */,
@@ -2182,7 +2175,6 @@
 				216DCA58D600EA88B333A324 /* Station.swift in Sources */,
 				4670998F86598F2E5C84ACD3 /* StationManager.swift in Sources */,
 				A5F8DD0A3B1785C4F7861188 /* StationRegistry.swift in Sources */,
-				9FA0C6130443BF763BA2BE24 /* StopHookResponder.swift in Sources */,
 				D167E1E554F3BA094107F39D /* TabCoordinator.swift in Sources */,
 				CE2F476AAE8E4F1A63F506EC /* TelegramRulesView.swift in Sources */,
 				7906BA09A1F8FE6C728AD72C /* TelegramSetupWizard.swift in Sources */,
