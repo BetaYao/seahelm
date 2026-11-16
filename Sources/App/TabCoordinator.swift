@@ -309,6 +309,8 @@ class TabCoordinator {
         candidates.formUnion(config.worktreeLastActivityAt.keys)
         candidates.formUnion(config.splitLayouts.keys)
         candidates.formUnion(config.focusedPaneIds.keys)
+        candidates.formUnion(terminalCoordinator.config.splitLayouts.keys)
+        candidates.formUnion(terminalCoordinator.config.focusedPaneIds.keys)
         candidates.formUnion(config.activeWorktreePaths.values)
         if let selected = config.selectedWorktreePath { candidates.insert(selected) }
         candidates.formUnion(config.cardOrder)
@@ -327,6 +329,10 @@ class TabCoordinator {
         prune(&config.worktreeLastActivityAt)
         prune(&config.splitLayouts)
         prune(&config.focusedPaneIds)
+        // TerminalCoordinator's copy is the one `resolveTree` restores from and
+        // `saveConfig` copies back over ours: pruning only ours never stuck.
+        prune(&terminalCoordinator.config.splitLayouts)
+        prune(&terminalCoordinator.config.focusedPaneIds)
         for (repo, worktree) in config.activeWorktreePaths where missing.contains(worktree) {
             config.activeWorktreePaths.removeValue(forKey: repo)
             changed = true
@@ -1312,11 +1318,37 @@ class TabCoordinator {
 
     // MARK: - Worktree Lifecycle
 
+    /// A worktree removed outside the app (`git worktree remove`, a script, a
+    /// branch-name reuse): its directory is gone, so end its panes' sessions as
+    /// the app's own delete does. Left running, the next worktree made at the
+    /// same path would attach its first pane to them (session names follow the
+    /// path) instead of starting fresh.
+    private func endSessionsOfDeletedWorktree(_ path: String) {
+        guard let tree = terminalCoordinator.stationManager.tree(forPath: path) else { return }
+        for leaf in tree.allLeaves where !leaf.paneSessionKey.isEmpty {
+            AgentSessionRef.forget(leaf.paneSessionKey)
+            if runtimeBackend != "local" {
+                SessionManager.killSession(leaf.paneSessionKey, backend: runtimeBackend)
+            }
+        }
+    }
+
     func worktreeDidDelete(_ info: WorktreeInfo) {
         // Idempotent surface teardown: every current caller already removed the
         // tree, but destroying here too means a future call path can't leak the
         // worktree's stations (removeTree on a missing path is a no-op).
         _ = terminalCoordinator.stationManager.removeTree(forPath: info.path)
+        // Forget its layout too. Kept, it outlived the worktree, and one made
+        // again at the same path (an agent reusing a branch name) restored the
+        // old panes: not placeholders, so a fork arriving there was split
+        // beside them ("2 panes", one of them empty) instead of replacing one.
+        // The app's own delete (`finalizeDeletedWorktree`) already did this; a
+        // worktree removed outside the app did not.
+        let hadLayout = terminalCoordinator.config.splitLayouts.removeValue(forKey: info.path) != nil
+        let hadFocus = terminalCoordinator.config.focusedPaneIds.removeValue(forKey: info.path) != nil
+        if hadLayout || hadFocus { terminalCoordinator.config.save() }
+        config.splitLayouts.removeValue(forKey: info.path)
+        config.focusedPaneIds.removeValue(forKey: info.path)
         let repoPath = worktreeRepoCache[info.path]
         allWorktrees.removeAll { $0.info.path == info.path }
         worktreeRepoCache.removeValue(forKey: info.path)
@@ -1529,6 +1561,7 @@ class TabCoordinator {
         if !deletedWorktrees.isEmpty {
             workspaceManager.updateWorktrees(at: tabIndex, worktrees: freshWorktrees)
             for deleted in deletedWorktrees {
+                endSessionsOfDeletedWorktree(deleted.path)
                 terminalCoordinator.stationManager.removeTree(forPath: deleted.path)
                 worktreeDidDelete(deleted)
             }
