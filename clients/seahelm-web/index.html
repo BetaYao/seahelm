@@ -2347,7 +2347,9 @@ function sendComposerText(byTap){
 function canAttach(){
   return !!S.selPane && S.transport === 'gateway' && isLinked() && !SHARE_PANE;
 }
-let attachPending = 0;
+// `var`: renderSendButton (which draws this button too) runs during load,
+// before this line does — a `let` here threw there and stopped the page.
+var attachPending = 0;
 function renderAttachButton(){
   const b = $('msgAttach');
   if (!b) return;
