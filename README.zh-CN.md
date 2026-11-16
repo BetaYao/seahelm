@@ -24,10 +24,11 @@ libghostty、每个 agent 一个 git worktree、用 hook 上报状态。真正�
 下一步选项，把行内标记变成可点击的卡片。First Mate 监听状态变化，要么自动处理，要么排进
 待批准队列。显示「正在等你」是容易的那一半，难的是接下来该做什么。
 
-**pane 跟着它的 agent 走。** 当一个 agent 创建了新的 worktree 并开始在里面工作，这个
-pane 会迁移到新 worktree 的卡片上，而不是在旁边多出一个空终端。依据是每个 hook 负载都
-携带的 cwd，配合同仓库判定和冷却时间，这样 agent 执行 `cd x && ...` 这类单次调用不会
-把 pane 来回拖动。
+**对话跟着工作分叉过去。** 当 Claude Code 的 agent 自己创建了新的 worktree 并开始在里面
+工作，Seahelm 会把它的对话分叉到那个 worktree 卡片上的一个新 pane 里（`claude --resume
+<id> --fork-session`）：分叉出来的 pane 带着完整的对话记录接着干，原来的 pane 留在原处，
+当前这一轮被停下，并收到一条说明工作去了哪里的消息。pane 本身从不会被自动挪走；agent
+只是去别的 worktree 看一眼时，标题上会显示它在哪，并提供一个按钮让你手动分叉过去。
 
 除此之外：基于 Ghostty 引擎的原生渲染而非 Electron、会话在 app 退出后继续运行(重启机器后 agent 自动续上对话)、
 开箱支持 12 种 agent 的状态识别。

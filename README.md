@@ -28,10 +28,13 @@ from the Stop hook and turns an inline next-step marker into clickable cards. Fi
 watches status transitions and either handles them or queues them for your approval.
 Showing "awaiting input" is the easy half; the question is what to do about it.
 
-**The pane follows its agent.** When an agent creates a worktree and starts working
-there, that pane moves to the new worktree's card instead of an empty pane appearing
-beside it. Keyed on the cwd every hook payload carries, with a same-repo gate and a
-cooldown so a `cd x && ...` tool call doesn't walk the pane back and forth.
+**The conversation forks to where the work goes.** When a Claude Code agent creates a
+worktree and starts working there, Seahelm forks its conversation into a new pane on
+that worktree's card (`claude --resume <id> --fork-session`): the fork carries on with
+the whole transcript, and the original pane stays where it was, its turn stopped and a
+note telling it where the work went. Panes are never moved on their own; an agent that
+merely visits another worktree only shows where it is in its title, with a button to
+fork it there by hand.
 
 Beyond that: native rendering on the Ghostty engine rather than Electron, sessions
 that outlive the app (and resume their agents after a reboot), and status detection for 12 agents out of the box.
