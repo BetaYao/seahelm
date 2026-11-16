@@ -12,7 +12,13 @@ class SplitTree {
     var worktreePath: String
     private let baseSessionName: String
 
+    /// Terminal panes; the document pane is not counted.
     var leafCount: Int { root.leafCount }
+    /// The document pane's leaf id, while the tree has one (`SplitNode.document`).
+    var documentId: String? { root.documentId }
+    var documentFocused: Bool { documentId != nil && documentId == focusedId }
+    /// Every pane in tree order, the document pane included.
+    var paneIds: [String] { root.paneIds }
     var allLeaves: [SplitNode.LeafInfo] { root.allLeaves }
     var allStationIds: [String] { root.allLeaves.map(\.stationId) }
 
@@ -35,12 +41,35 @@ class SplitTree {
         -> (leafId: String, splitId: String) {
         let newLeaf = SplitNode.leaf(id: newLeafId, stationId: newStationId, paneSessionKey: newSessionName)
         let splitId = UUID().uuidString
-        guard root.findLeaf(id: focusedId) != nil else { return (newLeafId, splitId) }
+        // The document pane splits like any pane: the new terminal goes beside it.
+        guard root.containsPane(id: focusedId) else { return (newLeafId, splitId) }
         let focusedNode = extractSubnode(id: focusedId)
         let replacement = SplitNode.split(id: splitId, axis: axis, ratio: 0.5, first: focusedNode, second: newLeaf)
         root = root.replacing(leafId: focusedId, with: replacement)
         focusedId = newLeafId
         return (newLeafId, splitId)
+    }
+
+    /// Split the focused pane for the document pane, which takes focus.
+    /// Returns its id; an existing one is kept, not doubled.
+    @discardableResult
+    func insertDocument(axis: SplitAxis = .horizontal) -> String {
+        if let existing = documentId { return existing }
+        let docId = UUID().uuidString
+        let anchor = root.findLeaf(id: focusedId)?.id ?? root.allLeaves.first?.id ?? root.id
+        let replacement = SplitNode.split(id: UUID().uuidString, axis: axis, ratio: 0.5,
+                                          first: extractSubnode(id: anchor), second: .document(id: docId))
+        root = root.replacing(leafId: anchor, with: replacement)
+        focusedId = docId
+        return docId
+    }
+
+    /// Take the document pane out, its sibling taking the split's place.
+    /// Focus goes to the first terminal if it was on the document pane.
+    func removeDocument() {
+        guard let docId = documentId, let newRoot = root.removing(leafId: docId) else { return }
+        root = newRoot
+        if focusedId == docId { focusedId = root.allLeaves.first?.id ?? focusedId }
     }
 
     func closeFocusedLeaf() -> SplitNode.LeafInfo? {
@@ -113,6 +142,7 @@ class SplitTree {
         root.nearestAncestorSplit(forLeaf: focusedId, axis: axis)
     }
 
+    /// Saved and mirrored without the document pane (`CodableSplitNode.from`).
     func toCodable() -> CodableSplitNode {
         CodableSplitNode.from(root)
     }
@@ -164,6 +194,7 @@ class SplitTree {
         if case .leaf(let leafId, let stationId, let paneSessionKey) = root, leafId == id {
             return .leaf(id: leafId, stationId: stationId, paneSessionKey: paneSessionKey)
         }
+        if root.documentId == id { return .document(id: id) }
         guard let info = root.findLeaf(id: id) else { return root }
         return .leaf(id: info.id, stationId: info.stationId, paneSessionKey: info.paneSessionKey)
     }

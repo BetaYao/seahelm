@@ -292,6 +292,11 @@ class TerminalCoordinator {
 
     private static func nodeToLayout(_ node: SplitNode) -> LayoutNode {
         switch node {
+        // The document pane is no part of a layout template.
+        case .split(_, _, _, .document, let other), .split(_, _, _, let other, .document):
+            return nodeToLayout(other)
+        case .document:
+            return .pane(label: "", command: nil, agent: nil, cwd: nil)
         case let .leaf(_, stationId, paneSessionKey):
             let agent = Fleet.shared.pane(for: stationId)?.agentType
             let named = (agent != nil && agent != .unknown) ? agent!.rawValue : nil
@@ -586,7 +591,9 @@ class TerminalCoordinator {
     func moveFocus(_ axis: SplitAxis, positive: Bool) {
         guard let container = activeSplitContainer() else { return }
         if let newFocusId = container.focusLeaf(direction: axis, positive: positive) {
-            if let tree = container.tree,
+            if container.tree?.documentId == newFocusId {
+                container.documentView?.focusContent()
+            } else if let tree = container.tree,
                let leaf = tree.root.findLeaf(id: newFocusId),
                let station = StationRegistry.shared.station(forId: leaf.stationId),
                let view = station.view {

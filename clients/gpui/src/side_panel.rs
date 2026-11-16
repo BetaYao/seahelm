@@ -8,7 +8,7 @@
 //!   committed work the base lacks (`worktree_git::changes`).
 //!
 //! Picking a file or a change asks the workspace to open it
-//! (`OpenRequested`), as a tab in the main area (`preview_tabs`).
+//! (`OpenRequested`), in the worktree's document pane (`document_pane`).
 //!
 //! Reads run off the UI thread. Changes are read again every few seconds
 //! while that tab is on screen; files when the panel opens or on ↻.

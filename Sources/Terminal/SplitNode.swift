@@ -6,23 +6,56 @@ enum SplitAxis: String, Codable {
 }
 
 /// Runtime split tree node. Leaves hold live Station references.
+///
+/// `.document` is the worktree's document pane: the files and changes opened
+/// from the side panel, split from a terminal the way ⌘D splits one. It is no
+/// terminal, so it is left out of `allLeaves`, `findLeaf` and `leafCount`
+/// (which count *terminals*), out of the saved layout and out of the layout
+/// remote clients mirror. At most one per tree.
 indirect enum SplitNode {
     case leaf(id: String, stationId: String, paneSessionKey: String)
+    case document(id: String)
     case split(id: String, axis: SplitAxis, ratio: CGFloat, first: SplitNode, second: SplitNode)
 
     var id: String {
         switch self {
         case .leaf(let id, _, _): return id
+        case .document(let id): return id
         case .split(let id, _, _, _, _): return id
         }
     }
 
+    /// Terminal leaves only.
     var leafCount: Int {
         switch self {
         case .leaf: return 1
+        case .document: return 0
         case .split(_, _, _, let first, let second):
             return first.leafCount + second.leafCount
         }
+    }
+
+    /// The document pane's id, if this subtree holds it.
+    var documentId: String? {
+        switch self {
+        case .leaf: return nil
+        case .document(let id): return id
+        case .split(_, _, _, let first, let second): return first.documentId ?? second.documentId
+        }
+    }
+
+    /// Every pane's id in tree order, terminals and the document pane alike
+    /// (pane tabs, focus moves).
+    var paneIds: [String] {
+        switch self {
+        case .leaf(let id, _, _), .document(let id): return [id]
+        case .split(_, _, _, let first, let second): return first.paneIds + second.paneIds
+        }
+    }
+
+    /// Whether a leaf of either kind with this id is in the subtree.
+    func containsPane(id: String) -> Bool {
+        findLeaf(id: id) != nil || documentId == id
     }
 
     struct LeafInfo {
@@ -35,6 +68,8 @@ indirect enum SplitNode {
         switch self {
         case .leaf(let id, let stationId, let paneSessionKey):
             return [LeafInfo(id: id, stationId: stationId, paneSessionKey: paneSessionKey)]
+        case .document:
+            return []
         case .split(_, _, _, let first, let second):
             return first.allLeaves + second.allLeaves
         }
@@ -65,7 +100,7 @@ indirect enum SplitNode {
     /// Replace a leaf node (by id) with a new subtree. Returns modified tree.
     func replacing(leafId: String, with replacement: SplitNode) -> SplitNode {
         switch self {
-        case .leaf(let id, _, _):
+        case .leaf(let id, _, _), .document(let id):
             return id == leafId ? replacement : self
         case .split(let id, let axis, let ratio, let first, let second):
             return .split(
@@ -82,10 +117,10 @@ indirect enum SplitNode {
     /// When a deeper leaf matches, the modified subtree is returned.
     func removing(leafId: String) -> SplitNode? {
         switch self {
-        case .leaf(let id, _, _):
-            // Leaf doesn't contain the target — return nil to signal "not found here"
-            // The parent split handles the case where a direct child leaf matches (lines below)
-            return id == leafId ? nil : nil
+        case .leaf, .document:
+            // A leaf doesn't contain the target — nil signals "not found here".
+            // The parent split handles a direct child leaf matching (below).
+            return nil
         case .split(_, _, _, let first, let second):
             // Direct child is the target leaf — promote its sibling
             if first.id == leafId { return second }
@@ -116,7 +151,7 @@ indirect enum SplitNode {
     /// Update ratio on a specific split node by id.
     func updatingRatio(splitId: String, newRatio: CGFloat) -> SplitNode {
         switch self {
-        case .leaf: return self
+        case .leaf, .document: return self
         case .split(let id, let axis, let ratio, let first, let second):
             let r = id == splitId ? newRatio : ratio
             return .split(
@@ -130,10 +165,10 @@ indirect enum SplitNode {
     /// Find the nearest ancestor split node with the given axis, for a leaf.
     func nearestAncestorSplit(forLeaf leafId: String, axis targetAxis: SplitAxis) -> String? {
         switch self {
-        case .leaf: return nil
+        case .leaf, .document: return nil
         case .split(let id, let axis, _, let first, let second):
-            let inFirst = first.findLeaf(id: leafId) != nil
-            let inSecond = second.findLeaf(id: leafId) != nil
+            let inFirst = first.containsPane(id: leafId)
+            let inSecond = second.containsPane(id: leafId)
             guard inFirst || inSecond else { return nil }
             let deeper = inFirst
                 ? first.nearestAncestorSplit(forLeaf: leafId, axis: targetAxis)
@@ -191,9 +226,16 @@ indirect enum CodableSplitNode: Codable {
         }
     }
 
-    /// Convert runtime SplitNode to serializable form.
+    /// Convert runtime SplitNode to serializable form. The document pane is
+    /// left out (its sibling takes the split's place): it is never restored,
+    /// and remote clients mirror terminals only.
     static func from(_ node: SplitNode) -> CodableSplitNode {
         switch node {
+        case .split(_, _, _, .document, let other), .split(_, _, _, let other, .document):
+            return from(other)
+        case .document:
+            // Only ever beside a terminal; a lone one has nothing to save.
+            return .leaf(paneSessionKey: "", title: nil)
         case .leaf(_, let stationId, let paneSessionKey):
             // Capture the pane's last-known strong title so a restored layout can
             // show it before fresh OSC/agent-session data arrives.

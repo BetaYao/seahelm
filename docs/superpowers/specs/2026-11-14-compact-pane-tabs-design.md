@@ -29,7 +29,7 @@ Widen past a higher exit threshold and leave compact: restore spatial splits and
 | Fleet in compact | Auto-collapse; switch worktrees via ⌘B / header expand (existing), not via tabs |
 | Exit fleet policy | Respect user `sidebar_collapsed` / GPUI `sidebar_visible` preference at exit — neither auto-collapse nor drawer use while compact overwrites that preference |
 | Split shortcuts in compact | Still allowed; new leaf appears as a tab and becomes active |
-| Edit mode (AppKit) | Share the same zoom + terminal tab strip; do not stack a second strip |
+| Document pane | The pane holding opened files/diffs (`SplitNode.document` / GPUI `document_pane`) is one of the pane tabs, titled by its tab on screen |
 
 ## State
 
@@ -49,7 +49,7 @@ paneTabSelection: LeafId?    // which pane tab is shown; defaults to focused lea
 
 Steady-state intent remains `compact ∨ user preference` on auto transitions; continuous enforcement of that OR would block peek.
 
-**Pane presentation** while compact (and while AppKit edit mode’s terminal strip is up):
+**Pane presentation** while compact:
 
 - Exactly one leaf is “zoomed” / full-bleed in the terminal column.
 - A tab strip lists every leaf of the current worktree’s `SplitTree`.
@@ -85,8 +85,8 @@ For each leaf in tree order (same order as edit-mode strip / split leaf walk):
 
 ### Placement
 
-- **AppKit:** hoist into `TerminalHeaderView` via existing `EditTabStripView` (same path edit mode uses: `editStripsProvider` / `chromeEditStrips`). Show the terminal strip whenever `compactActive || editMode`; preview strip still only in edit mode.
-- **GPUI:** add a pane tab row in the terminal column header when compact (or when the worktree has >1 leaf and compact). Keep existing `preview_tabs` (“Terminals” + file tabs). When a preview file tab is active, pane tabs are hidden or disabled until the user returns to “Terminals” — same priority as today (preview replaces the terminal body).
+- **AppKit:** hoist into `TerminalHeaderView` via `EditTabStripView` (`paneStripProvider` / `chromePaneStrip`), shown while `compactActive` with 2+ panes.
+- **GPUI:** a pane tab row above `panes_body` when compact with 2+ leaves (the document pane included).
 
 ### Single-pane worktrees
 
@@ -102,10 +102,8 @@ With only one leaf, still collapse the fleet in compact, but **omit** the pane t
 | Collapse SSOT | `ChromeLayoutState` — auto path must not persist `sidebar_collapsed` |
 | Zoom | `SplitContainerView.setZoom(leafId:on:)` (already used by `selectTerminalTab`) |
 | Strip UI | `EditTabStripView` on `TerminalHeaderView` |
-| Enter edit while compact | No-op for terminal strip; preview column behaviour unchanged |
-| Leave compact while edit | Keep edit strip; only clear “compact-driven” zoom if edit also clears it on exit — prefer: zoom stays while edit or compact |
 
-Focus / keyboard: pane tab cycle can mirror edit mode’s next-terminal-tab if one exists; otherwise Cmd+]/+] / existing focus-move among leaves still updates zoom target when compact.
+Focus / keyboard: Cmd+]/+] / existing focus-move among leaves still updates zoom target when compact.
 
 ### GPUI
 
@@ -115,7 +113,7 @@ Focus / keyboard: pane tab cycle can mirror edit mode’s next-terminal-tab if o
 | Collapse | `sidebar_visible` is the live state, `user_sidebar_visible` the preference; compact enter/exit and every toggle while compact leave the preference alone. Expanded while compact, the sidebar is a drawer (`drawer_open`): it floats over the terminals at their full width behind a dim, and the dim, ⌘B, picking a worktree or opening a file close it |
 | Zoom | New presentation flag on the terminal column: when compact and >1 leaf, draw only the focused leaf’s frame as full body (do not rewrite `SplitTree`). Selecting another pane tab sets `tree.focused` and repaints |
 | Strip UI | New small tab strip above `panes_body` / in terminal header; not worktree-scoped fleet tabs |
-| Preview | Unchanged; `preview_tabs` wins over pane body |
+| Preview | Files/changes open in the document pane, a leaf like any other |
 
 GPUI today has no `setZoom`; compact introduces **view-only zoom** (render filter), not a tree mutation.
 
@@ -149,7 +147,7 @@ GPUI today has no `setZoom`; compact introduces **view-only zoom** (render filte
 ## Implementation order (suggested)
 
 1. Shared behaviour spec constants + hysteresis helper (can be duplicated per client; no shared crate required).
-2. AppKit: wire width → compact flag → collapse without persisting; show `EditTabStripView` + `setZoom` outside edit mode.
+2. AppKit: wire width → compact flag → collapse without persisting; show `EditTabStripView` + `setZoom`.
 3. GPUI: `user_sidebar_visible` vs effective; view-only zoom + pane tab strip.
 4. Polish: tab labels (`#n`, custom title), single-pane strip omission, live-resize deferral parity.
 

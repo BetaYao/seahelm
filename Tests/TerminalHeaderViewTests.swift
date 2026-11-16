@@ -13,78 +13,31 @@ final class TerminalHeaderViewTests: XCTestCase {
         XCTAssertEqual(TerminalHeaderView.formatTitle(repo: "  ", pane: " main "), "main")
     }
 
-    // MARK: - Title vs. the edit-mode tab strips
+    // MARK: - Compact pane tab strip (owned by the header)
 
     private func makeHeader() -> TerminalHeaderView {
         TerminalHeaderView(frame: NSRect(x: 0, y: 0, width: 800, height: 38))
     }
 
-    /// Edit mode gives each column its own tab strip, so the pane title duplicates
-    /// one strip's selected tab and mislabels the other. The band still has to hold
-    /// the traffic lights, so it shows the worktree instead of going blank.
-    func testEditModeSwapsPaneTitleForWorktreeContext() {
+    /// The header owns the strip outright. It was previously moved up from the
+    /// column, which left the moved strip's clip view seated at a non-zero
+    /// vertical origin — every frame stayed correct while the tabs sat outside
+    /// the visible rect, painting an empty row. Owning it removes that failure.
+    func testPaneStripIsOwnedAndHiddenUntilCompact() {
         let header = makeHeader()
-        header.setPaneTitle("AGENTS.md")
-        header.setWorktreeContext("seahelm · feat/palette")
-        XCTAssertEqual(header.titleTextForTesting, "AGENTS.md")
+        XCTAssertTrue(header.paneStrip.superview === header)
+        XCTAssertTrue(header.paneStrip.isHidden)
 
-        header.setEditMode(available: true, isOn: true)
-        XCTAssertEqual(header.titleTextForTesting, "seahelm · feat/palette")
+        header.setHoistedStrips(.terminalOnly)
+        XCTAssertFalse(header.paneStrip.isHidden)
+        XCTAssertTrue(header.isTitleHiddenForTesting, "the strip takes the row")
 
-        header.setEditMode(available: true, isOn: false)
-        XCTAssertEqual(header.titleTextForTesting, "AGENTS.md", "leaving edit mode restores the pane title")
-    }
-
-    /// Merely *offering* edit mode must not swap the title — only entering it does.
-    func testAvailableButOffKeepsPaneTitle() {
-        let header = makeHeader()
-        header.setPaneTitle("AGENTS.md")
-        header.setEditMode(available: true, isOn: false)
-        XCTAssertEqual(header.titleTextForTesting, "AGENTS.md")
-    }
-
-    /// A pane title arriving mid-edit-mode must not displace the context.
-    func testPaneTitleUpdateDoesNotOverrideContext() {
-        let header = makeHeader()
-        header.setWorktreeContext("seahelm · main")
-        header.setEditMode(available: true, isOn: true)
-        header.setPaneTitle("AGENTS.md")
-        XCTAssertEqual(header.titleTextForTesting, "seahelm · main")
-    }
-
-    /// …and a context arriving while edit mode is on must land immediately, since
-    /// the worktree can change under an open edit layout.
-    func testContextUpdateAppliesWhileEditModeIsOn() {
-        let header = makeHeader()
-        header.setEditMode(available: true, isOn: true)
-        header.setWorktreeContext("teamclaw · fix/thing")
-        XCTAssertEqual(header.titleTextForTesting, "teamclaw · fix/thing")
-    }
-
-    // MARK: - Edit-mode tab strips (owned by the header)
-
-    /// The header owns the strips outright. They were previously moved up from the
-    /// columns, which left the moved strip's clip view seated at a non-zero vertical
-    /// origin — every frame stayed correct while the tabs sat outside the visible
-    /// rect, painting an empty row. Owning them removes that failure mode.
-    func testStripsAreOwnedAndHiddenUntilEditMode() {
-        let header = makeHeader()
-        XCTAssertTrue(header.editTerminalStrip.superview === header)
-        XCTAssertTrue(header.editPreviewStrip.superview === header)
-        XCTAssertTrue(header.editTerminalStrip.isHidden)
-
-        header.setEditStripsActive(true, ratio: 0.5)
-        XCTAssertFalse(header.editTerminalStrip.isHidden)
-        XCTAssertFalse(header.editPreviewStrip.isHidden)
-        XCTAssertTrue(header.isTitleHiddenForTesting, "the strips take the whole row")
-
-        header.setEditStripsActive(false, ratio: 0.5)
-        XCTAssertTrue(header.editTerminalStrip.isHidden)
+        header.setHoistedStrips(.none)
+        XCTAssertTrue(header.paneStrip.isHidden)
         XCTAssertFalse(header.isTitleHiddenForTesting, "the row goes back to the title")
     }
 
-    /// Compact's single pane strip leaves the fork controls on the header; edit
-    /// mode's two strips run over them, so they step aside there.
+    /// Compact's pane strip leaves the fork controls on the header.
     func testCompactStripKeepsForkControls() {
         let header = makeHeader()
         header.setForkTarget("@feature")
@@ -94,36 +47,6 @@ final class TerminalHeaderViewTests: XCTestCase {
         header.layoutSubtreeIfNeeded()
         XCTAssertTrue(header.forkButtonIsVisibleForTesting)
         XCTAssertTrue(header.forkedBadgeIsVisibleForTesting)
-
-        header.setHoistedStrips(.edit(ratio: 0.5))
-        XCTAssertFalse(header.forkButtonIsVisibleForTesting)
-        XCTAssertFalse(header.forkedBadgeIsVisibleForTesting)
-    }
-
-    /// The seam has to land on the column divider, computed from the same width.
-    func testSeamTracksTheDividerRatio() {
-        let header = makeHeader()
-        header.setEditStripsActive(true, ratio: 0.5)
-        header.layoutSubtreeIfNeeded()
-        let midSeam = header.editPreviewStrip.frame.minX
-
-        header.setEditStripRatio(0.75)
-        header.layoutSubtreeIfNeeded()
-        XCTAssertGreaterThan(header.editPreviewStrip.frame.minX, midSeam,
-                             "a wider terminal column pushes the seam right")
-    }
-
-    /// A divider dragged to the far edge must not drive a strip negative.
-    func testExtremeRatiosKeepBothStripsPositive() {
-        let header = makeHeader()
-        header.setEditStripsActive(true, ratio: 0.5)
-
-        for ratio in [0.0, 0.02, 0.98, 1.0] as [CGFloat] {
-            header.setEditStripRatio(ratio)
-            header.layoutSubtreeIfNeeded()
-            XCTAssertGreaterThan(header.editTerminalStrip.frame.width, 0, "terminal strip at ratio \(ratio)")
-            XCTAssertGreaterThan(header.editPreviewStrip.frame.width, 0, "preview strip at ratio \(ratio)")
-        }
     }
 
     /// The fullscreen file viewer titles itself with the whole path, and tail
@@ -158,13 +81,13 @@ final class TerminalHeaderViewTests: XCTestCase {
     /// Tabs must be inside the scroll view's visible rect, not merely well-framed.
     func testStripTabsAreVisibleOnTheHeaderRow() {
         let header = makeHeader()
-        header.setEditStripsActive(true, ratio: 0.5)
-        header.editTerminalStrip.apply(items: [
+        header.setHoistedStrips(.terminalOnly)
+        header.paneStrip.apply(items: [
             .init(id: "a", title: "First", closable: false),
         ], selectedId: "a")
         header.layoutSubtreeIfNeeded()
-        XCTAssertEqual(header.editTerminalStrip.clipOriginYForTesting, 0)
-        XCTAssertTrue(header.editTerminalStrip.firstTabIsVisibleForTesting)
+        XCTAssertEqual(header.paneStrip.clipOriginYForTesting, 0)
+        XCTAssertTrue(header.paneStrip.firstTabIsVisibleForTesting)
     }
 
     // MARK: - Memory readout

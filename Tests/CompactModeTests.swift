@@ -29,10 +29,9 @@ final class CompactModeTests: XCTestCase {
         XCTAssertFalse(CompactMode.effectiveCollapsed(compactActive: false, userSidebarCollapsed: false))
     }
 
-    func testShowPaneTabsRequiresCompactAndMultipleLeaves() {
-        XCTAssertFalse(CompactMode.shouldShowPaneTabs(compactActive: true, leafCount: 1, editMode: false))
-        XCTAssertTrue(CompactMode.shouldShowPaneTabs(compactActive: true, leafCount: 2, editMode: false))
-        XCTAssertTrue(CompactMode.shouldShowPaneTabs(compactActive: false, leafCount: 1, editMode: true))
-        XCTAssertFalse(CompactMode.shouldShowPaneTabs(compactActive: false, leafCount: 2, editMode: false))
+    func testShowPaneTabsRequiresCompactAndMultiplePanes() {
+        XCTAssertFalse(CompactMode.shouldShowPaneTabs(compactActive: true, paneCount: 1))
+        XCTAssertTrue(CompactMode.shouldShowPaneTabs(compactActive: true, paneCount: 2))
+        XCTAssertFalse(CompactMode.shouldShowPaneTabs(compactActive: false, paneCount: 2))
     }
 }
