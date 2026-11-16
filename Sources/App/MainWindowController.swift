@@ -479,13 +479,23 @@ class MainWindowController: NSWindowController {
         islandController.openCommandBar(prefill: prefill)
     }
 
-    @objc func helmTaskCommand() { openHelmCockpit(prefill: "/new ") }
-    @objc func helmAgentsCommand() { openHelmCockpit(prefill: "/status") }
-    @objc func helmOrderCommand() { openHelmCockpit(prefill: "/order ") }
-    @objc func helmBroadcastCommand() { openHelmCockpit(prefill: "/broadcast ") }
-    @objc func helmReturnCommand() { openHelmCockpit(prefill: "/return ") }
-    @objc func helmAddRepoCommand() { openHelmCockpit(prefill: "/add") }
-    @objc func helmFlagCommand() { openHelmCockpit(prefill: "/feedback ") }
+    // MARK: - Menu actions (MenuBuilder)
+
+    /// Fleet ▸ Status: the core's `/status`, in the island's command bar.
+    @objc func showFleetStatus() { openHelmCockpit(prefill: "/status") }
+    /// File ▸ Add Project: the folder picker the fleet's "+" opens.
+    @objc func addProject() { tabCoordinator.addRepoViaOpenPanel(window: window) }
+    @objc func showFleetPane() { selectChromePane(.firstMate) }
+    @objc func showFilesPane() { selectChromePane(.files) }
+    @objc func showChangesPane() { selectChromePane(.changes) }
+    @objc func toggleThemeFromMenu() { toggleThemeAppearance() }
+    @objc func toggleCommandPaletteFromMenu() { toggleCommandPalette() }
+    @objc func resetSplitRatioFromMenu() { resetSplitRatio() }
+    @objc func selectNextWorktree() { selectAdjacentWorktree(forward: true) }
+    @objc func selectPreviousWorktree() { selectAdjacentWorktree(forward: false) }
+    /// Pane ▸ Zoom Pane: the focused pane full-bleed in its worktree, or back.
+    @objc func toggleZoomFocusedPane() { _ = terminalCoordinator.zoomPane(targetStationId: nil, mode: "toggle") }
+    @objc func reportIssue() { openGitHubIssue(title: "") }
 
     @objc func splitHorizontal() { splitFocusedPane(axis: .horizontal) }
     @objc func splitVertical() { splitFocusedPane(axis: .vertical) }
@@ -1695,7 +1705,7 @@ extension MainWindowController: ChromeHeaderDelegate {
 // MARK: - Theme
 
 extension MainWindowController {
-    fileprivate func toggleThemeAppearance() {
+    func toggleThemeAppearance() {
         let isDark = window?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let next: ThemeMode = isDark ? .light : .dark
         config.themeMode = next.rawValue
@@ -2559,7 +2569,7 @@ extension MainWindowController {
         tabCoordinator.cards.dismiss(card)
     }
 
-    /// ⌘J, ⌃⌃ and View ▸ First Mate: First Mate's conversation in the island,
+    /// ⌘J, ⌃⌃ and Fleet ▸ First Mate: First Mate's conversation in the island,
     /// or shut it when that is what is showing.
     @objc func toggleFirstMate() {
         islandController.toggleFirstMate()
