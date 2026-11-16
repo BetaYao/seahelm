@@ -26,6 +26,25 @@ final class UsageReadoutTests: XCTestCase {
         XCTAssertEqual(readout.segments.map(\.severity), [.ok, .ok])
     }
 
+    /// An account with no 5h window (`five_hour: null`) shows its weekly one
+    /// alone, and the pill rotates only windows with a reading.
+    @MainActor
+    func testMissingFiveHourWindowIsLeftOut() throws {
+        let weeklyOnly = UsageSnapshot(
+            provider: .claude, rateLimit: nil,
+            weeklyRateLimit: UsageRateLimitWindow(usedPercent: 9, resetsAt: nil),
+            todayTokens: nil, updatedAt: Date(timeIntervalSince1970: 0), isStale: false)
+        let readout = try XCTUnwrap(UsageSummaryFormatter.readout(for: weeklyOnly, now: Date(timeIntervalSince1970: 0)))
+        XCTAssertEqual(readout.segments.map(\.label), ["7d"])
+        XCTAssertEqual(readout.segments.map(\.percentText), ["9%"])
+
+        let model = IslandModel()
+        model.setUsageReadouts(UsageSummaryFormatter.readouts(
+            claude: weeklyOnly,
+            codex: UsageSnapshot(provider: .codex, rateLimit: nil, todayTokens: nil, updatedAt: nil, isStale: true)))
+        XCTAssertEqual(model.pillFrames.map(\.segment.percentText), ["9%"])
+    }
+
     func testSeverityEscalatesWithUsage() {
         XCTAssertEqual(UsageReadoutSegment.Severity(usedPercent: 0), .ok)
         XCTAssertEqual(UsageReadoutSegment.Severity(usedPercent: 59), .ok)
