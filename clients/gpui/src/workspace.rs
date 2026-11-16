@@ -41,7 +41,7 @@ use crate::tokens::{self, MONO, SYSTEM};
 const SIDEBAR_DEFAULT: f32 = 300.0;
 const SIDEBAR_MIN: f32 = 200.0;
 const HEADER_H: f32 = 40.0;
-/// Height of a tab strip: the document pane's, and `compact_pane_strip`.
+/// Height of the document pane's tab strip.
 const STRIP_H: f32 = 30.0;
 /// Compact drawer: sidebar width cap as a share of the window.
 const DRAWER_MAX_SHARE: f32 = 0.85;
@@ -1771,7 +1771,9 @@ impl Workspace {
         self.select_pane_tab(&id, next, window, cx);
     }
 
-    /// Pane tab strip under the header while compact (2+ leaves, terminals visible).
+    /// Compact's pane tabs (2+ leaves), drawn in the header row in place of
+    /// the title, as the macOS header hoists its pane strip: a row of their
+    /// own stacked over the document pane's tabs read as two tab bars.
     fn compact_pane_strip(&self, id: &str, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         if !self.wants_compact_pane_tabs(id) {
             return None;
@@ -1781,50 +1783,71 @@ impl Workspace {
         let focused = panes.tree.focused;
         let mut strip = div()
             .id("compact-pane-strip")
-            .flex_none()
-            .h(px(STRIP_H))
-            .px(px(8.))
+            .h_full()
+            .min_w_0()
             .flex()
             .flex_row()
-            .items_end()
+            .items_center()
             .gap(px(2.))
             .overflow_x_scroll()
-            .border_b_1()
-            .border_color(tokens::hairline())
-            .bg(tokens::sidebar_tint())
             .font_family(SYSTEM)
             .text_size(px(12.));
         for leaf in leaves {
-            let title = self.pane_tab_title(id, leaf);
+            let title = self.pane_tab_title(id, leaf, cx);
             let row = id.to_string();
+            let active = leaf == focused;
             strip = strip.child(
-                document_pane::tab_chip(
-                    SharedString::from(format!("pane-tab-{id}-{leaf}")),
-                    &title,
-                    leaf == focused,
-                    None,
-                )
-                .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
-                    w.select_pane_tab(&row, leaf, window, cx)
-                })),
+                div()
+                    .id(SharedString::from(format!("pane-tab-{id}-{leaf}")))
+                    .h(px(24.))
+                    .px(px(10.))
+                    .rounded(px(6.))
+                    .flex()
+                    .items_center()
+                    .flex_none()
+                    .cursor_pointer()
+                    .text_color(if active { tokens::ink() } else { tokens::ink_dim() })
+                    .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                    .when(active, |d| d.bg(tokens::row_hover()))
+                    .when(!active, |d| d.hover(|s| s.bg(tokens::row_hover())))
+                    .child(title)
+                    .on_click(cx.listener(move |w, _: &ClickEvent, window, cx| {
+                        w.select_pane_tab(&row, leaf, window, cx)
+                    })),
             );
         }
         Some(strip.into_any_element())
     }
 
-    fn pane_tab_title(&self, id: &str, leaf: LeafId) -> String {
+    /// A pane tab's text, in the macOS app's order (`PaneTitleResolver`): the
+    /// user's name for the pane, else the core's title for its agent session,
+    /// else — for an agent pane — the title the agent set, else the branch
+    /// (what the header shows for the worktree), and only then its `#n`.
+    fn pane_tab_title(&self, id: &str, leaf: LeafId, cx: &App) -> String {
         if let Some(d) = self.document(id).filter(|d| d.leaf == leaf) {
             return d.title();
         }
-        let session = pane_session(id, leaf);
-        let facts = self.pane_facts.get(&session);
-        match facts {
-            Some(f) => match (f.handle, f.custom_title.as_deref().or(f.display_title.as_deref())) {
-                (Some(n), Some(t)) if !t.is_empty() => format!("#{n} · {t}"),
-                (Some(n), _) => format!("#{n}"),
-                (_, Some(t)) if !t.is_empty() => t.to_string(),
-                _ => format!("Pane {leaf}"),
-            },
+        let facts = self.pane_facts.get(&pane_session(id, leaf));
+        let named = facts.and_then(|f| f.custom_title.as_deref().or(f.display_title.as_deref())).map(str::trim).filter(|t| !t.is_empty());
+        if let Some(t) = named {
+            return t.to_string();
+        }
+        // A shell's own title (user@host, a prompt) says nothing a tab needs.
+        let is_agent = facts.is_some_and(|f| !f.agent.is_empty() && !f.agent.eq_ignore_ascii_case("unknown"));
+        if is_agent {
+            if let Some(t) = self.panes.get(id).and_then(|p| p.views.get(&leaf)).and_then(|v| v.read(cx).title()) {
+                return t;
+            }
+        }
+        if let Some(item) = self.fleet.find(id) {
+            for t in [&item.branch, &item.title] {
+                if !t.trim().is_empty() {
+                    return t.trim().to_string();
+                }
+            }
+        }
+        match facts.and_then(|f| f.handle) {
+            Some(n) => format!("#{n}"),
             None => format!("Pane {leaf}"),
         }
     }
@@ -1874,13 +1897,12 @@ impl Render for Workspace {
         } else if self.first_mate_open {
             Some(self.workbench(cx))
         } else {
-            selected.as_deref().map(|id| {
-                let content = self.panes_body(id, window, cx);
-                match self.compact_pane_strip(id, cx) {
-                    None => content,
-                    Some(strip) => div().flex_1().min_h_0().flex().flex_col().child(strip).child(content).into_any_element(),
-                }
-            })
+            selected.as_deref().map(|id| self.panes_body(id, window, cx))
+        };
+        let pane_tabs = if self.settings_open || self.first_mate_open {
+            None
+        } else {
+            selected.as_deref().and_then(|id| self.compact_pane_strip(id, cx))
         };
         if !self.watching_activation {
             self.watching_activation = true;
@@ -1995,7 +2017,7 @@ impl Render for Workspace {
                 .size_0(),
             );
         }
-        root = root.child(self.terminal_column(title, cards, body, window.is_maximized(), cx));
+        root = root.child(self.terminal_column(title, pane_tabs, cards, body, window.is_maximized(), cx));
         if self.sidebar_docked() {
             root = root.child(self.divider(width, cx));
         }
@@ -2252,6 +2274,7 @@ impl Workspace {
     fn terminal_column(
         &self,
         title: SharedString,
+        pane_tabs: Option<gpui::AnyElement>,
         cards: Option<gpui::AnyElement>,
         body: Option<gpui::AnyElement>,
         maximized: bool,
@@ -2279,7 +2302,7 @@ impl Workspace {
                 ),
             )
             .child(div().ml(px(6.)).font_family(SYSTEM).text_size(px(11.)).line_height(px(15.)).text_color(tokens::ink_dim()).child(memory))
-            .child(
+            .when(pane_tabs.is_none(), |d| d.child(
                 // Truly centred, over the whole header.
                 div()
                     .absolute()
@@ -2297,7 +2320,8 @@ impl Workspace {
                             .text_color(fg)
                             .child(title),
                     ),
-            )
+            ))
+            .when_some(pane_tabs, |d, tabs| d.child(div().ml(px(10.)).mr(px(8.)).h_full().flex_1().min_w_0().child(tabs)))
             .child(div().flex_1())
             .when(self.settings_open, |d| {
                 d.child(

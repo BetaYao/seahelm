@@ -170,12 +170,12 @@ impl TerminalView {
         self.suggestion_hits.iter().find(|(b, _)| b.contains(&position)).map(|(_, i)| *i)
     }
 
-    pub fn title(&self) -> String {
+    /// The title the program in the pane set (OSC 0/2), if any.
+    pub fn title(&self) -> Option<String> {
         self.session
             .as_ref()
-            .and_then(|s| s.grid.lock().ok().map(|g| g.title.clone()))
+            .and_then(|s| s.grid.lock().ok().map(|g| g.title.trim().to_string()))
             .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| self.name.clone())
     }
 
     /// Attach on the first layout, when the size is known: a held session
