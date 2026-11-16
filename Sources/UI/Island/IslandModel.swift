@@ -358,10 +358,14 @@ final class IslandModel {
     /// Every known window, flattened across providers — Claude 5h, Claude 7d,
     /// Codex 5h — so the pill rotates one window at a time instead of trying
     /// to fit a whole provider into a wing.
+    /// Windows with no reading ("--") are skipped while any window has one,
+    /// so the pill does not spend a turn in three on a blank.
     var pillFrames: [PillUsageFrame] {
-        usageReadouts.flatMap { readout in
+        let all = usageReadouts.flatMap { readout in
             readout.segments.map { PillUsageFrame(logoName: readout.logoName, segment: $0) }
         }
+        let known = all.filter { $0.segment.severity != .unknown }
+        return known.isEmpty ? all : known
     }
 
     /// The window currently on show. Pending orders own the left wing, so

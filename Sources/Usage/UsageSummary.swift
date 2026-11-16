@@ -180,7 +180,12 @@ enum UsageSummaryFormatter {
         var segments: [UsageReadoutSegment] = []
         if let window = snapshot.rateLimit {
             segments.append(segment(label: window.label ?? "5h", window: window, now: now))
-        } else {
+        } else if snapshot.weeklyRateLimit == nil {
+            // A window the account does not have (Claude has reported no 5h
+            // window on some plans: its statusline payload and its own usage
+            // endpoint both send `five_hour: null`) is left out rather than
+            // drawn as "--" beside the weekly one. Placeholders stay only
+            // while nothing at all is known.
             let defaultLabel = snapshot.provider == .claude ? "5h" : "quota"
             segments.append(placeholderSegment(label: defaultLabel))
         }
