@@ -176,4 +176,24 @@ final class SelectedFilePathResolutionTests: XCTestCase {
                                                     bases: [tmpDir]).isEmpty)
     }
 
+    /// An agent that went into another worktree names files relative to it,
+    /// while its pane stays filed where it was (#598 writing a storyboard into
+    /// another repo's worktree): the path resolves against the agent's place.
+    func testPathsResolveWhereTheAgentIsWorking() throws {
+        let file = try touch("other-repo/projects/teamclu/storyboards/ep06.md")
+        let other = (tmpDir as NSString).appendingPathComponent("other-repo")
+        let filed = (tmpDir as NSString).appendingPathComponent("filed")
+        try FileManager.default.createDirectory(atPath: filed, withIntermediateDirectories: true)
+        let line = GhosttyNSView.tokensByProximity(in: "第 6 集写好了，在 projects/teamclu/storyboards/ep06.md，认可之前", to: nil)
+
+        let withoutAgent = GhosttyNSView.pathResolutionBases(pwd: nil, filedWorktree: filed, initialDirectory: filed,
+                                                             agentLocation: nil)
+        XCTAssertTrue(GhosttyNSView.resolvableFiles(in: line, bases: withoutAgent).isEmpty)
+
+        let away = Station.HookLocation(worktreePath: other, cwd: (other as NSString).appendingPathComponent("projects"))
+        let withAgent = GhosttyNSView.pathResolutionBases(pwd: nil, filedWorktree: filed, initialDirectory: filed,
+                                                          agentLocation: away)
+        XCTAssertEqual(GhosttyNSView.resolvableFiles(in: line, bases: withAgent).map(\.path),
+                       [URL(fileURLWithPath: file).standardizedFileURL.path])
+    }
 }
