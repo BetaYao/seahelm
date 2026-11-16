@@ -16,6 +16,7 @@
 
 mod actions;
 mod bridge;
+mod claude_trust;
 mod cli;
 mod command;
 mod core;
