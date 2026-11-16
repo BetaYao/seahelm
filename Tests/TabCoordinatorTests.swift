@@ -69,6 +69,23 @@ final class TabCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.allWorktrees.isEmpty)
     }
 
+    /// A worktree made again at a deleted one's path must start fresh, not
+    /// restore the old panes from a layout that outlived it.
+    func testWorktreeDidDeleteForgetsItsLayout() {
+        let coordinator = TabCoordinator(config: Config())
+        coordinator.terminalCoordinator = TerminalCoordinator(config: Config(), activeSplitContainer: { nil })
+        coordinator.statusAggregator = WorktreeStatusAggregator()
+        let info = WorktreeInfo(path: "/tmp/test-wt-layout", branch: "feature", commitHash: "", isMainWorktree: false)
+        let tree = SplitTree(worktreePath: info.path, rootLeafId: "leaf-1", stationId: "surface-1", paneSessionKey: "test")
+        coordinator.allWorktrees.append((info: info, tree: tree))
+        coordinator.terminalCoordinator.config.splitLayouts[info.path] = tree.toCodable()
+        coordinator.terminalCoordinator.config.focusedPaneIds[info.path] = "leaf-1"
+
+        coordinator.worktreeDidDelete(info)
+        XCTAssertNil(coordinator.terminalCoordinator.config.splitLayouts[info.path])
+        XCTAssertNil(coordinator.terminalCoordinator.config.focusedPaneIds[info.path])
+    }
+
     /// Auto-add follows an agent's cwd, so a repo cloned into a temp dir for a build
     /// must not be joined to the workspace — `workspacePaths` is never pruned, so the
     /// entry would outlive the directory.
