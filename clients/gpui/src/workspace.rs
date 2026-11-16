@@ -2327,15 +2327,6 @@ impl Workspace {
                         .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.toggle_first_mate(window, cx))),
                 )
             })
-            .when(!self.first_mate_open && !self.settings_open, |d| {
-                d.child(
-                    div().mr(px(8.)).child(
-                        icon_button("columns-2", tokens::alpha(fg, 0.55))
-                            .id("split-right")
-                            .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.split(Axis::Horizontal, window, cx))),
-                    ),
-                )
-            })
             // Expand fleet when collapsed (compact or ⌘B), as the macOS terminal header does.
             .when(!self.sidebar_visible, |d| {
                 d.child(
