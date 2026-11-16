@@ -74,7 +74,7 @@ impl Workspace {
             menu = menu
                 .child(item("pm-preview", "Preview", true).on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
                     w.pane_menu = None;
-                    w.open_preview(crate::side_panel::OpenItem::File { worktree: root.clone(), path: rel.clone() }, cx);
+                    w.open_document(crate::side_panel::OpenItem::File { worktree: root.clone(), path: rel.clone() }, cx);
                 })))
                 .child(separator());
         }

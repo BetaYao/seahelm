@@ -29,8 +29,8 @@ mod pane_extras;
 mod share_popover;
 #[path = "pane_menu.rs"]
 mod pane_menu;
-#[path = "preview_tabs.rs"]
-mod preview_tabs;
+#[path = "document_pane.rs"]
+mod document_pane;
 use worktree_menu::{CancelSheet, NewWorktree, RowMenu};
 use crate::side_panel::{self, SidePanel, Tab as SideTab};
 use crate::split::{Axis, Direction, LeafId, Rect, SplitTree};
@@ -41,7 +41,7 @@ use crate::tokens::{self, MONO, SYSTEM};
 const SIDEBAR_DEFAULT: f32 = 300.0;
 const SIDEBAR_MIN: f32 = 200.0;
 const HEADER_H: f32 = 40.0;
-/// Height of a tab strip above the panes (`preview_strip`, `compact_pane_strip`).
+/// Height of a tab strip: the document pane's, and `compact_pane_strip`.
 const STRIP_H: f32 = 30.0;
 /// Compact drawer: sidebar width cap as a share of the window.
 const DRAWER_MAX_SHARE: f32 = 0.85;
@@ -139,7 +139,26 @@ struct Panes {
     /// running on in seahelmd until the pane is woken (the macOS app's
     /// Sleep Pane, which frees the surface the same way).
     asleep: std::collections::HashSet<LeafId>,
+    /// Files and changes opened here, in a pane of their own (`document_pane`).
+    document: Option<document_pane::DocPane>,
     _subscriptions: Vec<Subscription>,
+}
+
+impl Panes {
+    /// The tree as it is saved: without the document pane, which is never
+    /// restored. None when what is left is a single pane.
+    fn saved_tree(&self) -> Option<SplitTree> {
+        let mut tree = self.tree.clone();
+        if let Some(d) = &self.document {
+            tree.remove(d.leaf);
+        }
+        (tree.len() > 1).then_some(tree)
+    }
+
+    /// Panes with a terminal: every leaf but the document pane's.
+    fn terminal_count(&self) -> usize {
+        self.tree.len() - usize::from(self.document.as_ref().is_some_and(|d| self.tree.leaves().contains(&d.leaf)))
+    }
 }
 
 /// A divider being dragged.
@@ -233,8 +252,6 @@ pub struct Workspace {
     share_lifetime: crate::gateway_client::Lifetime,
     /// Who is at work on a pane through the core, by session.
     presence: HashMap<String, pane_extras::Presence>,
-    /// Files and changes opened as tabs in the main area, by worktree.
-    preview_tabs: HashMap<String, preview_tabs::PreviewTabs>,
     /// The worktree and leaf shown alone (zoomed), if any.
     zoomed: Option<(String, LeafId)>,
     /// AI agents for the empty right panel (PATH scan; refreshed on activate).
@@ -250,7 +267,7 @@ impl Workspace {
         let side_closed = cx.subscribe(&side_panel, |w, _, _: &side_panel::CloseRequested, cx| w.set_side(None, cx));
         cx.subscribe(&side_panel, |w, _, e: &side_panel::OpenRequested, cx| {
             w.close_drawer();
-            w.open_preview(e.0.clone(), cx)
+            w.open_document(e.0.clone(), cx)
         })
         .detach();
         let this = Self {
@@ -305,7 +322,6 @@ impl Workspace {
             share_lifetime: crate::gateway_client::Lifetime::Day,
             presence: HashMap::new(),
             zoomed: None,
-            preview_tabs: HashMap::new(),
             agents: agents::scan(),
         };
         Self::poll_pane_facts(cx);
@@ -605,8 +621,8 @@ impl Workspace {
 
     /// A card's button took the click; typing goes back to the terminal.
     fn refocus_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(view) = self.selected.clone().and_then(|id| self.terminal_for(&id, window, cx)) {
-            window.focus(&view.focus_handle(cx));
+        if let Some(id) = self.selected.clone() {
+            self.focus_focused(&id, window, cx);
         }
     }
 
@@ -1162,23 +1178,41 @@ impl Workspace {
         // On screen in a frontmost window: a turn that ends here is seen.
         self.report_visible(window.is_window_active(), cx);
         notify::log("select", serde_json::json!({"worktree": id}));
-        if let Some(term) = self.terminal_for(&id, window, cx) {
-            window.focus(&term.focus_handle(cx));
-        }
+        self.focus_focused(&id, window, cx);
         cx.notify();
     }
 
     /// The session the focused pane of the selected worktree is on.
+    /// None while the document pane has focus: it has no session.
     fn focused_session(&self) -> Option<String> {
         let id = self.selected.as_deref()?;
         let leaf = self.panes.get(id).map_or(0, |p| p.tree.focused);
+        if self.is_document(id, leaf) {
+            return None;
+        }
         Some(pane_session(id, leaf))
     }
 
-    /// The worktree's focused terminal, its panes made on first use.
-    fn terminal_for(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<TerminalView>> {
+    /// Focus the worktree's focused pane, its terminal made on first use.
+    /// False when there is nothing to focus (an asleep pane).
+    fn focus_focused(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let leaf = self.panes.entry(id.to_string()).or_default().tree.focused;
-        self.view_for(id, leaf, window, cx)
+        self.focus_leaf(id, leaf, window, cx)
+    }
+
+    /// Focus one pane: the document pane's own handle, or the terminal's.
+    fn focus_leaf(&mut self, id: &str, leaf: LeafId, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if let Some(d) = self.document(id).filter(|d| d.leaf == leaf) {
+            window.focus(&d.focus.clone());
+            return true;
+        }
+        match self.view_for(id, leaf, window, cx) {
+            Some(v) => {
+                window.focus(&v.focus_handle(cx));
+                true
+            }
+            None => false,
+        }
     }
 
     /// Every pane with a terminal, as `pane.register` takes it.
@@ -1199,6 +1233,10 @@ impl Workspace {
     fn view_for(&mut self, id: &str, leaf: LeafId, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<TerminalView>> {
         if let Some(t) = self.panes.get(id).and_then(|p| p.views.get(&leaf)) {
             return Some(t.clone());
+        }
+        // The document pane is no terminal: no session, no registration.
+        if self.is_document(id, leaf) {
+            return None;
         }
         if self.panes.get(id).is_some_and(|p| p.asleep.contains(&leaf)) {
             return None;
@@ -1247,8 +1285,7 @@ impl Workspace {
     }
 
     fn save_layouts(&self) {
-        let layouts: HashMap<&String, &SplitTree> =
-            self.panes.iter().filter(|(_, p)| p.tree.len() > 1).map(|(id, p)| (id, &p.tree)).collect();
+        let layouts: HashMap<&String, SplitTree> = self.panes.iter().filter_map(|(id, p)| Some((id, p.saved_tree()?))).collect();
         if let Ok(text) = serde_json::to_string(&layouts) {
             let _ = std::fs::create_dir_all(platform::config_dir());
             let _ = std::fs::write(layout_file(), text);
@@ -1272,7 +1309,13 @@ impl Workspace {
         let Some(id) = self.selected.clone() else { return };
         let Some(panes) = self.panes.get_mut(&id) else { return };
         let leaf = panes.tree.focused;
-        if !panes.tree.remove(leaf) {
+        // ⌘W on the document pane closes the tab on screen; the last tab, the pane.
+        if panes.document.as_ref().is_some_and(|d| d.leaf == leaf) {
+            self.close_active_document_tab(&id, cx);
+            return;
+        }
+        // The last terminal stays, even beside a document pane.
+        if panes.terminal_count() <= 1 || !panes.tree.remove(leaf) {
             return;
         }
         panes.views.remove(&leaf);
@@ -1285,9 +1328,7 @@ impl Workspace {
             })
             .detach();
         self.save_layouts();
-        if let Some(v) = self.terminal_for(&id, window, cx) {
-            window.focus(&v.focus_handle(cx));
-        }
+        self.focus_focused(&id, window, cx);
         cx.notify();
     }
 
@@ -1303,9 +1344,7 @@ impl Workspace {
             p.tree.focused = next;
         }
         self.save_layouts();
-        if let Some(v) = self.view_for(&id, next, window, cx) {
-            window.focus(&v.focus_handle(cx));
-        }
+        self.focus_leaf(&id, next, window, cx);
         cx.notify();
     }
 
@@ -1335,7 +1374,7 @@ impl Workspace {
         let zoomed = self.display_zoomed_leaf(id);
         let several = tree.len() > 1 && zoomed.is_none();
         // Panes are placed as fractions of the body, not px from the window:
-        // the card, preview and pane-tab strips above it change its height,
+        // the card and pane-tab strips above it change its height,
         // and px sizes made from the window ran the bottom rows off screen.
         let measured = self.body_rect.clone();
         let mut body = div()
@@ -1353,6 +1392,15 @@ impl Workspace {
             None => tree.frames(),
         };
         for (leaf, r) in frames {
+            if self.is_document(id, leaf) {
+                let Some(doc) = self.document_element(id, cx) else { continue };
+                let mut pane = div().absolute().left(relative(r.x)).top(relative(r.y)).w(relative(r.w)).h(relative(r.h)).child(doc);
+                if several && leaf != tree.focused {
+                    pane = pane.child(div().absolute().inset_0().bg(tokens::inactive_wash()));
+                }
+                body = body.child(pane);
+                continue;
+            }
             if self.panes.get(id).is_some_and(|p| p.asleep.contains(&leaf)) {
                 let worktree = id.to_string();
                 body = body.child(
@@ -1681,11 +1729,8 @@ impl Workspace {
         }
     }
 
-    /// Compact pane tabs for this worktree (not while a preview file tab is up).
+    /// Compact pane tabs for this worktree (the document pane is one of them).
     fn wants_compact_pane_tabs(&self, id: &str) -> bool {
-        if self.preview_active(id) {
-            return false;
-        }
         let leaf_count = self.panes.get(id).map(|p| p.tree.len()).unwrap_or(0);
         crate::compact::should_show_pane_tabs(self.compact_active, leaf_count)
     }
@@ -1706,9 +1751,7 @@ impl Workspace {
             p.tree.focused = leaf;
         }
         self.save_layouts();
-        if let Some(v) = self.view_for(id, leaf, window, cx) {
-            window.focus(&v.focus_handle(cx));
-        }
+        self.focus_leaf(id, leaf, window, cx);
         cx.notify();
     }
 
@@ -1755,7 +1798,7 @@ impl Workspace {
             let title = self.pane_tab_title(id, leaf);
             let row = id.to_string();
             strip = strip.child(
-                preview_tabs::tab_chip(
+                document_pane::tab_chip(
                     SharedString::from(format!("pane-tab-{id}-{leaf}")),
                     &title,
                     leaf == focused,
@@ -1770,6 +1813,9 @@ impl Workspace {
     }
 
     fn pane_tab_title(&self, id: &str, leaf: LeafId) -> String {
+        if let Some(d) = self.document(id).filter(|d| d.leaf == leaf) {
+            return d.title();
+        }
         let session = pane_session(id, leaf);
         let facts = self.pane_facts.get(&session);
         match facts {
@@ -1829,24 +1875,10 @@ impl Render for Workspace {
             Some(self.workbench(cx))
         } else {
             selected.as_deref().map(|id| {
-                let content = match self.preview_active(id).then(|| self.preview_body(id)).flatten() {
-                    Some(p) => p,
-                    None => self.panes_body(id, window, cx),
-                };
-                let preview = self.preview_strip(id, cx);
-                let pane_tabs = self.compact_pane_strip(id, cx);
-                match (preview, pane_tabs) {
-                    (None, None) => content,
-                    (preview, pane_tabs) => {
-                        let mut col = div().flex_1().min_h_0().flex().flex_col();
-                        if let Some(s) = preview {
-                            col = col.child(s);
-                        }
-                        if let Some(s) = pane_tabs {
-                            col = col.child(s);
-                        }
-                        col.child(content).into_any_element()
-                    }
+                let content = self.panes_body(id, window, cx);
+                match self.compact_pane_strip(id, cx) {
+                    None => content,
+                    Some(strip) => div().flex_1().min_h_0().flex().flex_col().child(strip).child(content).into_any_element(),
                 }
             })
         };
@@ -1864,10 +1896,11 @@ impl Render for Workspace {
             })
             .detach();
         }
-        if self.needs_focus && !self.settings_open && !selected.as_deref().is_some_and(|id| self.preview_active(id)) {
-            if let Some(view) = selected.as_deref().and_then(|id| self.terminal_for(id, window, cx)) {
-                window.focus(&view.focus_handle(cx));
-                self.needs_focus = false;
+        if self.needs_focus && !self.settings_open {
+            if let Some(id) = selected.as_deref() {
+                if self.focus_focused(id, window, cx) {
+                    self.needs_focus = false;
+                }
             }
         }
         let title: SharedString = match selected.as_deref().and_then(|id| self.fleet.find(id)) {
