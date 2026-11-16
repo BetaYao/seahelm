@@ -21,7 +21,7 @@ use seahelm_core_registry::notify::{
     self, CompletionInput, CompletionSignals, CompletionStep, Decision, Notice, NotificationPolicy, NotifyRequest,
 };
 use seahelm_core_registry::rollup::{Aggregator, PaneUpdate};
-use seahelm_core_registry::{HookInput, Outcome, Registration, Registry};
+use seahelm_core_registry::{HookInput, HookModel, Outcome, Registration, Registry};
 use seahelm_core_scan::manifest::ManifestStore;
 use seahelm_core_scan::pane::{PaneScanner, ScanInput};
 use seahelm_core_scan::process::{self, Probe, ProcessTable};
@@ -489,9 +489,15 @@ impl Core {
                     self.queue_cursor_prose(pane.clone(), alias.clone(), cwd.clone(), chat_id.clone(), *session_start, p, now);
                     return Reply::Value(Ok(match stdout { Some(out) => json!({"stdout": out}), None => json!({}) }));
                 }
+                let mut transcript_model = None;
                 let prose = wanted.map(|request| {
                     let entries = match request.source {
-                        TranscriptSource::File(path) => self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).new_prose(&path, request.since),
+                        TranscriptSource::File(path) => {
+                            let mut tail = self.transcripts.lock().unwrap_or_else(|e| e.into_inner());
+                            let entries = tail.new_prose(&path, request.since);
+                            transcript_model = tail.model(&path).cloned();
+                            entries
+                        }
                         TranscriptSource::Cursor { .. } => unreachable!(),
                     };
                     let (pane, alias) = (request.pane, request.alias);
@@ -512,7 +518,7 @@ impl Core {
                         st.messages.append(rows);
                     }
                 }
-                st.hook(p, now);
+                st.hook_with_model(p, now, transcript_model);
                 let moved = st.registry.seq() != before || st.messages.seq() != before_messages;
                 let prompts = if st.messages.seq() != before_messages { user_prompts(&st, before_messages, now) } else { Vec::new() };
                 let at_desk = st.app_active;
@@ -2253,7 +2259,21 @@ impl State {
     /// One hook payload, end to end (the app's event sink, provider and
     /// `handleWebhookEvent`, in that order).
     fn hook(&mut self, payload: Value, now: Timestamp) {
+        self.hook_with_model(payload, now, None);
+    }
+
+    /// A hook, with the model its transcript last named (read off the lock,
+    /// with the prose): that outranks the hook's own `model`, since Claude
+    /// Code names one only at SessionStart and `/model` changes it later.
+    fn hook_with_model(&mut self, payload: Value, now: Timestamp, transcript_model: Option<seahelm_core_messages::transcript::Model>) {
         let Some(event) = hooks::event::parse(&payload) else { return };
+        // A subagent's hooks name its own model, not the pane's.
+        let model = transcript_model.map(|m| HookModel { name: m.name, effort: m.effort }).or_else(|| {
+            (!event.is_subagent())
+                .then(|| event.data_str("model").map(str::trim).filter(|m| !m.is_empty() && !m.starts_with('<')))
+                .flatten()
+                .map(|name| HookModel { name: name.to_string(), effort: None })
+        });
         if let Some(scan) = event.pane_id.as_deref().and_then(|p| self.registry.resolve(Some(p), "")).and_then(|id| self.panes.get_mut(&id)) {
             // A hook means the screen is about to change: look at the next frame.
             scan.scanner.invalidate();
@@ -2324,7 +2344,7 @@ impl State {
                 .get("last_assistant_message")
                 .and_then(Value::as_str)
                 .map(|m| hooks::suggest::strip_sentinel(m));
-            let input = HookInput { pane_hint: ev.pane_id.clone(), cwd: ev.cwd.clone(), source: ev.source.clone(), kind, last_assistant_message };
+            let input = HookInput { pane_hint: ev.pane_id.clone(), cwd: ev.cwd.clone(), source: ev.source.clone(), kind, last_assistant_message, model: model.clone() };
             let live = |name: &str| seahelmd::client::connect(name).is_ok();
             let manifests = &self.manifests;
             let result = self.registry.ingest_hook(input, &live, &|a| manifests.authority(a), now);

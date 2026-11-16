@@ -22,5 +22,5 @@ pub mod unseen;
 pub use events::EventHub;
 pub use pane::{PaneInfo, Registration};
 pub use registry::{
-    arbitrate, arbitrate_detailed, DecidedBy, Graces, HookInput, HookResult, Outcome, Registry,
+    arbitrate, arbitrate_detailed, DecidedBy, Graces, HookInput, HookModel, HookResult, Outcome, Registry,
 };

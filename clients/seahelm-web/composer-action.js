@@ -54,5 +54,26 @@
     return label ? { kind: 'agent', label } : { kind: 'shell', label: 'Terminal' };
   }
 
-  return { composerAction, STOPPABLE, paneKind, AGENT_LABELS };
+  /**
+   * The model the agent answers with, short enough for the composer's tag:
+   * Claude's ids read as their names (`claude-opus-5-5` → `Opus 5.5`, a
+   * dated snapshot's date and a `[1m]` context tag dropped), every other id
+   * as written. Codex's reasoning effort follows it.
+   * @returns {string} '' when the core has not named one
+   */
+  function modelLabel(model, effort) {
+    let name = typeof model === 'string' ? model.trim() : '';
+    if (!name) return '';
+    const claude = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[[^\]]*\])?$/.exec(name)
+      // The older order: claude-3-5-sonnet-20241022.
+      || /^claude-(\d+)(?:-(\d{1,2}))?-([a-z]+)(?:-\d{8})?$/.exec(name);
+    if (claude) {
+      const [family, major, minor] = /^\d/.test(claude[1]) ? [claude[3], claude[1], claude[2]] : [claude[1], claude[2], claude[3]];
+      name = family[0].toUpperCase() + family.slice(1) + ' ' + major + (minor ? '.' + minor : '');
+    }
+    const e = typeof effort === 'string' ? effort.trim() : '';
+    return e ? `${name} · ${e}` : name;
+  }
+
+  return { composerAction, STOPPABLE, paneKind, AGENT_LABELS, modelLabel };
 });

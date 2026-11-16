@@ -1440,6 +1440,8 @@ function onPaneStatus(p){
   if (!pane) { refreshFleetSoon(true); return; }
   if (p.status) pane.status = p.status;
   if (p.agent_type) pane.agent_type = p.agent_type;
+  // Told with every agent change: absent means the core names none (yet).
+  if (p.agent_type || 'model' in p) { pane.model = p.model || ''; pane.effort = p.effort || ''; }
   if (typeof p.last_message === 'string') pane.last_message = p.last_message;
   if (typeof p.unseen === 'boolean') pane.unseen = p.unseen;
   // Renamed (here or on another client): the name, and the title it falls back to.
@@ -2232,7 +2234,9 @@ function renderComposerKind(pane){
     : `Message ${k.label}…`;
   if (input.placeholder !== placeholder) input.placeholder = placeholder;
   if (tag) {
-    tag.textContent = k ? (kind === 'shell' ? 'Terminal · no agent' : k.label) : '';
+    const model = k && kind === 'agent' ? SeahelmComposerAction.modelLabel(pane.model, pane.effort) : '';
+    tag.textContent = k ? (kind === 'shell' ? 'Terminal · no agent' : model ? `${k.label} · ${model}` : k.label) : '';
+    tag.title = model && pane.model !== model ? pane.model : '';
     tag.hidden = !k;
   }
 }
