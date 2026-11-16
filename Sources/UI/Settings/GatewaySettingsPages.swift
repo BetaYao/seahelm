@@ -25,6 +25,7 @@ final class GatewaySettingsPages: NSObject {
     private let telegramUsersView = NSTextView()
     private let telegramUsersScrollView = NSScrollView()
     private let telegramDefaultChatField = SettingsTextField()
+    private let telegramAPIField = SettingsTextField()
     private let telegramMiniAppField = SettingsTextField()
     private let telegramMiniAppStatus = NSTextField(labelWithString: "")
     private lazy var telegramEnabledToggle = SettingsControls.toggle(
@@ -122,7 +123,7 @@ final class GatewaySettingsPages: NSObject {
             label.isHidden = up
         }
         let controls: [NSControl] = [
-            telegramTokenField, telegramDefaultChatField, telegramMiniAppField, telegramEnabledToggle,
+            telegramTokenField, telegramDefaultChatField, telegramAPIField, telegramMiniAppField, telegramEnabledToggle,
             telegramSetupButton, telegramTestButton, copyMiniAppButton,
             webEnabledToggle, webPortField, webPublicURLField, webOpenPageButton,
         ]
@@ -149,6 +150,7 @@ final class GatewaySettingsPages: NSObject {
             telegramUsersView.string = t.allowedUsers.joined(separator: "\n")
         }
         telegramDefaultChatField.stringValue = t.defaultChatId ?? ""
+        telegramAPIField.stringValue = t.apiURL ?? ""
         telegramEnabledToggle.state = t.enabled ? .on : .off
         telegramMiniAppField.stringValue = t.miniAppURL ?? ""
         refreshTelegramMiniAppStatus()
@@ -261,6 +263,12 @@ final class GatewaySettingsPages: NSObject {
 
         telegramEnabledToggle.setAccessibilityIdentifier("settings.telegram.autoConnect")
 
+        telegramAPIField.placeholderString = "https://api.telegram.org"
+        telegramAPIField.font = AppFont.mono(size: 12, weight: .regular)
+        telegramAPIField.setAccessibilityIdentifier("settings.telegram.apiURL")
+        telegramAPIField.target = self
+        telegramAPIField.action = #selector(telegramAPIChanged)
+
         telegramMiniAppField.placeholderString = "https://tg.example.com/"
         telegramMiniAppField.font = AppFont.mono(size: 12, weight: .regular)
         telegramMiniAppField.setAccessibilityIdentifier("settings.telegram.miniApp")
@@ -330,6 +338,9 @@ final class GatewaySettingsPages: NSObject {
                 SettingsRow.make("Notify",
                                  subtitle: "Chat id where agent-finished notifications go. Empty means the first numeric allowed user, or failing that the chat your last command came from.",
                                  control: telegramDefaultChatField),
+                SettingsRow.make("API URL",
+                                 subtitle: "Leave empty to reach Telegram directly. Where api.telegram.org cannot be reached, an https reverse proxy that forwards to it unchanged \u{2014} scripts/telegram-proxy-worker.js deploys one on Cloudflare Workers. Changing it reconnects the bot.",
+                                 control: telegramAPIField),
                 SettingsRow.make("Bot on", control: telegramEnabledToggle),
                 SettingsRow.make("In a group",
                                  subtitle: "Send a slash command (/status, or /status@yourbot when several bots share the group), start a line with @yourbot, or reply to one of the bot's messages. A bare line in a group stays conversation \u{2014} only a private chat takes plain prose as an order."),
@@ -404,6 +415,16 @@ final class GatewaySettingsPages: NSObject {
 
     @objc private func telegramChatChanged() {
         write(["telegram": ["default_chat_id": telegramDefaultChatField.stringValue.trimmingCharacters(in: .whitespaces)]])
+    }
+
+    @objc private func telegramAPIChanged() {
+        let text = telegramAPIField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.isEmpty || Self.isHTTPS(text) else {
+            telegramStatusLabel.stringValue = "The API URL must start with https://"
+            telegramStatusLabel.textColor = .systemOrange
+            return
+        }
+        write(["telegram": ["api_url": text]])
     }
 
     @objc private func telegramEnabledChanged() {
