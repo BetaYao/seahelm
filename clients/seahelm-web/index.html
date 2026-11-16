@@ -458,6 +458,10 @@
      under 16px). */
   #messageTimeline{--fs-body:14px;--fs-sub:12px;--fs-cap:11px;--fs-mono:12px}
   @media (max-width:760px){ #messageTimeline{--fs-body:16px;--fs-sub:14px;--fs-cap:12px;--fs-mono:12px} }
+  /* The docked column is narrow but on a desktop screen: the phone's type
+     scale above would make it read larger than the middle beside it. */
+  body[data-dock="mate"]{--fs-body:15px;--fs-sub:13px;--fs-cap:12px;--fs-title:28px}
+  body[data-dock="mate"] #messageTimeline{--fs-body:14px;--fs-sub:12px;--fs-cap:11px;--fs-mono:12px}
   .tl{width:100%;max-width:760px;margin:0 auto}
   .tl-empty{padding:56px 8px;text-align:center;color:var(--muted);font-size:var(--fs-sub)}
   .tl-more{padding:12px 0 2px;text-align:center;font-size:var(--fs-cap);color:var(--faint)}
