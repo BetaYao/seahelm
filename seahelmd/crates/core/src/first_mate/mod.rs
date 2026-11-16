@@ -17,6 +17,7 @@ pub mod brief;
 pub mod budget;
 pub mod clock;
 pub mod cron;
+pub mod daily_stats;
 pub mod engine;
 pub mod facts;
 pub mod habits;
@@ -381,6 +382,13 @@ struct FirstMate {
     /// a brief for Telegram is only sent, and only counts, when it can.
     telegram_ready: Box<dyn Fn() -> bool + Send>,
     telegram_checked: Option<(Instant, bool)>,
+    /// Measures the days the brief's "yesterday's work" needs (git and
+    /// GitHub). Unit tests measure nothing: they must not read the machine's
+    /// repositories or call `gh`.
+    measure_work: std::sync::Arc<dyn Fn(&[daily_stats::DayRef], &[String]) -> HashMap<String, daily_stats::Day> + Send + Sync>,
+    /// Those days measured off this thread ahead of the brief (seconds of
+    /// git and GitHub): the report day they are for, and the job.
+    work_prefetch: Option<(String, std::thread::JoinHandle<HashMap<String, daily_stats::Day>>)>,
 }
 
 /// Start First Mate's thread. It does nothing until the config gives it
@@ -468,6 +476,8 @@ impl FirstMate {
             expired_confirms: HashSet::new(),
             telegram_ready: Box::new(brief::telegram_ready),
             telegram_checked: None,
+            measure_work: if cfg!(test) { std::sync::Arc::new(|_, _| HashMap::new()) } else { std::sync::Arc::new(daily_stats::measure) },
+            work_prefetch: None,
         }
     }
 }
