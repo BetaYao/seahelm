@@ -337,8 +337,12 @@ struct Config: Codable {
         Config.write(self)
     }
 
+    /// Unit tests run inside the app and build throwaway configs; a save from
+    /// one must never reach the user's real file.
+    private static let isUnitTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     private static func write(_ config: Config) {
-        guard !writesBlocked else { return }
+        guard !writesBlocked, !isUnitTest else { return }
         do {
             try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
             let encoder = JSONEncoder()
