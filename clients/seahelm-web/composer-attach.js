@@ -1,8 +1,10 @@
 // Files attached to the composer: a pasted screenshot, a picked or dropped
 // file. The page runs on another device, so each one is sent to the gateway
-// (`file.upload`), kept on the machine the panes run on, and its path goes
-// into the message — an agent opens a path it is given, a shell takes it as
-// an argument. The gateway names the file so the path needs no quoting.
+// (`file.upload`) as soon as it is attached and kept on the machine the panes
+// run on. The composer shows it as a thumbnail above the field, not as a path
+// in the text; on send its path goes after the words — an agent opens a path
+// it is given, a shell takes it as an argument. The gateway names the file so
+// the path needs no quoting.
 //
 // Nothing here knows about the DOM or the socket.
 (function (root, factory) {
@@ -55,6 +57,22 @@
     return { value, caret: (before + lead + path + trail).length };
   }
 
+  /** The message to send: the words, then every uploaded file's path. */
+  function composeMessage(text, attachments) {
+    const paths = (attachments || []).map((a) => a && a.path).filter(Boolean);
+    return [(text || '').trim(), ...paths].filter(Boolean).join(' ');
+  }
+
+  /** Attachments still on their way to the Mac. */
+  function pendingCount(attachments) {
+    return (attachments || []).filter((a) => a && !a.path && !a.error).length;
+  }
+
+  /** A file the composer can show as a picture. */
+  function isImage(file) {
+    return !!file && /^image\//.test(file.type || '');
+  }
+
   /** Why a file cannot go, or '' when it can. */
   function refusal(file) {
     if (!file) return 'Nothing to attach';
@@ -73,5 +91,5 @@
     return typeof btoa === 'function' ? btoa(bin) : Buffer.from(bin, 'binary').toString('base64');
   }
 
-  return { MAX_BYTES, filesOf, uploadName, insertPath, refusal, toBase64 };
+  return { MAX_BYTES, filesOf, uploadName, insertPath, composeMessage, pendingCount, isImage, refusal, toBase64 };
 });

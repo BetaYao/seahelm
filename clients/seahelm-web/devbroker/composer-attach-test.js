@@ -3,7 +3,7 @@
 // Run:  node devbroker/composer-attach-test.js
 'use strict';
 
-const { filesOf, uploadName, insertPath, refusal, toBase64, MAX_BYTES } = require('../composer-attach.js');
+const { filesOf, uploadName, insertPath, composeMessage, pendingCount, isImage, refusal, toBase64, MAX_BYTES } = require('../composer-attach.js');
 
 let pass = 0, fail = 0;
 const check = (ok, name, extra = '') => {
@@ -38,6 +38,14 @@ r = insertPath('fix this bug', 4, 8, '/t/a.png');
 check(r.value === 'fix /t/a.png bug', 'over a selection');
 r = insertPath('ab', 1, 1, '/p');
 check(r.value === 'a /p b' && r.caret === 5, 'inside a word, spaced both sides');
+
+const atts = [{ path: '/t/a.png' }, { path: null }, { path: null, error: 'x' }, { path: '/t/b.pdf' }];
+check(composeMessage(' look at these ', atts) === 'look at these /t/a.png /t/b.pdf',
+  'the words, then each uploaded path; pending and failed ones are left out');
+check(composeMessage('', atts) === '/t/a.png /t/b.pdf', 'attachments alone are a message');
+check(composeMessage('hi', []) === 'hi', 'no attachments, just the words');
+check(pendingCount(atts) === 1, 'one still uploading');
+check(isImage({ type: 'image/png' }) && !isImage({ type: 'application/pdf' }), 'images are told apart');
 
 check(refusal({ name: 'a', size: 10 }) === '', 'a small file goes');
 check(/over 10 MB/.test(refusal({ name: 'big.mov', size: MAX_BYTES + 1 })), 'an oversized one is refused by name');

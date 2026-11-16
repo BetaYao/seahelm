@@ -585,6 +585,25 @@
   body[data-share="pane"] .mc-field button.mc-attach{display:none}
   body[data-share="pane"] .mc-field{padding-left:16px}
   .msg-composer.dropping .mc-field{border-color:var(--accent);border-style:dashed}
+  /* Attached files float above the field as thumbnails, each with its ×. */
+  .mc-atts{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 8px;scrollbar-width:none}
+  .mc-atts[hidden]{display:none}
+  .mc-att{position:relative;flex:none;height:56px;border-radius:10px;overflow:hidden;
+    background:var(--panel);border:0.5px solid var(--panel3);display:flex;align-items:center}
+  .mc-att img{display:block;height:56px;width:auto;max-width:120px;min-width:40px;object-fit:cover}
+  .mc-att .mc-att-file{display:flex;align-items:center;gap:6px;padding:0 26px 0 10px;max-width:180px;
+    font-size:var(--fs-cap);color:var(--muted)}
+  .mc-att .mc-att-file svg{flex:none;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round}
+  .mc-att .mc-att-file span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mc-att[data-state="pending"] img,.mc-att[data-state="pending"] .mc-att-file{opacity:.45}
+  .mc-att[data-state="pending"]::after{content:'';position:absolute;left:50%;top:50%;width:16px;height:16px;
+    margin:-8px 0 0 -8px;border-radius:50%;border:2px solid var(--accent);border-right-color:transparent;
+    animation:fmspin .9s linear infinite}
+  .mc-att[data-state="error"]{border-color:var(--failed, #e5484d)}
+  .mc-att[data-state="error"] img{opacity:.35}
+  .mc-att-x{position:absolute;top:3px;right:3px;width:20px;height:20px;border:0;border-radius:50%;padding:0;
+    background:rgba(0,0,0,.6);color:#fff;font-size:13px;line-height:20px;text-align:center;cursor:pointer}
   /* A bare terminal runs what you type: a $ prompt and a monospace field, so a
      command line never passes for a chat box at a glance. */
   .msg-composer[data-kind="shell"] .mc-kind{color:var(--shell);font-family:var(--mono)}
@@ -686,6 +705,7 @@
       <div class="reply-bar" id="replyBar" hidden></div>
       <div class="msg-composer" id="msgComposer" data-kind="agent">
         <div class="mc-kind" id="mcKind" hidden></div>
+        <div class="mc-atts" id="mcAtts" hidden></div>
         <div class="mc-field">
           <button id="msgAttach" class="mc-attach" type="button" title="Attach a file — or paste a screenshot"
                   aria-label="Attach a file" disabled>
@@ -848,6 +868,11 @@ function scrollbackForLeafCount(count){
 // only, no pairing code, and the gateway sends nothing else. Declared before
 // anything runs: start-up code (applySurfaceMode → renderMateTodoToggle) reads
 // it, and a `const` read before its line throws and left the page blank.
+// Files attached to the composer, shown above the field until sent
+// ({id, name, preview, path, error}; composer-attach.js). Declared up here:
+// renderSendButton reads it during load.
+let attachments = [];
+let attachSeq = 0;
 const SHARE_PANE = (() => {
   try { return new URLSearchParams(location.search).get('pane'); }
   catch (e) { return null; }
@@ -2221,7 +2246,7 @@ function renderSendButton(){
   const pane = (S.selPane && S.panes.get(S.selPane)) || null;
   const status = pane ? normStatus(pane.status) : 'idle';
   const action = SeahelmComposerAction.composerAction({
-    hasText: !!(input && input.value.trim()),
+    hasText: !!(input && input.value.trim()) || attachments.length > 0,
     status,
     ready: !!(S.selPane && isLinked()),
   });
@@ -2258,9 +2283,15 @@ function renderSendButton(){
  */
 function sendComposerText(byTap){
   const input = $('msgInput');
-  const text = (input && input.value || '').trim();
+  const typed = (input && input.value || '').trim();
   const key = S.selPane;
-  if (!text || !key || !isLinked()) return;
+  if (!key || !isLinked()) return;
+  if (SeahelmComposerAttach.pendingCount(attachments)) { showActionToast('Still uploading — send once it is done', true); return; }
+  const text = SeahelmComposerAttach.composeMessage(typed, attachments);
+  if (!text) return;
+  const sentAtts = attachments;
+  attachments = [];
+  renderAttachments();
   if (S.todoFilter) setMateTodoFilter(false);
   const pane = S.panes.get(key) || {};
   const paneId = pane.pane_id || key;
@@ -2268,12 +2299,15 @@ function sendComposerText(byTap){
     if (!r || r.ok !== false) return;
     // Not sent, or not known to be: give the words back rather than lose
     // them, unless something new has been typed since.
-    if (!input.value.trim()) { input.value = text; autoGrowComposer(); renderSendButton(); }
+    if (!input.value.trim() && !attachments.length) {
+      input.value = typed; attachments = sentAtts; renderAttachments(); autoGrowComposer(); renderSendButton();
+    }
     showActionToast(linkLost(r)
       ? 'Connection lost — your message may not have been sent'
       : ((r.error && r.error.message) || 'Not sent'), true);
   });
   input.value = '';
+  setTimeout(() => { if (!attachments.includes(sentAtts[0])) for (const a of sentAtts) if (a.preview) URL.revokeObjectURL(a.preview); }, 60000);
   if (byTap) input.blur();
   autoGrowComposer();
   // Sending re-arms following, wherever you had scrolled back to: the reply is
@@ -2347,49 +2381,78 @@ function sendComposerText(byTap){
 function canAttach(){
   return !!S.selPane && S.transport === 'gateway' && isLinked() && !SHARE_PANE;
 }
-// `var`: renderSendButton (which draws this button too) runs during load,
-// before this line does — a `let` here threw there and stopped the page.
-var attachPending = 0;
 function renderAttachButton(){
   const b = $('msgAttach');
   if (!b) return;
   b.disabled = !canAttach();
-  if (attachPending) b.dataset.busy = ''; else delete b.dataset.busy;
+  if (SeahelmComposerAttach.pendingCount(attachments)) b.dataset.busy = ''; else delete b.dataset.busy;
 }
-/** Send each file to the Mac and put its path into the message where the
- *  caret is, in the order they finish. */
+const FILE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+/** The thumbnails above the field. */
+function renderAttachments(){
+  const host = $('mcAtts');
+  if (!host) return;
+  host.hidden = !attachments.length;
+  host.replaceChildren(...attachments.map((a) => {
+    const el = document.createElement('div');
+    el.className = 'mc-att';
+    el.dataset.state = a.error ? 'error' : (a.path ? 'ready' : 'pending');
+    el.title = a.error ? `${a.name}: ${a.error}` : a.name;
+    if (a.preview) {
+      const img = document.createElement('img');
+      img.src = a.preview; img.alt = a.name;
+      el.appendChild(img);
+    } else {
+      const f = document.createElement('div');
+      f.className = 'mc-att-file';
+      f.innerHTML = FILE_ICON;
+      const span = document.createElement('span');
+      span.textContent = a.name;
+      f.appendChild(span);
+      el.appendChild(f);
+    }
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'mc-att-x'; x.textContent = '×';
+    x.setAttribute('aria-label', `Remove ${a.name}`);
+    x.onclick = () => {
+      attachments = attachments.filter((b) => b !== a);
+      if (a.preview) URL.revokeObjectURL(a.preview);
+      renderAttachments();
+    };
+    el.appendChild(x);
+    return el;
+  }));
+  renderSendButton();
+}
+/** Show each file above the field and send it to the Mac now, so it is
+ *  there by the time the message goes. */
 function attachFiles(files){
   if (!files.length) return;
   if (!canAttach()) { showActionToast('Not connected — nothing attached', true); return; }
   for (const file of files) {
     const why = SeahelmComposerAttach.refusal(file);
     if (why) { showActionToast(why, true); continue; }
-    const name = SeahelmComposerAttach.uploadName(file, new Date());
-    attachPending++;
-    renderAttachButton();
-    let settled = false;
-    const done = () => { if (settled) return; settled = true; attachPending--; renderAttachButton(); };
+    const a = {
+      id: ++attachSeq,
+      name: SeahelmComposerAttach.uploadName(file, new Date()),
+      preview: SeahelmComposerAttach.isImage(file) ? URL.createObjectURL(file) : null,
+      path: null, error: null,
+    };
+    attachments = attachments.concat(a);
+    const fail = (msg) => { a.error = msg; renderAttachments(); showActionToast(`${a.name}: ${msg}`, true); };
     file.arrayBuffer().then((buf) => {
-      sendCommand('file.upload', { name, b64: SeahelmComposerAttach.toBase64(buf) }, (r) => {
-        done();
+      if (!isLinked()) { fail('not connected'); return; }
+      sendCommand('file.upload', { name: a.name, b64: SeahelmComposerAttach.toBase64(buf) }, (r) => {
         const path = r && r.ok !== false && r.result && r.result.path;
-        if (!path) {
-          showActionToast(linkLost(r) ? `Connection lost — ${name} not attached`
-            : `${name}: ${(r && r.error && r.error.message) || 'not attached'}`, true);
-          return;
-        }
-        const input = $('msgInput');
-        if (!input) return;
-        const at = SeahelmComposerAttach.insertPath(input.value, input.selectionStart, input.selectionEnd, path);
-        input.value = at.value;
-        input.focus();
-        input.setSelectionRange(at.caret, at.caret);
-        autoGrowComposer();
-        renderSendButton();
+        if (!path) { fail(linkLost(r) ? 'connection lost' : ((r && r.error && r.error.message) || 'not attached')); return; }
+        a.path = path;
+        renderAttachments();
       });
-      if (!isLinked()) done();   // dropped before it went: sendCommand never replies
-    }, () => { done(); showActionToast(`${name} could not be read`, true); });
+    }, () => fail('could not be read'));
   }
+  renderAttachments();
+  const input = $('msgInput');
+  if (input) input.focus();
 }
 
 
