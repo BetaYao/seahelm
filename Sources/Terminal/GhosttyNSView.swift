@@ -1323,7 +1323,20 @@ class GhosttyNSView: NSView, NSTextInputClient {
     /// Directories a relative path is resolved against, most specific first.
     private func pathResolutionBases() -> [String?] {
         let worktreePath = station.map { Fleet.shared.pane(for: $0.id)?.worktreePath } ?? nil
-        return [station?.pwd, worktreePath, station?.initialWorkingDirectory]
+        return Self.pathResolutionBases(pwd: station?.pwd, filedWorktree: worktreePath,
+                                        initialDirectory: station?.initialWorkingDirectory,
+                                        agentLocation: station?.hookLocation)
+    }
+
+    /// Where a relative path on screen may be relative to: the shell's pwd, the
+    /// pane's worktree, the directory it started in — and then where its agent
+    /// is working. An agent that went into another worktree (another repo,
+    /// even) names files relative to *that* checkout, and its pane is still
+    /// filed where it was, so without it those paths found nothing and the
+    /// menu had no Preview.
+    static func pathResolutionBases(pwd: String?, filedWorktree: String?, initialDirectory: String?,
+                                    agentLocation: Station.HookLocation?) -> [String?] {
+        [pwd, filedWorktree, initialDirectory, agentLocation?.worktreePath, agentLocation?.cwd]
     }
 
     /// Parse a GitHub PR URL from a token, e.g.
