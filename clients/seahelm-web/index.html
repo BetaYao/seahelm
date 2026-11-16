@@ -136,6 +136,31 @@
   body[data-share="pane"] .pane-tabs,
   body[data-share="pane"] #nwOpenBtn{display:none}
   body[data-share="pane"] #midcol{display:flex}
+  /* A wide window keeps First Mate open on the right while a worktree fills
+     the middle. The column is this same page again (`?dock=mate`, below) in
+     a frame, so its timeline and composer are First Mate's own and never
+     compete with the worktree's for the one timeline this page draws. It
+     takes the debug log's place. */
+  #matecol{display:none;overflow:hidden;border-left:0.5px solid var(--sep)}
+  #matecol iframe{display:block;width:100%;height:100%;border:0;background:var(--bg)}
+  @media (min-width:1280px){
+    main.mate, main.mate.nolog{grid-template-columns:340px 1fr 420px}
+    main.mate #rightcol{display:none}
+    main.mate #matecol{display:block}
+  }
+  /* The docked page: First Mate's conversation and nothing else. */
+  body[data-dock="mate"] main,
+  body[data-dock="mate"] main.nolog{grid-template-columns:1fr}
+  body[data-dock="mate"] #leftcol,
+  body[data-dock="mate"] #rightcol,
+  body[data-dock="mate"] #matecol,
+  body[data-dock="mate"] #drawerBtn,
+  body[data-dock="mate"] #paneMenuBtn,
+  body[data-dock="mate"] .pane-tabs{display:none}
+  body[data-dock="mate"] #midcol{display:flex}
+  /* As tall as the middle's head, ruled the same, so the two read as one bar. */
+  body[data-dock="mate"] .detail-head{padding-left:16px;min-height:61px;align-content:center;border-bottom-color:var(--sep)}
+  body[data-dock="mate"] .dh-title{align-items:flex-start;text-align:left}
   /* With one pane there is nothing else in the head, so Timeline / Terminal
      comes out of the ⋯ menu and sits beside it, where a visitor sees it. */
   #shareSurface{display:none;grid-area:surf;height:36px}
@@ -166,6 +191,7 @@
      needs from you; amber with a count when cards wait. */
   .fm-top-actions{display:flex;align-items:center;gap:2px}
   #mateBtn{position:relative;color:var(--muted)}
+  #mateBtn[hidden]{display:none}
   #mateBtn .mate-dot{position:absolute;right:10px;top:10px;width:8px;height:8px;border-radius:4px;
     box-shadow:0 0 0 2px var(--bg);background:var(--idle)}
   #mateBtn.watching{color:var(--accent)} #mateBtn.watching .mate-dot{background:var(--accent)}
@@ -755,6 +781,7 @@
       </div>
       <div id="log"></div>
     </div>
+    <div class="col" id="matecol"></div>
   </main>
 
   <div class="menu" id="menu" role="menu" hidden>
@@ -899,6 +926,13 @@ const SHARE_PANE = (() => {
   try { return new URLSearchParams(location.search).get('pane'); }
   catch (e) { return null; }
 })();
+// `?dock=mate` is this page as the First Mate column of a wide window (the
+// frame in #matecol): it opens First Mate and stays there, on the parent's
+// pairing (localStorage), with no list and no way out.
+const DOCK = (() => {
+  try { return !SHARE_PANE && new URLSearchParams(location.search).get('dock') === 'mate'; }
+  catch (e) { return false; }
+})();
 const SHARE_TOKEN = (() => {
   try { return SHARE_PANE && new URLSearchParams(location.search).get('share') || null; }
   catch (e) { return null; }
@@ -1018,6 +1052,8 @@ const $ = id => document.getElementById(id);
 // Phone layout: list and worktree as two full screens (see showScreen). Up here
 // because the first render runs long before the navigation code below.
 const NARROW = window.matchMedia('(max-width:760px)');
+// Wide enough to dock First Mate on the right (renderMateDock).
+const WIDE = window.matchMedia('(min-width:1280px)');
 const base = () => `seahelm/${S.mac}`;
 
 // Same-origin Host Gateway WSS. Prefer this whenever the page is served by
@@ -2617,6 +2653,7 @@ for (const b of document.querySelectorAll('#fmModes button'))
 syncModeButtons();
 
 if (SHARE_PANE) document.body.dataset.share = 'pane';
+if (DOCK) { document.body.dataset.dock = 'mate'; document.body.dataset.screen = 'detail'; }
 // Who is on this end of an open share link. The Mac signs every message sent
 // from here with it, so it is asked once and kept for the next link. A link
 // made for someone carries its own name and never asks.
@@ -2635,6 +2672,7 @@ function applySessionSnapshot(result){
   const fm = S.firstMate && S.firstMate.pane;
   if (fm && !SHARE_PANE) S.panes.set(FM_KEY, Object.assign({}, fm, S.panes.get(FM_KEY) || {}));
   if (SHARE_PANE) openSharedPane();
+  openDockedMate();
   refreshGroups();
   renderSendButton();
 }
@@ -3137,6 +3175,8 @@ function applyFirstMate(state){
     if (S.selPane === FM_KEY) S.todoFilter = false;
   }
   renderMateButton();
+  renderMateDock();
+  openDockedMate();
   refreshFleetSoon(false);
   if (S.selPane === FM_KEY) { renderDetailChrome(); renderReplyBar(); renderMateTodoToggle(); renderComposerKind(S.panes.get(FM_KEY)); }
   fmActivationProgress(state);
@@ -3145,7 +3185,7 @@ function applyFirstMate(state){
 function renderMateButton(){
   const btn = $('mateBtn');
   const st = S.firstMate;
-  btn.hidden = !st || !!SHARE_PANE;
+  btn.hidden = !st || !!SHARE_PANE || mateDocked();
   if (!st) return;
   const tone = st.enabled ? (st.tone || 'watching') : 'quiet';
   btn.className = 'icon-btn ' + ({ wants_you: 'wants', working: 'working', watching: 'watching' }[tone] || '');
@@ -3160,9 +3200,60 @@ function renderMateButton(){
 function openFirstMate(){
   const st = S.firstMate;
   if (!st || !st.enabled) { fmShowSheet(); return; }
+  if (mateDocked()) {
+    const frame = $('mateFrame');
+    if (frame && frame.contentWindow) frame.contentWindow.postMessage({ seahelm: 'focus-mate' }, location.origin);
+    return;
+  }
   const row = buildFleet().find(r => r.firstMate);
   if (row) selectWorktree(row, FM_KEY);
 }
+
+// ── First Mate docked on the right (wide windows) ──────────────────────────
+/** First Mate has its own column: a wide window, a paired page (not a share
+ *  link, not the column itself), First Mate on. */
+function mateDocked(){
+  return !DOCK && !SHARE_PANE && WIDE.matches && !!(S.firstMate && S.firstMate.enabled && S.firstMate.pane);
+}
+
+/** Put the column up or take it down. The frame connects on its own, so it is
+ *  made only while the column shows and dropped with it. */
+function renderMateDock(){
+  if (DOCK || SHARE_PANE) return;
+  const on = mateDocked();
+  const main = document.querySelector('main');
+  if (main.classList.contains('mate') === on) return;
+  main.classList.toggle('mate', on);
+  const col = $('matecol');
+  if (on) {
+    const frame = document.createElement('iframe');
+    frame.id = 'mateFrame';
+    frame.title = 'First Mate';
+    frame.src = `${location.pathname}?dock=mate`;
+    col.appendChild(frame);
+    // The middle no longer needs to show First Mate: open a worktree there.
+    if (S.selPane === FM_KEY) {
+      const row = buildFleet().find(r => !r.firstMate);
+      if (row) selectWorktree(row, null, { navigate: false });
+    }
+  } else {
+    col.innerHTML = '';
+  }
+  renderMateButton();
+  requestAnimationFrame(() => fitAllPanes());
+}
+WIDE.addEventListener('change', renderMateDock);
+
+/** In the docked column: open First Mate once it is known, and stay on it. */
+function openDockedMate(){
+  if (!DOCK || S.selPane === FM_KEY) return;
+  const row = buildFleet().find(r => r.firstMate);
+  if (row) selectWorktree(row, FM_KEY, { navigate: false });
+}
+window.addEventListener('message', (ev) => {
+  if (!DOCK || ev.origin !== location.origin || !ev.data || ev.data.seahelm !== 'focus-mate') return;
+  $('msgInput').focus({ preventScroll: true });
+});
 
 // ── Turning First Mate on ───────────────────────────────────────────────
 // With First Mate off, its button opens this sheet instead of a toast that
@@ -3685,7 +3776,9 @@ function showScreen(screen){
   const was = document.body.dataset.screen;
   if (screen !== 'detail' && S.selPane === FM_KEY && S.todoFilter) S.todoFilter = false;
   document.body.dataset.screen = screen;
-  if (screen === 'detail' && was !== 'detail' && NARROW.matches) {
+  // Not from the docked frame: a frame's history is the window's, and its
+  // entry would make the browser's back step through First Mate.
+  if (screen === 'detail' && was !== 'detail' && NARROW.matches && !DOCK) {
     history.pushState({ seahelmScreen: 'detail' }, '');
   }
   if (screen === 'detail' && was !== 'detail') {
