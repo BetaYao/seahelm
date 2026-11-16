@@ -1,145 +1,121 @@
 import AppKit
 
+/// The menu bar. Every item is something the app does today, and the key
+/// shown is the one that does it — several shortcuts are handled first by
+/// `SeahelmWindow` / `GlobalKeymap` (split, focus, ⌘B, ⌘P, ⌘J, ⌃Tab), so
+/// those items are where the user finds them.
 enum MenuBuilder {
     static func buildMainMenu(target: AnyObject? = nil) -> NSMenu {
         let mainMenu = NSMenu()
-
-        // App menu
-        let appMenuItem = NSMenuItem()
-        let appMenu = NSMenu()
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(MainWindowController.showSettings), keyEquivalent: ",")
-        settingsItem.keyEquivalentModifierMask = .command
-        settingsItem.target = target
-        appMenu.addItem(settingsItem)
-        appMenu.addItem(NSMenuItem.separator())
-        let checkUpdateItem = NSMenuItem(title: "Check for Updates...", action: #selector(MainWindowController.checkForUpdates), keyEquivalent: "u")
-        checkUpdateItem.keyEquivalentModifierMask = .command
-        checkUpdateItem.target = target
-        appMenu.addItem(checkUpdateItem)
-        let pairItem = NSMenuItem(title: "Pair Remote Clients...", action: #selector(MainWindowController.showPairing), keyEquivalent: "")
-        pairItem.target = target
-        appMenu.addItem(pairItem)
-        let cleanOrphanSessionsItem = NSMenuItem(title: "Clean Orphan Sessions", action: #selector(MainWindowController.cleanOrphanSessions), keyEquivalent: "")
-        cleanOrphanSessionsItem.target = target
-        appMenu.addItem(cleanOrphanSessionsItem)
-        appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit seahelm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appMenuItem.submenu = appMenu
-        mainMenu.addItem(appMenuItem)
-
-        // First Mate menu — opens the Helm cockpit with a slash command prefilled.
-        // Aligned with the `CommandSpecs` verbs. Cmd+R is plain; letter chords take
-        // Shift to avoid Cmd+C (copy), Cmd+B (sidebar), and Cmd+A (select all).
-        let firstMateMenuItem = NSMenuItem()
-        let firstMateMenu = NSMenu(title: "First Mate")
-        let commands: [(String, Selector, String, NSEvent.ModifierFlags)] = [
-            ("New Worktree (/new)", #selector(MainWindowController.helmTaskCommand), "t", [.command, .shift]),
-            ("Status (/status)", #selector(MainWindowController.helmAgentsCommand), "", []),
-            ("Order (/order)", #selector(MainWindowController.helmOrderCommand), "o", [.command, .shift]),
-            ("Broadcast (/broadcast)", #selector(MainWindowController.helmBroadcastCommand), "b", [.command, .shift]),
-            ("Return (/return)", #selector(MainWindowController.helmReturnCommand), "r", .command),
-            ("Add Project (/add)", #selector(MainWindowController.helmAddRepoCommand), "a", [.command, .shift]),
-            ("Feedback (/feedback)", #selector(MainWindowController.helmFlagCommand), "f", [.command, .shift]),
-        ]
-        for (title, action, key, mods) in commands {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-            item.keyEquivalentModifierMask = mods
-            item.target = target
-            firstMateMenu.addItem(item)
+        func item(_ title: String, _ action: Selector?, _ key: String = "",
+                  _ mods: NSEvent.ModifierFlags = .command, toTarget: Bool = true) -> NSMenuItem {
+            let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            i.keyEquivalentModifierMask = key.isEmpty ? [] : mods
+            if toTarget { i.target = target }
+            return i
         }
-        firstMateMenuItem.submenu = firstMateMenu
-        mainMenu.addItem(firstMateMenuItem)
+        func menu(_ title: String, _ items: [NSMenuItem]) -> NSMenu {
+            let m = NSMenu(title: title)
+            items.forEach(m.addItem)
+            let top = NSMenuItem()
+            top.submenu = m
+            mainMenu.addItem(top)
+            return m
+        }
+        let sep = { NSMenuItem.separator() }
 
-        // Edit menu (standard Cut/Copy/Paste/Undo/Redo)
-        let editMenuItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
-        redoItem.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(redoItem)
-        editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editMenuItem.submenu = editMenu
-        mainMenu.addItem(editMenuItem)
+        // App
+        let services = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        let servicesMenu = NSMenu(title: "Services")
+        services.submenu = servicesMenu
+        NSApp.servicesMenu = servicesMenu
+        _ = menu("Seahelm", [
+            item("About Seahelm", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), toTarget: false),
+            item("Check for Updates...", #selector(MainWindowController.checkForUpdates), "u"),
+            sep(),
+            item("Settings...", #selector(MainWindowController.showSettings), ","),
+            item("Pair Remote Clients...", #selector(MainWindowController.showPairing)),
+            sep(),
+            services,
+            sep(),
+            item("Hide Seahelm", #selector(NSApplication.hide(_:)), "h", toTarget: false),
+            item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option], toTarget: false),
+            item("Show All", #selector(NSApplication.unhideAllApplications(_:)), toTarget: false),
+            sep(),
+            item("Quit Seahelm", #selector(NSApplication.terminate(_:)), "q", toTarget: false),
+        ])
 
-        // View menu
-        let viewMenuItem = NSMenuItem()
-        let viewMenu = NSMenu(title: "View")
+        // File: what goes into the fleet, and closing what is focused.
+        _ = menu("File", [
+            item("New Worktree...", #selector(MainWindowController.showNewBranchDialog), "n"),
+            item("Add Project...", #selector(MainWindowController.addProject), "o"),
+            sep(),
+            item("Close Pane", #selector(MainWindowController.closePaneOrTab), "w"),
+            sep(),
+            item("Clean Orphan Sessions", #selector(MainWindowController.cleanOrphanSessions)),
+        ])
 
-        let splitHItem = NSMenuItem(
-            title: "Split Horizontally",
-            action: #selector(MainWindowController.splitHorizontal),
-            keyEquivalent: "d"
-        )
-        splitHItem.keyEquivalentModifierMask = .command
-        splitHItem.target = target
-        viewMenu.addItem(splitHItem)
+        // Edit (standard; the responder chain answers these)
+        _ = menu("Edit", [
+            item("Undo", Selector(("undo:")), "z", toTarget: false),
+            item("Redo", Selector(("redo:")), "z", [.command, .shift], toTarget: false),
+            sep(),
+            item("Cut", #selector(NSText.cut(_:)), "x", toTarget: false),
+            item("Copy", #selector(NSText.copy(_:)), "c", toTarget: false),
+            item("Paste", #selector(NSText.paste(_:)), "v", toTarget: false),
+            item("Select All", #selector(NSText.selectAll(_:)), "a", toTarget: false),
+        ])
 
-        let splitVItem = NSMenuItem(
-            title: "Split Vertically",
-            action: #selector(MainWindowController.splitVertical),
-            keyEquivalent: "d"
-        )
-        splitVItem.keyEquivalentModifierMask = [.command, .shift]
-        splitVItem.target = target
-        viewMenu.addItem(splitVItem)
+        // View: the left column and the window's look.
+        _ = menu("View", [
+            item("Toggle Sidebar", #selector(MainWindowController.toggleChromeCollapsed), "b"),
+            item("Fleet", #selector(MainWindowController.showFleetPane)),
+            item("Files", #selector(MainWindowController.showFilesPane)),
+            item("Changes", #selector(MainWindowController.showChangesPane)),
+            sep(),
+            item("Toggle Light/Dark", #selector(MainWindowController.toggleThemeFromMenu)),
+            sep(),
+            item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control], toTarget: false),
+        ])
 
-        viewMenu.addItem(NSMenuItem.separator())
+        // Pane: the focused worktree's split tree.
+        _ = menu("Pane", [
+            item("Split Horizontally", #selector(MainWindowController.splitHorizontal), "d"),
+            item("Split Vertically", #selector(MainWindowController.splitVertical), "d", [.command, .shift]),
+            sep(),
+            item("Zoom Pane", #selector(MainWindowController.toggleZoomFocusedPane), "\r", [.command, .shift]),
+            item("Reset Split Sizes", #selector(MainWindowController.resetSplitRatioFromMenu), "=", [.command, .control]),
+            sep(),
+            item("Close Pane", #selector(MainWindowController.closePaneOrTab)),
+        ])
 
-        let toggleSidebarItem = NSMenuItem(
-            title: "Toggle Sidebar",
-            action: #selector(MainWindowController.toggleChromeCollapsed),
-            keyEquivalent: "b"
-        )
-        toggleSidebarItem.keyEquivalentModifierMask = .command
-        toggleSidebarItem.target = target
-        viewMenu.addItem(toggleSidebarItem)
+        // Fleet: moving around it and talking to it. The island's command bar
+        // runs seahelm-core's command language (/new, /status, /go, /show).
+        _ = menu("Fleet", [
+            item("Command Bar", #selector(MainWindowController.toggleCommandPaletteFromMenu), "p"),
+            item("First Mate", #selector(MainWindowController.toggleFirstMate), "j"),
+            item("Status", #selector(MainWindowController.showFleetStatus)),
+            sep(),
+            item("Next Worktree", #selector(MainWindowController.selectNextWorktree), "\t", .control),
+            item("Previous Worktree", #selector(MainWindowController.selectPreviousWorktree), "\t", [.control, .shift]),
+        ])
 
-        // Window-level ⌘J (GlobalKeymap) reaches it first, and a double Control
-        // (SeahelmWindow) does the same; the item is for finding it.
-        let firstMateItem = NSMenuItem(
-            title: "First Mate",
-            action: #selector(MainWindowController.toggleFirstMate),
-            keyEquivalent: "j"
-        )
-        firstMateItem.keyEquivalentModifierMask = .command
-        firstMateItem.target = target
-        viewMenu.addItem(firstMateItem)
-
-        let closePaneItem = NSMenuItem(title: "Close Pane", action: #selector(MainWindowController.closePaneOrTab), keyEquivalent: "w")
-        closePaneItem.keyEquivalentModifierMask = .command
-        closePaneItem.target = target
-        viewMenu.addItem(closePaneItem)
-
-        viewMenuItem.submenu = viewMenu
-        mainMenu.addItem(viewMenuItem)
-
-        // Window menu (standard macOS window management)
-        let windowMenuItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
-        windowMenu.addItem(NSMenuItem.separator())
-        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
-        windowMenuItem.submenu = windowMenu
-        mainMenu.addItem(windowMenuItem)
+        // Window (standard)
+        let windowMenu = menu("Window", [
+            item("Minimize", #selector(NSWindow.miniaturize(_:)), "m", toTarget: false),
+            item("Zoom", #selector(NSWindow.zoom(_:)), toTarget: false),
+            sep(),
+            item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:)), toTarget: false),
+        ])
         NSApp.windowsMenu = windowMenu
 
-        // Help menu
-        let helpMenuItem = NSMenuItem()
-        let helpMenu = NSMenu(title: "Help")
-        let keyboardShortcutsItem = NSMenuItem(title: "Keyboard Shortcuts", action: #selector(MainWindowController.showKeyboardShortcuts), keyEquivalent: "")
-        keyboardShortcutsItem.target = target
-        helpMenu.addItem(keyboardShortcutsItem)
-        helpMenu.addItem(NSMenuItem.separator())
-        let docsItem = NSMenuItem(title: "seahelm Documentation", action: #selector(MainWindowController.openDocumentation), keyEquivalent: "")
-        docsItem.target = target
-        helpMenu.addItem(docsItem)
-        helpMenuItem.submenu = helpMenu
-        mainMenu.addItem(helpMenuItem)
+        // Help
+        let helpMenu = menu("Help", [
+            item("Keyboard Shortcuts", #selector(MainWindowController.showKeyboardShortcuts)),
+            sep(),
+            item("Seahelm Documentation", #selector(MainWindowController.openDocumentation)),
+            item("Report an Issue...", #selector(MainWindowController.reportIssue)),
+        ])
         NSApp.helpMenu = helpMenu
 
         return mainMenu
