@@ -10,7 +10,7 @@
 mod common;
 
 use common::*;
-use seahelm_core_registry::{HookInput, HookResult, Registry};
+use seahelm_core_registry::{HookInput, HookModel, HookResult, Registry};
 use seahelm_core_types::{
     AgentStatus::*, AgentType, EventKind, EventSource, TaskItem, TaskItemStatus,
 };
@@ -32,6 +32,7 @@ fn webhook(r: &mut Registry, kind: Option<EventKind>, now: f64) -> HookResult {
         source: "claude-code".into(),
         kind,
         last_assistant_message: None,
+        model: None,
     };
     r.ingest_hook(input, &|_| false, &authority_of, now)
 }
@@ -159,6 +160,7 @@ fn hook_types_the_pane_and_carries_the_final_message() {
         source: "claude-code".into(),
         kind: Some(stop(true)),
         last_assistant_message: Some("  修好了。 ".into()),
+        model: None,
     };
     let res = r.ingest_hook(input, &|_| false, &authority_of, T0);
     assert_eq!(res.pane.as_deref(), Some(TID));
@@ -182,6 +184,7 @@ fn unresolved_hint_falls_back_visibly() {
         source: "codex".into(),
         kind: None,
         last_assistant_message: None,
+        model: None,
     };
     let res = r.ingest_hook(input, &|_| false, &authority_of, T0);
     assert_eq!(res.pane.as_deref(), Some(TID));
@@ -221,10 +224,37 @@ fn a_hook_naming_no_pane_belongs_to_none() {
         source: "codex".into(),
         kind: Some(stop(true)),
         last_assistant_message: Some("someone else's reply".into()),
+        model: None,
     };
     let res = r.ingest_hook(input, &|_| false, &authority_of, T0);
     assert_eq!(res.pane, None);
     assert!(res.outcome.is_none());
     assert_eq!(r.pane(TID).unwrap().agent_type, AgentType::Unknown, "it does not type the pane either");
     assert_eq!(r.note_assistant_message(None, WT, "x", T0), None);
+}
+
+#[test]
+fn a_hook_names_the_panes_model_and_a_bare_name_keeps_the_effort() {
+    let mut r = setup();
+    let mut hook = |model: Option<HookModel>, now: f64| {
+        let input = HookInput {
+            pane_hint: Some(TID.into()),
+            cwd: WT.into(),
+            source: "codex".into(),
+            kind: Some(EventKind::UserPrompt { text: "go".into() }),
+            last_assistant_message: None,
+            model,
+        };
+        r.ingest_hook(input, &|_| false, &authority_of, now).outcome.unwrap()
+    };
+    let named = |name: &str, effort: Option<&str>| Some(HookModel { name: name.into(), effort: effort.map(str::to_string) });
+    let o = hook(named("gpt-6.1-sol", Some("xhigh")), T0);
+    assert_eq!((o.info.model.as_deref(), o.info.effort.as_deref()), (Some("gpt-6.1-sol"), Some("xhigh")));
+    assert_eq!(o.to_event()["model"], "gpt-6.1-sol");
+    let o = hook(named("gpt-6.1-sol", None), T0 + 1.0);
+    assert_eq!(o.info.effort.as_deref(), Some("xhigh"), "same model, no effort named: kept");
+    let o = hook(None, T0 + 2.0);
+    assert_eq!(o.info.model.as_deref(), Some("gpt-6.1-sol"), "a hook naming none changes nothing");
+    let o = hook(named("gpt-6-luna", None), T0 + 3.0);
+    assert_eq!((o.info.model.as_deref(), o.info.effort), (Some("gpt-6-luna"), None), "another model: the old effort is not its");
 }

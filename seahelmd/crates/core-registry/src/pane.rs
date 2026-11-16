@@ -64,6 +64,12 @@ pub struct PaneInfo {
     /// looked since. Not a status: an unseen completion is still `Idle` to
     /// everything that reasons about the agent.
     pub unseen_completion: bool,
+    /// The model the agent answers with (`claude-opus-5-5`, `gpt-6.1-sol`),
+    /// from its transcript or its hooks; None until one names it.
+    pub model: Option<String>,
+    /// The reasoning effort that goes with it, where the agent reports one
+    /// (Codex).
+    pub effort: Option<String>,
 }
 
 /// How many activity events a pane keeps.
@@ -102,6 +108,8 @@ impl PaneInfo {
             program_state: None,
             background_busy: false,
             unseen_completion: false,
+            model: None,
+            effort: None,
         }
     }
 

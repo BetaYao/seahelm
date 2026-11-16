@@ -194,6 +194,18 @@ pub struct HookInput {
     /// A Stop's `last_assistant_message` (also on the suggestion split off
     /// it), sentinel already stripped.
     pub last_assistant_message: Option<String>,
+    /// The model the agent answers with, when the hook or the transcript it
+    /// names says (a subagent's model is not the pane's and is left out).
+    pub model: Option<HookModel>,
+}
+
+/// A model as a hook reports it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HookModel {
+    pub name: String,
+    /// `None` keeps the effort already known while the name stays the same:
+    /// Codex's hooks name the model but not the effort its transcript gives.
+    pub effort: Option<String>,
 }
 
 /// Where a hook landed.
@@ -773,6 +785,14 @@ impl Registry {
                 outcome: None,
             };
         };
+        if let (Some(m), Some(info)) = (&input.model, self.panes.get_mut(&pane)) {
+            if info.model.as_deref() != Some(m.name.as_str()) {
+                info.model = Some(m.name.clone());
+                info.effort = m.effort.clone();
+            } else if m.effort.is_some() {
+                info.effort = m.effort.clone();
+            }
+        }
         // Every hook source that names a known agent types the pane.
         let hook_agent = AgentType::from_hook_source(&input.source);
         if hook_agent != AgentType::Unknown {
@@ -1088,6 +1108,12 @@ impl Registry {
             "last_message": p.last_message,
             "title": "",
         });
+        if let Some(model) = &p.model {
+            d["model"] = model.as_str().into();
+            if let Some(effort) = &p.effort {
+                d["effort"] = effort.as_str().into();
+            }
+        }
         if p.unseen_completion {
             d["unseen"] = true.into();
         }
@@ -1140,6 +1166,8 @@ fn displayed_state_unchanged(a: &PaneInfo, b: &PaneInfo) -> bool {
         && a.last_user_prompt == b.last_user_prompt
         && a.command_line == b.command_line
         && a.agent_type == b.agent_type
+        && a.model == b.model
+        && a.effort == b.effort
         && a.scan_status == b.scan_status
         && a.hook_status == b.hook_status
         && a.program_status == b.program_status

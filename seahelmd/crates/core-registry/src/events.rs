@@ -94,6 +94,8 @@ pub fn pane_detail(p: &PaneInfo) -> Value {
         "program_state": p.program_state.map(|s| format!("{s:?}").to_lowercase()),
         "background_busy": p.background_busy,
         "unseen": p.unseen_completion,
+        "model": p.model,
+        "effort": p.effort,
     })
 }
 
@@ -124,6 +126,10 @@ pub fn outcome_event(o: &Outcome) -> Value {
         agent_type_str(o.info.agent_type).into(),
     );
     d.insert("last_message".into(), o.info.last_message.clone().into());
+    if let Some(model) = &o.info.model {
+        d.insert("model".into(), model.as_str().into());
+        d.insert("effort".into(), o.info.effort.clone().into());
+    }
     d.insert("info".into(), pane_detail(&o.info));
     // The event itself (kind and source, serde's shape), so a client can
     // hand its consumers the same event the core decided on.

@@ -62,12 +62,20 @@ struct Session {
     vt_deflate: bool,
     keys_binary: bool,
     vt: VtStreams,
-    /// agent_type last told per pane, so `pane.updated` goes out only when
-    /// it changes (an agent starting, or exiting to the shell).
+    /// agent_type, model and effort last told per pane, so `pane.updated`
+    /// goes out only when one changes (an agent starting, exiting to the
+    /// shell, or switched to another model).
     sent_agent: HashMap<String, String>,
     /// Timeline rows at or below this were in the auth replay.
     message_floor: u64,
     out: mpsc::Sender<Message>,
+}
+
+/// What the page knows a pane runs: its agent, and the model and effort
+/// when the core has named them. Compared, so a change is told once.
+fn agent_of(p: &Value) -> String {
+    let s = |k: &str| p[k].as_str().unwrap_or("");
+    format!("{}\u{1f}{}\u{1f}{}", s("agent_type"), s("model"), s("effort"))
 }
 
 pub async fn run(gw: Arc<Gateway>, socket: WebSocket, meta: Meta) {
@@ -462,7 +470,7 @@ impl Session {
         }
         self.sent_agent = panes
             .iter()
-            .filter_map(|p| Some((p["pane_session_key"].as_str()?.to_string(), p["agent_type"].as_str().unwrap_or("").to_string())))
+            .filter_map(|p| Some((p["pane_session_key"].as_str()?.to_string(), agent_of(p))))
             .collect();
         Ok(panes)
     }
@@ -498,20 +506,21 @@ impl Session {
             }
             Value::Object(m)
         };
-        const STATUS_KEYS: &[&str] = &["pane_id", "pane_session_key", "status", "old_status", "agent_type", "worktree_path", "last_message"];
+        const STATUS_KEYS: &[&str] = &["pane_id", "pane_session_key", "status", "old_status", "agent_type", "model", "effort", "worktree_path", "last_message"];
         match ty {
             "pane.status_changed" => {
-                if let Some(a) = ev["agent_type"].as_str() {
-                    self.sent_agent.insert(key.into(), a.into());
+                if ev["agent_type"].is_string() {
+                    self.sent_agent.insert(key.into(), agent_of(ev));
                 }
                 vec![notify("pane.status", pick(STATUS_KEYS))]
             }
             "pane.updated" => {
-                let Some(a) = ev["agent_type"].as_str() else { return Vec::new() };
-                if self.sent_agent.get(key).map(String::as_str) == Some(a) {
+                if !ev["agent_type"].is_string() { return Vec::new() }
+                let a = agent_of(ev);
+                if self.sent_agent.get(key) == Some(&a) {
                     return Vec::new();
                 }
-                self.sent_agent.insert(key.into(), a.into());
+                self.sent_agent.insert(key.into(), a);
                 vec![notify("pane.status", pick(STATUS_KEYS))]
             }
             "pane.renamed" => vec![notify("pane.status", pick(&["pane_id", "pane_session_key", "worktree_path", "custom_title", "display_title"]))],
@@ -522,8 +531,8 @@ impl Session {
             }
             "pane.registered" => {
                 let pane = ev.get("pane").cloned().unwrap_or_else(|| ev.clone());
-                if let Some(a) = pane["agent_type"].as_str() {
-                    self.sent_agent.insert(key.into(), a.into());
+                if pane["agent_type"].is_string() {
+                    self.sent_agent.insert(key.into(), agent_of(&pane));
                 }
                 vec![notify("pane.added", pane)]
             }
@@ -734,6 +743,14 @@ mod tests {
         assert_eq!(device_label("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit Version/17.0 Mobile Safari/604.1"), "Safari on iPhone");
         assert_eq!(device_label("Mozilla/5.0 (Macintosh) Chrome/120 Safari/537"), "Chrome on Mac");
         assert_eq!(device_label(""), "browser");
+    }
+
+    #[test]
+    fn a_model_change_is_a_change_of_agent() {
+        let opus = json!({"agent_type": "claudeCode", "model": "claude-opus-5-5"});
+        assert_ne!(agent_of(&opus), agent_of(&json!({"agent_type": "claudeCode", "model": "claude-sonnet-5-5"})));
+        assert_ne!(agent_of(&opus), agent_of(&json!({"agent_type": "claudeCode"})));
+        assert_eq!(agent_of(&opus), agent_of(&json!({"agent_type": "claudeCode", "model": "claude-opus-5-5", "effort": null})));
     }
 
     #[test]

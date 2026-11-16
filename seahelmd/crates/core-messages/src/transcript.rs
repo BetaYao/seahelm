@@ -23,11 +23,22 @@ pub struct Entry {
     pub timestamp: Option<Timestamp>,
 }
 
+/// The model an agent last answered with, as its transcript names it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Model {
+    pub name: String,
+    /// Codex's reasoning effort (`low` … `xhigh`); Claude Code writes none.
+    pub effort: Option<String>,
+}
+
 pub struct Tail {
     /// How much of a transcript seen for the first time is read: a long
     /// session is not replayed, only its recent end newer than `since`.
     first_read: u64,
     offsets: HashMap<String, u64>,
+    /// The latest model each transcript named, kept across reads: Codex names
+    /// it once a turn, so most reads see none.
+    models: HashMap<String, Model>,
 }
 
 /// Cursor uses a root-list position and blob hash rather than its non-unique
@@ -99,7 +110,12 @@ impl Default for Tail {
 
 impl Tail {
     pub fn new(first_read: u64) -> Self {
-        Tail { first_read, offsets: HashMap::new() }
+        Tail { first_read, offsets: HashMap::new(), models: HashMap::new() }
+    }
+
+    /// The model `path` last named, as of the last `new_prose` for it.
+    pub fn model(&self, path: &str) -> Option<&Model> {
+        self.models.get(path)
     }
 
     /// Prose appended to `path` since the last call for it, in file order.
@@ -132,10 +148,17 @@ impl Tail {
                 None => return Vec::new(),
             }
         }
-        body.split(|&b| b == b'\n')
-            .filter_map(prose)
-            .filter(|e| known.is_some() || e.timestamp.is_some_and(|t| t > since))
-            .collect()
+        let mut entries = Vec::new();
+        for line in body.split(|&b| b == b'\n') {
+            let Ok(v) = serde_json::from_slice::<Value>(line) else { continue };
+            if let Some(m) = model(&v) {
+                self.models.insert(path.into(), m);
+            }
+            if let Some(e) = prose_value(&v).filter(|e| known.is_some() || e.timestamp.is_some_and(|t| t > since)) {
+                entries.push(e);
+            }
+        }
+        entries
     }
 }
 
@@ -166,7 +189,29 @@ fn cursor_message_prose(message: &CursorMessage) -> Option<Entry> {
 /// "content":[{"type":"output_text",…}]}}` or `{"payload":{"type":"reasoning","summary":[…]}}`.
 /// A subagent's lines (`isSidechain`) are its own conversation.
 pub fn prose(line: &[u8]) -> Option<Entry> {
-    let v: Value = serde_json::from_slice(line).ok()?;
+    prose_value(&serde_json::from_slice(line).ok()?)
+}
+
+/// The model one transcript line names, if any. Claude Code: an assistant
+/// line's `message.model` (not a subagent's, and not `<synthetic>`, which it
+/// writes for replies it made up itself, such as an interrupted turn).
+/// Codex: `{"type":"turn_context","payload":{"model":…,"effort":…}}`.
+pub fn model(v: &Value) -> Option<Model> {
+    let text = |v: Option<&Value>| v.and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    match v.get("type").and_then(Value::as_str) {
+        Some("assistant") if v.get("isSidechain").and_then(Value::as_bool) != Some(true) => {
+            let name = text(v.pointer("/message/model")).filter(|n| !n.starts_with('<'))?;
+            Some(Model { name, effort: None })
+        }
+        Some("turn_context") => {
+            let p = v.get("payload")?;
+            Some(Model { name: text(p.get("model"))?, effort: text(p.get("effort")) })
+        }
+        _ => None,
+    }
+}
+
+fn prose_value(v: &Value) -> Option<Entry> {
     let texts = |arr: Option<&Value>, ty: &str, key: &str| -> Vec<String> {
         arr.and_then(Value::as_array)
             .into_iter()
@@ -360,6 +405,30 @@ mod tests {
         f.write(&(claude(json!([{"type": "text", "text": "subagent chatter"}]), 1000, true) + "\n"));
         f.write(&(say("Done.\n\n::seahelm-suggest:: push | open PR", 1001) + "\n"));
         assert_eq!(texts(&Tail::default().new_prose(&f.path(), 0.0)), ["Done."]);
+    }
+
+    #[test]
+    fn the_model_is_the_latest_one_named_and_outlives_reads_that_name_none() {
+        let mut f = File::new();
+        let line = |model: &str, sidechain: bool| json!({"type": "assistant", "isSidechain": sidechain, "timestamp": stamp(1000),
+            "message": {"role": "assistant", "model": model, "content": [{"type": "text", "text": "hi"}]}}).to_string();
+        f.write(&(line("claude-sonnet-5-5", false) + "\n" + &line("claude-opus-5-5", false) + "\n"));
+        f.write(&(line("claude-haiku-5-5", true) + "\n" + &line("<synthetic>", false) + "\n"));
+        let mut tail = Tail::default();
+        tail.new_prose(&f.path(), 0.0);
+        assert_eq!(tail.model(&f.path()), Some(&Model { name: "claude-opus-5-5".into(), effort: None }));
+        f.write(&(json!({"type": "user", "message": {"role": "user", "content": "go on"}}).to_string() + "\n"));
+        tail.new_prose(&f.path(), 0.0);
+        assert_eq!(tail.model(&f.path()).map(|m| m.name.as_str()), Some("claude-opus-5-5"));
+    }
+
+    #[test]
+    fn codex_names_its_model_and_effort_in_the_turn_context() {
+        let mut f = File::new();
+        f.write(&(json!({"type": "turn_context", "timestamp": stamp(1000), "payload": {"model": "gpt-6.1-sol", "effort": "xhigh", "cwd": "/p"}}).to_string() + "\n"));
+        let mut tail = Tail::default();
+        tail.new_prose(&f.path(), 0.0);
+        assert_eq!(tail.model(&f.path()), Some(&Model { name: "gpt-6.1-sol".into(), effort: Some("xhigh".into()) }));
     }
 
     #[test]
