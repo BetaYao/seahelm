@@ -693,6 +693,12 @@ impl FirstMate {
             exists = false;
         }
         if !exists {
+            // First Mate's home is the core's own directory: nobody would
+            // answer Claude Code's trust prompt there, and First Mate would
+            // sit at it with every order unanswered.
+            if agent == pane::Agent::Claude {
+                crate::claude_trust::trust(&self.dir);
+            }
             pane::mark_session_current(&self.dir, agent, self.config.language);
             let out = std::process::Command::new(crate::actions::seahelmd_bin())
                 .current_dir(&self.dir)
