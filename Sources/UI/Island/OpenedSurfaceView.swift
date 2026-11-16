@@ -117,6 +117,10 @@ struct OpenedSurfaceView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(toneColor)
             Spacer(minLength: 0)
+            if !model.mateRunning {
+                // "● off" is only a reading; this is the switch.
+                pill(model.language.turnOn, systemImage: "power", tint: IslandStyle.accent) { model.turnOnFirstMate() }
+            }
             if model.mateBusy {
                 pill(model.language.stop, systemImage: "stop.fill", tint: .white.opacity(0.75)) { model.stopFirstMate() }
             }
@@ -1037,13 +1041,14 @@ enum IslandLanguage: String, Equatable {
     }
 
     var stop: String { isChinese ? "停止" : "Stop" }
+    var turnOn: String { isChinese ? "开启" : "Turn on" }
     var retry: String { isChinese ? "重试" : "Retry" }
     var more: String { isChinese ? "更多" : "More" }
     var less: String { isChinese ? "收起" : "Less" }
     var collapse: String { isChinese ? "收起" : "Collapse" }
     var composerPlaceholder: String { isChinese ? "问问 First Mate — 输入 / 查看命令" : "Ask First Mate — / for a command" }
     var nothingSaidYet: String { isChinese ? "还没有消息。可以问 First Mate 任何问题，`/命令` 会直接运行。" : "Nothing said yet. Ask First Mate anything — a `/command` runs as one." }
-    var firstMateOff: String { isChinese ? "First Mate 尚未启用。可在“设置 ▸ First Mate”中开启。" : "First Mate is off. Turn it on in Settings ▸ First Mate." }
+    var firstMateOff: String { isChinese ? "First Mate 尚未启用。点上方的“开启”，或在“设置 ▸ First Mate”中开启。" : "First Mate is off. Use Turn on above, or Settings ▸ First Mate." }
     var commandFailed: String { isChinese ? "命令未能运行。" : "That command did not run." }
     var sendFailed: String { isChinese ? "First Mate 未收到消息——确认它正在运行。" : "First Mate did not get it — is it running?" }
     var stoppedWithError: String { isChinese ? "因错误而停止" : "Stopped with an error" }

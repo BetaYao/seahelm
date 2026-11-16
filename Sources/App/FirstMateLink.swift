@@ -25,9 +25,9 @@ final class FirstMateLink {
     }
     var onStateChange: ((State) -> Void)?
     /// What config.json says about First Mate (`autopilot_enabled`,
-    /// `autopilot_agent`), as the core read it. seahelm-web can change both
-    /// (`autopilot.configure`); the app keeps its own copy of the config and
-    /// writes all of it on any save, so it follows the core's reading here.
+    /// `autopilot_agent`), as the core read it. seahelm-web and the island can
+    /// change both (`autopilot.configure`), and so can a hand edit; the app
+    /// keeps its own copy of the config, so it follows the core's reading here.
     var onConfigured: ((_ enabled: Bool, _ agent: String) -> Void)?
 
     /// The core says First Mate is running.
@@ -44,6 +44,18 @@ final class FirstMateLink {
         guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.poll() }
         poll()
+    }
+
+    /// Turn First Mate on (the island's switch): the core writes
+    /// `autopilot_enabled` into config.json and starts it at once, rather than
+    /// at its next read of the file. `onConfigured` brings the app's copy along.
+    func turnOn() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            if case .failure(let error) = CoreSocketClient.call("autopilot.configure", ["enabled": true]) {
+                NSLog("[FirstMateLink] autopilot.configure failed: \(error)")
+            }
+            DispatchQueue.main.async { self?.poll() }
+        }
     }
 
     /// The user's own words, now. False when it is not running.

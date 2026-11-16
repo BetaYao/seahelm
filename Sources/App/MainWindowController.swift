@@ -2041,6 +2041,9 @@ extension MainWindowController {
         model.onInterruptFirstMate = { [weak self] in
             self?.tabCoordinator.firstMate.interrupt()
         }
+        model.onTurnOnFirstMate = { [weak self] in
+            self?.tabCoordinator.firstMate.turnOn()
+        }
         islandController.install()
         // The opened island reads First Mate's timeline while it shows.
         islandMateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -2561,10 +2564,11 @@ extension MainWindowController {
         }
     }
 
-    /// config.json changed under the app (seahelm-web turned First Mate on, or
-    /// picked its agent): take it into the app's copy, which every save writes
-    /// whole and would otherwise put back. Nothing is written here: the file
-    /// already says so.
+    /// config.json changed under the app (seahelm-web or the island turned
+    /// First Mate on through `autopilot.configure`, or the user edited the
+    /// file): take it into the app's copy, so Settings shows it. A save would
+    /// keep the file's value anyway (`Config.merged` writes only keys the app
+    /// changed). Nothing is written here: the file already says so.
     fileprivate func adoptFirstMateConfig(enabled: Bool, agent: String) {
         guard config.autopilotEnabled != enabled || config.autopilotAgent != agent else { return }
         config.autopilotEnabled = enabled
