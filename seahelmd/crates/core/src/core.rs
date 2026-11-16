@@ -2300,11 +2300,9 @@ impl State {
                 }
             }
             if let Some(r) = &out.session_ref {
-                // By pane when the hook named one, else the worktree's pane.
-                let key = match &r.pane {
-                    Some(p) => self.registry.resolve(Some(p), &r.worktree),
-                    None => self.registry.pane_for_worktree(&r.worktree).map(|p| p.id.clone()),
-                };
+                // Only a hook that names its pane: an agent outside every
+                // pane (no hint) must not become the session a pane resumes.
+                let key = r.pane.as_deref().and_then(|p| self.registry.resolve(Some(p), &r.worktree));
                 if let (Some(key), Ok(v)) = (key, serde_json::to_value(&r.session_ref)) {
                     if self.session_refs.get(&key) != Some(&v) {
                         // Pushed, so the client that recreates the pane's session

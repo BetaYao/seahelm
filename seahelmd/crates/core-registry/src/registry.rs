@@ -420,8 +420,17 @@ impl Registry {
     /// The pane an event is about: the hint (`seahelm_pane_id`, a session or
     /// an alias) when it names a registered pane, else the first pane of the
     /// worktree whose path is the longest prefix of `cwd`.
+    ///
+    /// No hint, no pane. Every agent in a seahelmd session carries one
+    /// (`SEAHELM_PANE_ID`, else `SEAHELMD_SESSION`), so an event without one
+    /// comes from an agent outside every pane — a Codex or Claude in another
+    /// terminal or an IDE that happens to work in a tracked worktree. Filed
+    /// under the worktree's first pane, it took that pane over: its prompts
+    /// and replies became the pane's timeline, its session the one the pane
+    /// would resume, its questions cards whose answers went into the pane.
     pub fn resolve(&self, pane_hint: Option<&str>, cwd: &str) -> Option<String> {
-        if let Some(key) = pane_hint.and_then(|h| self.pane_for_hint(h)) {
+        let hint = pane_hint?;
+        if let Some(key) = self.pane_for_hint(hint) {
             return Some(key.to_string());
         }
         let wt = self.worktree_for_cwd(cwd)?;

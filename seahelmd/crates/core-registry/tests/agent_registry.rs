@@ -262,17 +262,25 @@ fn aliases_resolve_to_the_session() {
 /// The registry's own cwd fallback takes the longest prefix: a worktree
 /// nested inside another (`<repo>/.claude/worktrees/x`) wins over the repo.
 #[test]
+fn no_hint_resolves_to_no_pane() {
+    let mut r = Registry::new();
+    register(&mut r, "outer", "/repo");
+    assert_eq!(r.resolve(None, "/repo/src"), None, "an agent outside every pane is no pane's");
+}
+
+#[test]
 fn cwd_fallback_uses_the_longest_prefix() {
     let mut r = Registry::new();
     register(&mut r, "outer", "/repo");
     register(&mut r, "inner", "/repo/.claude/worktrees/x");
+    // A hint that names no registered pane falls back on the cwd.
     assert_eq!(
-        r.resolve(None, "/repo/.claude/worktrees/x/src").as_deref(),
+        r.resolve(Some("gone"), "/repo/.claude/worktrees/x/src").as_deref(),
         Some("inner")
     );
-    assert_eq!(r.resolve(None, "/repo/src").as_deref(), Some("outer"));
+    assert_eq!(r.resolve(Some("gone"), "/repo/src").as_deref(), Some("outer"));
     assert_eq!(
-        r.resolve(None, "/repository"),
+        r.resolve(Some("gone"), "/repository"),
         None,
         "a prefix only counts on a path boundary"
     );
