@@ -41,11 +41,15 @@ pub struct TelegramConfig {
     /// `TelegramRule`s, as the rules editor writes them.
     pub rules: Vec<Value>,
     pub mini_app_url: Option<String>,
+    /// Where to reach the Bot API instead of `https://api.telegram.org`: a
+    /// reverse proxy that forwards to it unchanged, for a network that cannot
+    /// reach Telegram (scripts/telegram-proxy-worker.js is one for Cloudflare).
+    pub api_url: Option<String>,
 }
 
 impl Default for TelegramConfig {
     fn default() -> Self {
-        Self { enabled: true, allowed_users: Vec::new(), default_chat_id: None, backfill_seconds: 60.0, rules: Vec::new(), mini_app_url: None }
+        Self { enabled: true, allowed_users: Vec::new(), default_chat_id: None, backfill_seconds: 60.0, rules: Vec::new(), mini_app_url: None, api_url: None }
     }
 }
 
@@ -59,6 +63,17 @@ impl TelegramConfig {
             let needle = normalize_user(entry);
             !needle.is_empty() && (needle == id || (!name.is_empty() && needle == name))
         })
+    }
+
+    /// The Bot API base: `api_url` when it is a usable https URL (no trailing
+    /// slash), else Telegram's own.
+    pub fn api_base(&self) -> String {
+        self.api_url
+            .as_deref()
+            .map(|u| u.trim().trim_end_matches('/'))
+            .filter(|u| u.to_ascii_lowercase().starts_with("https://") && url_host(u).is_some())
+            .map(str::to_string)
+            .unwrap_or_else(|| crate::telegram::api::HOST.to_string())
     }
 
     /// The Mini App URL when it is a usable https URL.
@@ -334,6 +349,20 @@ fn set_private(path: &Path, mode: u32) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_api_url_must_be_https_and_loses_its_trailing_slash() {
+        let with = |u: Option<&str>| TelegramConfig { api_url: u.map(str::to_string), ..TelegramConfig::default() }.api_base();
+        assert_eq!(with(None), "https://api.telegram.org");
+        assert_eq!(with(Some("")), "https://api.telegram.org");
+        assert_eq!(with(Some("http://tg.example.com")), "https://api.telegram.org");
+        assert_eq!(with(Some("not a url")), "https://api.telegram.org");
+        assert_eq!(with(Some(" https://tg-api.example.workers.dev/ ")), "https://tg-api.example.workers.dev");
+        assert_eq!(with(Some("https://example.com/telegram")), "https://example.com/telegram");
+        // An older config without the key still reads.
+        let old: TelegramConfig = serde_json::from_value(json!({"enabled": true})).unwrap();
+        assert_eq!(old.api_base(), "https://api.telegram.org");
+    }
 
     #[test]
     fn imports_the_apps_settings_once() {

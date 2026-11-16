@@ -18,7 +18,7 @@
 //! Long polling, not a webhook: the gateway may have no public address, and
 //! Telegram answers a held `getUpdates` the moment something arrives.
 
-mod api;
+pub(crate) mod api;
 mod callbacks;
 mod fleet;
 mod format;
@@ -132,7 +132,8 @@ pub fn admin(gw: &Arc<Gateway>, method: &str, params: &Value) -> Option<RpcResul
                 return Some(Ok(json!({"ok": false, "error": "No bot token given"})));
             }
             let http = ADAPTER.get().map(|a| a.http.clone()).unwrap_or_else(api::http_client);
-            let bot = api::Bot::new(http, token);
+            let base = gw.store().config.telegram.api_base();
+            let bot = api::Bot::with_base(http, token, base);
             Ok(match gw.runtime.block_on(bot.get_me()) {
                 Ok(me) => json!({"ok": true, "username": me.username}),
                 Err(e) => json!({"ok": false, "error": e.to_string()}),
@@ -265,7 +266,7 @@ impl Adapter {
     // MARK: connection
 
     /// Follow the settings: connected while Telegram is on and a token is
-    /// set; a new token reconnects, and a changed Mini App URL moves the
+    /// set; a new token or API URL reconnects, and a changed Mini App URL moves the
     /// menu button without one.
     async fn run_connection(self: Arc<Self>) {
         let mut rx = self.gw.config();
@@ -278,14 +279,16 @@ impl Adapter {
                 }
                 continue;
             };
-            let session = tokio::spawn(self.clone().run_bot(token.clone()));
+            let base = cfg.telegram.api_base();
+            let session = tokio::spawn(self.clone().run_bot(token.clone(), base.clone()));
             loop {
                 if rx.changed().await.is_err() {
                     session.abort();
                     return;
                 }
                 let (c, t) = rx.borrow_and_update().clone();
-                if t.filter(|_| c.telegram.enabled).as_deref() != Some(token.as_str()) {
+                // A new token, or a new way to reach Telegram, reconnects.
+                if t.filter(|_| c.telegram.enabled).as_deref() != Some(token.as_str()) || c.telegram.api_base() != base {
                     break;
                 }
                 self.clone().apply_menu_button(&c.telegram).await;
@@ -346,8 +349,8 @@ impl Adapter {
         }
     }
 
-    async fn run_bot(self: Arc<Self>, token: String) {
-        let bot = api::Bot::new(self.http.clone(), token);
+    async fn run_bot(self: Arc<Self>, token: String, base: String) {
+        let bot = api::Bot::with_base(self.http.clone(), token, base);
         let Some(me) = self.retrying("getMe", || bot.get_me()).await else { return };
         let username = me.username.clone().filter(|u| !u.is_empty());
         eprintln!("seahelm-gateway: telegram: connected as @{}", username.clone().unwrap_or_else(|| me.id.to_string()));

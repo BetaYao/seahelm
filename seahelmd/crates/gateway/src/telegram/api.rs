@@ -286,6 +286,8 @@ impl ApiError {
 pub struct Bot {
     http: reqwest::Client,
     token: String,
+    /// The Bot API base, `HOST` or a proxy in front of it.
+    base: String,
 }
 
 /// The shared client: connections to Telegram are reused, so a reply does not
@@ -300,8 +302,9 @@ pub fn http_client() -> reqwest::Client {
 }
 
 impl Bot {
-    pub fn new(http: reqwest::Client, token: impl Into<String>) -> Bot {
-        Bot { http, token: token.into() }
+    /// A bot reached through `base` (`TelegramConfig::api_base`).
+    pub fn with_base(http: reqwest::Client, token: impl Into<String>, base: impl Into<String>) -> Bot {
+        Bot { http, token: token.into(), base: base.into() }
     }
 
     fn scrub(&self, message: &str) -> String {
@@ -313,7 +316,7 @@ impl Bot {
     }
 
     pub async fn call<T: DeserializeOwned>(&self, method: &str, params: Value, timeout_secs: u64) -> Result<T, ApiError> {
-        let url = format!("{HOST}/bot{}/{method}", self.token);
+        let url = format!("{}/bot{}/{method}", self.base, self.token);
         let response = self
             .http
             .post(url)
@@ -451,7 +454,7 @@ impl Bot {
         if file_path.starts_with('/') || file_path.contains("..") || file_path.contains("://") {
             return Err(ApiError::BadResponse);
         }
-        let url = format!("{HOST}/file/bot{}/{file_path}", self.token);
+        let url = format!("{}/file/bot{}/{file_path}", self.base, self.token);
         let mut response = self
             .http
             .get(url)

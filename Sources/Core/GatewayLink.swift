@@ -258,6 +258,9 @@ struct GatewaySettings: Equatable {
         var backfillSeconds: Int?
         var rules: [TelegramRule] = []
         var miniAppURL: String?
+        /// A reverse proxy in front of the Bot API, for a network that cannot
+        /// reach api.telegram.org; nil uses Telegram's own.
+        var apiURL: String?
     }
     var web = Web()
     var telegram = Telegram()
@@ -283,7 +286,8 @@ struct GatewaySettings: Equatable {
                             defaultChatId: string(t["default_chat_id"]),
                             backfillSeconds: (t["backfill_seconds"] as? NSNumber)?.intValue,
                             rules: rules,
-                            miniAppURL: string(t["mini_app_url"]))
+                            miniAppURL: string(t["mini_app_url"]),
+                            apiURL: string(t["api_url"]))
     }
 
     /// Rules in the wire shape, for `gateway.config.set`.
