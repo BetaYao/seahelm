@@ -243,6 +243,22 @@ pub fn call(socket: &Path, method: &str, params: Value) -> Result<Value> {
     call_with_timeout(socket, method, params, Duration::from_secs(10))
 }
 
+/// `method` on `socket` and the pid of the process that answered it, for a
+/// client that may have to replace that process.
+pub fn call_with_server(socket: &Path, method: &str, params: Value) -> Result<(Value, Option<u32>)> {
+    let mut stream = Stream::connect(socket).with_context(|| format!("connect {}", socket.display()))?;
+    let pid = seahelmd::platform::server_pid(&stream);
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    write_line(&mut stream, &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))?;
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line)?;
+    let mut v: Value = serde_json::from_str(&line).with_context(|| format!("reply to {method}"))?;
+    if let Some(err) = v.get("error") {
+        bail!("{method}: {err}");
+    }
+    Ok((v.get_mut("result").map(Value::take).unwrap_or(Value::Null), pid))
+}
+
 /// `call`, waiting up to `timeout` for the answer (a wait, a worktree add).
 pub fn call_with_timeout(socket: &Path, method: &str, params: Value, timeout: Duration) -> Result<Value> {
     let mut stream = Stream::connect(socket).with_context(|| format!("connect {}", socket.display()))?;

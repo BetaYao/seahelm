@@ -472,7 +472,7 @@ impl Core {
             // `-32004`, `pane.presence`). A CLI newer than a core still running
             // from before an update sees no `cli` and asks the app instead.
             "core.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "started_at": STARTED_AT.get().copied(),
-                                     "cli": CLI_DIALECT})),
+                                     "cli": CLI_DIALECT, "build": seahelmd::build_id::current(), "pid": std::process::id()})),
             "hook" | "suggest" => {
                 let stdout = hook_stdout(method, &p).map(|output| {
                     let memory = str_param(&p, "seahelm_pane_id").and_then(|pane| self.resolve_pane(&pane)).and_then(|pane| self.pane_row(&pane))

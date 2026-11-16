@@ -193,3 +193,42 @@ pub fn tty_size() -> (u16, u16) {
         }
     }
 }
+
+/// The process serving the other end of a connected socket: the core or the
+/// gateway, asked by a client that may have to replace it.
+#[cfg(target_os = "macos")]
+pub fn server_pid(stream: &Stream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let mut pid: libc::pid_t = 0;
+    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+    // SAFETY: the fd is a live socket while `stream` is; pid and len are sized
+    // for LOCAL_PEERPID, which writes one pid_t.
+    let got = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_LOCAL, libc::LOCAL_PEERPID, (&mut pid as *mut libc::pid_t).cast(), &mut len) };
+    (got == 0 && pid > 0).then_some(pid as u32)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn server_pid(stream: &Stream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: the fd is a live socket; cred and len are sized for SO_PEERCRED.
+    let got = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&mut cred as *mut libc::ucred).cast(), &mut len) };
+    (got == 0 && cred.pid > 0).then_some(cred.pid as u32)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
+pub fn server_pid(_stream: &Stream) -> Option<u32> {
+    None
+}
+
+/// Ask one process to end (SIGTERM; never its group, which would take the
+/// sessions it started).
+pub fn terminate(pid: u32, force: bool) {
+    unsafe { libc::kill(pid as i32, if force { libc::SIGKILL } else { libc::SIGTERM }) };
+}
+
+/// The process is still there.
+pub fn alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}

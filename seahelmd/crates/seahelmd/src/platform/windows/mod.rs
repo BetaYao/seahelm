@@ -222,3 +222,37 @@ pub fn stdin_bytes() -> Box<dyn Read + Send> {
 pub fn stdout_bytes() -> Box<dyn Write + Send> {
     Box::new(console::Output::stdout())
 }
+
+/// The process serving the other end of a connected pipe.
+pub fn server_pid(stream: &Stream) -> Option<u32> {
+    stream.server_process_id().ok().filter(|p| *p > 0)
+}
+
+/// End one process (not its tree, which holds the sessions it started).
+/// Windows has no polite signal for a console-less process; `force` is moot.
+pub fn terminate(pid: u32, _force: bool) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    unsafe {
+        let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if !h.is_null() {
+            TerminateProcess(h, 1);
+            CloseHandle(h);
+        }
+    }
+}
+
+/// The process is still running.
+pub fn alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+    unsafe {
+        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if h.is_null() {
+            return false;
+        }
+        let running = WaitForSingleObject(h, 0) == WAIT_TIMEOUT;
+        CloseHandle(h);
+        running
+    }
+}

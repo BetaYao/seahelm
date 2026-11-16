@@ -85,6 +85,8 @@ fn serve() -> Result<()> {
     // but the service starts sessions (First Mate, `/new`) that must not
     // inherit the identity of whatever pane launched it.
     seahelmd::inherited::scrub();
+    // Now, before an update can swap the file under this process.
+    let _ = seahelmd::build_id::current();
     let _ = core::STARTED_AT.set(seahelm_core_types::now());
     // An ignored signal survives exec, so a core started by a client that
     // ignores SIGTERM (a GUI toolkit may) could not be stopped by it.
@@ -124,7 +126,14 @@ fn serve() -> Result<()> {
 /// caller (its own session, like seahelmd's), and wait until it answers.
 fn ensure() -> Result<()> {
     let path = rpc::core_socket();
-    if rpc::call(&path, "core.ping", Value::Null).is_ok() {
+    // A core from another build (the app was updated under it) gives way.
+    let ping = || {
+        rpc::call_with_server(&path, "core.ping", Value::Null).ok().map(|(r, peer)| seahelmd::build_id::Running {
+            build: r.get("build").and_then(Value::as_str).map(str::to_string),
+            pid: r.get("pid").and_then(Value::as_u64).map(|p| p as u32).or(peer),
+        })
+    };
+    if seahelmd::build_id::make_room("seahelm-core", ping) {
         return Ok(());
     }
     let exe = std::env::current_exe()?;
