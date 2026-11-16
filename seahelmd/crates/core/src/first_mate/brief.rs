@@ -52,6 +52,8 @@ pub struct Inputs {
     /// Habit level changes since the last brief.
     pub notes: Vec<Text>,
     pub research: Vec<String>,
+    /// "Yesterday's work" (`daily_stats::compose`), first after the title.
+    pub work: Option<String>,
 }
 
 fn listed(items: &[String], lang: Lang) -> String {
@@ -212,7 +214,7 @@ pub fn compose(i: &Inputs) -> Option<String> {
             Lang::Zh => format!("{expired} 张卡片没人回，已撤下"),
         });
     }
-    if done.is_empty() && i.waiting.is_empty() && i.suggest.is_empty() && i.tasks.is_empty() && notes.is_empty() && i.research.is_empty() {
+    if i.work.is_none() && done.is_empty() && i.waiting.is_empty() && i.suggest.is_empty() && i.tasks.is_empty() && notes.is_empty() && i.research.is_empty() {
         return None;
     }
     let title = match (i.away, i.fallback) {
@@ -222,6 +224,9 @@ pub fn compose(i: &Inputs) -> Option<String> {
     };
     let sep = l.pick("; ", "；");
     let mut out = vec![title];
+    if let Some(work) = &i.work {
+        out.push(work.clone());
+    }
     if !done.is_empty() {
         out.push(format!("{}{}", l.pick("Done: ", "做了："), done.join(sep)));
     }
@@ -378,6 +383,7 @@ impl FirstMate {
         if self.config.paused {
             return;
         }
+        self.prefetch_work(now);
         let presence = self.core.presence();
         let off = offset(now);
         let Some(due) = budget::due(&self.budget, &presence, now, off, false) else { return };
@@ -439,6 +445,7 @@ impl FirstMate {
         let since_iso = iso8601(since);
         let entries: Vec<Entry> = self.audit.recent(5000).into_iter().filter(|e| e.at > since_iso).collect();
         let tasks = self.task_brief(now);
+        let (mut stats, work, through) = self.yesterdays_work(now);
         let inputs = Inputs {
             lang: self.config.language,
             away,
@@ -450,8 +457,15 @@ impl FirstMate {
             tasks,
             notes: self.budget.notes.clone(),
             research: self.research.pending(),
+            work,
         };
-        let Some(text) = compose(&inputs) else {
+        let told_work = inputs.work.is_some();
+        let text = compose(&inputs);
+        if told_work && text.is_some() {
+            stats.reported_through = Some(through);
+        }
+        stats.save(&self.dir);
+        let Some(text) = text else {
             self.budget.dealt_with(&day, None);
             self.save_budget();
             return;
@@ -475,6 +489,68 @@ impl FirstMate {
         }
         self.budget.dealt_with(&day, Some(now));
         self.save_budget();
+    }
+
+    /// The brief's "yesterday's work": the days it needs measured (each
+    /// once; a day GitHub could not be asked about is asked again), then
+    /// composed. Returns the store to save, the lines, and the last day
+    /// they speak of.
+    fn yesterdays_work(&mut self, now: f64) -> (super::daily_stats::Store, Option<String>, String) {
+        use super::daily_stats as ds;
+        let off = offset(now);
+        let (day, extra) = ds::report_days(now, off);
+        let mut store = ds::Store::load(&self.dir);
+        // The job started ahead, if it is for this report (waited for when
+        // still running); else measured now.
+        if let Some((key, job)) = self.work_prefetch.take() {
+            if key == day.key {
+                if let Ok(days) = job.join() {
+                    store.days.extend(days);
+                }
+            }
+        }
+        let missing = self.work_missing(&store, &day, &extra, off);
+        if !missing.is_empty() {
+            let repos = ds::repos(&crate::rpc::config_dir(), self.core.repos());
+            store.days.extend((self.measure_work)(&missing, &repos));
+        }
+        let work = ds::compose(&ds::Report { lang: self.config.language, day: &day, extra: &extra, offset: off, store: &store });
+        let through = extra.last().unwrap_or(&day).key.clone();
+        (store, work, through)
+    }
+
+    /// The days a report needs that the store lacks (or holds without
+    /// GitHub's numbers, asked again).
+    fn work_missing(&self, store: &super::daily_stats::Store, day: &super::daily_stats::DayRef, extra: &[super::daily_stats::DayRef], off: i64) -> Vec<super::daily_stats::DayRef> {
+        super::daily_stats::days_needed(day, extra, off)
+            .into_iter()
+            .filter(|d| store.days.get(&d.key).map_or(true, |x| x.prs_merged.is_none()))
+            .collect()
+    }
+
+    /// Start measuring today's report off this thread, once a day, so the
+    /// brief — sent the moment the user arrives — does not wait on git and
+    /// GitHub. Its result is merged into the store when the brief goes.
+    fn prefetch_work(&mut self, now: f64) {
+        use super::daily_stats as ds;
+        let off = offset(now);
+        let (day, extra) = ds::report_days(now, off);
+        if self.work_prefetch.as_ref().is_some_and(|(k, _)| *k == day.key) {
+            return;
+        }
+        let store = ds::Store::load(&self.dir);
+        if store.reported_through.as_deref().is_some_and(|k| k >= extra.last().unwrap_or(&day).key.as_str()) {
+            return;
+        }
+        let missing = self.work_missing(&store, &day, &extra, off);
+        let repos = ds::repos(&crate::rpc::config_dir(), self.core.repos());
+        let measure = self.measure_work.clone();
+        let job = std::thread::Builder::new()
+            .name("first-mate-work".into())
+            .spawn(move || if missing.is_empty() { std::collections::HashMap::new() } else { measure(&missing, &repos) });
+        if let Ok(job) = job {
+            self.work_prefetch = Some((day.key, job));
+        }
     }
 
     // MARK: expiry
@@ -623,6 +699,16 @@ mod tests {
         assert_eq!(compose(&quiet), None);
     }
 
+    #[test]
+    fn yesterdays_work_comes_first_and_alone_is_a_brief() {
+        let work = "昨日工作（11月18日 周三）：\n代码：6 次提交".to_string();
+        let text = compose(&Inputs { lang: Lang::Zh, work: Some(work.clone()), waiting: vec!["x".into()], ..Inputs::default() }).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[1], "昨日工作（11月18日 周三）：");
+        assert!(lines[3].starts_with("等你处理"), "{text}");
+        assert!(compose(&Inputs { work: Some(work), ..Inputs::default() }).is_some());
+    }
+
     fn sample(lang: Lang) -> Inputs {
         let mut approved = action("Deleted worktree c (approved, habit h)", None, "approved", Some("/w/wt/c"));
         approved.action = Some("delete_worktree".into());
@@ -639,6 +725,7 @@ mod tests {
             ],
             waiting: vec!["these 2 worktrees look done:".into(), "First Mate asks: delete x".into()],
             research: vec![],
+            work: None,
             later: 1,
             suggest: vec!["spike-x".into()],
             tasks: vec![],
