@@ -78,6 +78,7 @@ push:     {"type":"notify","method","params"}
 | `card-timeline.js` | card-row merging, First Mate decision deduplication, waiting-only suggestion cap, waiting filter, and collapsed message runs |
 | `pane-pick.js` | which pane a worktree opens on, and the words a row uses for its status |
 | `composer-action.js` | what the composer's one button means right now — send, stop, or nothing. Typed text always wins, so an agent being busy never refuses the message you just wrote |
+| `composer-attach.js` | files attached to the composer — the paperclip, a pasted screenshot, a drop: each is uploaded to the gateway at once (`file.upload`, kept under `$TMPDIR/seahelm-drops/`, at most 10 MB) and shown as a thumbnail above the field with its ×; on send the paths follow the words. Share pages have no attach |
 | `devbroker/` | dependency-free node unit tests for the modules above, plus the result collector for `bench.html` |
 
 ## The interface

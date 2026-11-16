@@ -425,6 +425,24 @@ impl Session {
                 });
                 return None;
             }
+            // A pasted screenshot or a picked file, kept on this machine so the
+            // pane's agent can open it; the page puts the path in the message.
+            // Share pages never get here (`share_gate`).
+            "file.upload" => {
+                let name = str_of(&p, "name").unwrap_or("file").to_string();
+                let Some(bytes) = str_of(&p, "b64").and_then(|b| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b).ok()) else {
+                    return Some(Err(RpcError::invalid_params("b64 required")));
+                };
+                if bytes.len() > super::upload::MAX_BYTES {
+                    return Some(Err(RpcError::invalid_params(format!("larger than {} MB", super::upload::MAX_BYTES >> 20))));
+                }
+                let root = super::upload::root();
+                match tokio::task::spawn_blocking(move || super::upload::save(&root, &name, &bytes)).await {
+                    Ok(Ok(path)) => Ok(json!({"path": path.to_string_lossy()})),
+                    Ok(Err(e)) => Err(RpcError::internal(e.to_string())),
+                    Err(e) => Err(RpcError::internal(e.to_string())),
+                }
+            }
             m if NOT_FOR_PAGES.contains(&m) => Err(RpcError::not_found(m)),
             m => self.core(m, p).await,
         })

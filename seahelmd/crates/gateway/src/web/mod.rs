@@ -7,6 +7,7 @@ mod fleet;
 mod frames;
 mod session;
 mod static_files;
+mod upload;
 mod vt;
 
 use std::net::SocketAddr;
