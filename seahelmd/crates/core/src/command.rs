@@ -27,9 +27,7 @@ impl CoreHost<'_> {
             }
         }
         let dir = Path::new(path);
-        let repo = git(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
-            .and_then(|c| Path::new(c.trim()).parent().map(|p| p.to_string_lossy().into_owned()))
-            .unwrap_or_default();
+        let repo = crate::discovery::main_checkout(path);
         let branch = git(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).map(|b| b.trim().to_string()).filter(|b| b != "HEAD").unwrap_or_default();
         self.0.git_cache.lock().unwrap_or_else(|e| e.into_inner()).insert(path.into(), (repo.clone(), branch.clone(), Instant::now()));
         (repo, branch)

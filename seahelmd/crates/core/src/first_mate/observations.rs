@@ -638,8 +638,7 @@ fn is_checkout(path: &str) -> bool {
 /// main checkout itself and anything that is not a checkout.
 pub fn worktree_info(path: &str) -> Option<(String, String)> {
     let wt = Path::new(path);
-    let common = facts::git(wt, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
-    let repo = Path::new(common.trim()).parent()?.to_string_lossy().into_owned();
+    let repo = Some(crate::discovery::main_checkout(path)).filter(|r| !r.is_empty())?;
     if norm(&repo) == norm(path) {
         return None;
     }

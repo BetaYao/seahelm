@@ -294,6 +294,58 @@ class TabCoordinator {
         return previous.subtracting(current)
     }
 
+    /// Move per-worktree entries kept under a submodule's git dir
+    /// (`…/.git/modules/<name>`) to the submodule's checkout. Discovery used
+    /// to take `git worktree list`'s word for the main worktree, which in a
+    /// submodule is that git dir, so panes and layouts were filed there; it
+    /// now lists the checkout, and without this they would sit on a path no
+    /// row shows.
+    private func rehomeSubmoduleGitDirEntries() {
+        var changed = false
+        func rehome<V>(_ map: inout [String: V]) {
+            if let moved = Self.rehomedGitDirKeys(map, resolve: WorktreeDiscovery.listedCheckout) {
+                map = moved
+                changed = true
+            }
+        }
+        rehome(&config.worktreeStartedAt)
+        rehome(&config.worktreeLastActivityAt)
+        rehome(&config.splitLayouts)
+        rehome(&config.focusedPaneIds)
+        rehome(&terminalCoordinator.config.splitLayouts)
+        rehome(&terminalCoordinator.config.focusedPaneIds)
+        for (repo, worktree) in config.activeWorktreePaths where Self.isGitDirPath(worktree) {
+            let moved = WorktreeDiscovery.listedCheckout(worktree)
+            if moved != worktree { config.activeWorktreePaths[repo] = moved; changed = true }
+        }
+        if let selected = config.selectedWorktreePath, Self.isGitDirPath(selected) {
+            let moved = WorktreeDiscovery.listedCheckout(selected)
+            if moved != selected { config.selectedWorktreePath = moved; changed = true }
+        }
+        let order = config.cardOrder.map { Self.isGitDirPath($0) ? WorktreeDiscovery.listedCheckout($0) : $0 }
+        if order != config.cardOrder { config.cardOrder = order; changed = true }
+        if changed { saveConfig() }
+    }
+
+    static func isGitDirPath(_ path: String) -> Bool {
+        path.contains("/.git/modules/")
+    }
+
+    /// `map` with every git-dir key moved to `resolve(key)`, or nil when none
+    /// moved. An entry already under the new key wins over the moved one.
+    static func rehomedGitDirKeys<V>(_ map: [String: V], resolve: (String) -> String) -> [String: V]? {
+        var out = map
+        var moved = false
+        for (key, value) in map where isGitDirPath(key) {
+            let to = resolve(key)
+            guard to != key else { continue }
+            out.removeValue(forKey: key)
+            if out[to] == nil { out[to] = value }
+            moved = true
+        }
+        return moved ? out : nil
+    }
+
     /// Drop per-worktree config entries whose directory no longer exists, so a
     /// deleted worktree doesn't leave timestamps/layouts/session names behind
     /// forever. Runs once per loadWorkspaces.
@@ -580,6 +632,7 @@ class TabCoordinator {
                     self.config.workspacePaths = resolvedPaths
                     self.saveConfig()
                 }
+                self.rehomeSubmoduleGitDirEntries()
                 self.pruneStaleWorktreeConfigEntries()
                 // Keep the volume monitor's watched set in sync with the live
                 // workspace list (repos + every discovered worktree path).

@@ -106,11 +106,37 @@ enum WorktreeDiscovery {
             url = URL(fileURLWithPath: path).appendingPathComponent(commonDir)
         }
         url = url.standardizedFileURL
-        // Non-bare repos: root is the directory containing .git.
+        // Non-bare repos: root is the directory containing .git; a submodule's
+        // git dir (`.git/modules/<name>`) belongs to the checkout it names.
+        return checkout(ofGitDir: url.path) ?? url.path
+    }
+
+    /// The checkout a repository's (common) git dir belongs to: the parent of
+    /// a `.git` directory, or — for a submodule, whose git dir is the
+    /// superproject's `.git/modules/<name>` — the directory its
+    /// `core.worktree` names. Taking the parent there made every submodule a
+    /// repo called `modules`. Nil for a bare repository.
+    static func checkout(ofGitDir gitDir: String) -> String? {
+        let url = URL(fileURLWithPath: gitDir).standardizedFileURL
         if url.lastPathComponent == ".git" {
             return url.deletingLastPathComponent().path
         }
-        return url.path
+        guard let rel = GitProcess.run(["config", "--file", url.appendingPathComponent("config").path, "core.worktree"],
+                                       in: url.path, timeout: gitTimeout)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !rel.isEmpty else { return nil }
+        let dir = rel.hasPrefix("/") ? URL(fileURLWithPath: rel) : url.appendingPathComponent(rel)
+        return dir.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    /// A path `git worktree list` printed, as the checkout it means. In a
+    /// submodule git lists the main worktree by its git dir, which is no
+    /// checkout; every other path is returned as given.
+    static func listedCheckout(_ path: String) -> String {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: (path as NSString).appendingPathComponent(".git")),
+              fm.fileExists(atPath: (path as NSString).appendingPathComponent("HEAD")) else { return path }
+        return checkout(ofGitDir: path) ?? path
     }
 
     private static func runGit(_ arguments: [String], at path: String) -> String? {
@@ -157,7 +183,12 @@ enum WorktreeDiscovery {
             NSLog("git worktree list timed out or failed at \(repoPath)")
             return []
         }
-        return parsePorcelain(output)
+        return parsePorcelain(output).map { info in
+            let path = listedCheckout(info.path)
+            guard path != info.path else { return info }
+            return WorktreeInfo(path: path, branch: info.branch, commitHash: info.commitHash,
+                                isMainWorktree: info.isMainWorktree, isDetached: info.isDetached)
+        }
     }
 
     /// Parse `git worktree list --porcelain` output

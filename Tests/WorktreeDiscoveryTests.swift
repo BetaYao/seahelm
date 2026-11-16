@@ -142,6 +142,41 @@ final class WorktreeDiscoveryTests: XCTestCase {
                        canonicalBase)
     }
 
+    /// A submodule's git dir is the superproject's `.git/modules/<name>`, and
+    /// `git worktree list` names it as the main worktree. The repo is the
+    /// submodule checkout (not a repo called `modules`), and discovery lists
+    /// that checkout, never the git dir.
+    func testSubmoduleIsItsOwnRepo() throws {
+        WorktreeDiscovery.resetRepoRootCacheForTesting()
+        let sup = try makeTempGitRepo()
+        let base = sup.deletingLastPathComponent()
+        let sub = base.appendingPathComponent("olap")
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        try runGit(["init", "-q"], in: sub.path)
+        try runGit(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "init", "-q"], in: sub.path)
+        try runGit(["-c", "protocol.file.allow=always", "submodule", "add", "-q", sub.path, "olap"], in: sup.path)
+        let checkout = sup.appendingPathComponent("olap")
+        let linked = base.appendingPathComponent("olap-feat")
+        try runGit(["worktree", "add", "-q", "-b", "feat", linked.path], in: checkout.path)
+        let canon = { (p: String) in WorktreeDiscovery.canonicalPath(p) }
+
+        XCTAssertEqual(WorktreeDiscovery.findRepoRoot(from: linked.path).map(canon), canon(checkout.path))
+        XCTAssertEqual(WorktreeDiscovery.findRepoRoot(from: checkout.path).map(canon), canon(checkout.path))
+
+        let listed = WorktreeDiscovery.discover(repoPath: checkout.path)
+        XCTAssertEqual(listed.map { canon($0.path) }, [canon(checkout.path), canon(linked.path)])
+        XCTAssertTrue(listed[0].isMainWorktree)
+    }
+
+    func testGitDirKeysMoveToTheCheckout() {
+        let map = ["/r/.git/modules/olap": 1, "/r/other": 2, "/r/olap-wt": 3]
+        let moved = TabCoordinator.rehomedGitDirKeys(map) { $0 == "/r/.git/modules/olap" ? "/r/olap" : $0 }
+        XCTAssertEqual(moved, ["/r/olap": 1, "/r/other": 2, "/r/olap-wt": 3])
+        XCTAssertNil(TabCoordinator.rehomedGitDirKeys(["/r/a": 1]) { $0 })
+        let kept = TabCoordinator.rehomedGitDirKeys(["/r/.git/modules/olap": 1, "/r/olap": 9]) { _ in "/r/olap" }
+        XCTAssertEqual(kept, ["/r/olap": 9])
+    }
+
     func testFindRepoRoot_NonexistentPathReturnsNil() {
         XCTAssertNil(WorktreeDiscovery.findRepoRoot(from: "/nonexistent/path/for/seahelm/tests"))
     }

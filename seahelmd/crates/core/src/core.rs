@@ -1497,8 +1497,8 @@ impl Core {
     pub fn repos(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for w in self.prs.listed() {
-            let common = first_mate::facts::git(std::path::Path::new(&w), &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-            if let Some(repo) = common.and_then(|c| std::path::Path::new(c.trim()).parent().map(|p| p.to_string_lossy().into_owned())) {
+            let repo = crate::discovery::main_checkout(&w);
+            if !repo.is_empty() {
                 if !out.contains(&repo) {
                     out.push(repo);
                 }
