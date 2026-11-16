@@ -97,6 +97,8 @@ fn serve() -> Result<()> {
     // A gateway started from inside a pane must not pass that pane's
     // identity on (it starts nothing today, but its children would).
     seahelmd::inherited::scrub();
+    // Now, before an update can swap the file under this process.
+    let _ = seahelmd::build_id::current();
     #[cfg(unix)]
     unsafe {
         libc::signal(libc::SIGTERM, libc::SIG_DFL);
@@ -125,7 +127,14 @@ fn serve() -> Result<()> {
 fn ensure() -> Result<()> {
     let path = paths::gateway_socket();
     let ping = || matches!(rpc::call(&path, "gateway.ping", json!({}), Duration::from_secs(2)), Ok(Ok(_)));
-    if ping() {
+    // A gateway from another build (the app was updated under it) gives way.
+    let running = || {
+        rpc::call_with_server(&path, "gateway.ping", Duration::from_secs(2)).ok().map(|(r, peer)| seahelmd::build_id::Running {
+            build: r.get("build").and_then(serde_json::Value::as_str).map(str::to_string),
+            pid: r.get("pid").and_then(serde_json::Value::as_u64).map(|p| p as u32).or(peer),
+        })
+    };
+    if seahelmd::build_id::make_room("seahelm-gateway", running) {
         return Ok(());
     }
     let exe = std::env::current_exe()?;

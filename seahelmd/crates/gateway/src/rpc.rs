@@ -69,6 +69,22 @@ pub fn call(socket: &Path, method: &str, params: Value, timeout: Duration) -> Re
     Ok(Ok(v.get_mut("result").map(Value::take).unwrap_or(Value::Null)))
 }
 
+/// `method` on `socket` and the pid of the process that answered, for a
+/// client that may have to replace that process.
+pub fn call_with_server(socket: &Path, method: &str, timeout: Duration) -> Result<(Value, Option<u32>)> {
+    let mut stream = Stream::connect(socket).with_context(|| format!("connect {}", socket.display()))?;
+    let pid = seahelmd::platform::server_pid(&stream);
+    stream.set_read_timeout(Some(timeout))?;
+    write_line(&mut stream, &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": {}}))?;
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line)?;
+    let mut v: Value = serde_json::from_str(&line).with_context(|| format!("reply to {method}"))?;
+    if v.get("error").is_some() {
+        bail!("{method}: error");
+    }
+    Ok((v.get_mut("result").map(Value::take).unwrap_or(Value::Null), pid))
+}
+
 /// Open a subscription (`events.subscribe`, `message.subscribe`) and hand
 /// every notification to `each` until it returns false or the stream ends.
 /// The first line (the subscribe result) goes to `each` too, as

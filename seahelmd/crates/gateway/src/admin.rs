@@ -50,7 +50,7 @@ pub fn call(gw: &Arc<Gateway>, method: &str, p: Value) -> Reply {
 
 fn dispatch(gw: &Arc<Gateway>, method: &str, p: &Value) -> RpcResult {
     match method {
-        "gateway.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id()})),
+        "gateway.ping" => Ok(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id(), "build": seahelmd::build_id::current()})),
         "gateway.status" => Ok(gw.status()),
         "gateway.config.get" => Ok(config_json(gw)),
         "gateway.config.set" => {
