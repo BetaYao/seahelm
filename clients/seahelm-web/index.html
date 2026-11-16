@@ -585,6 +585,20 @@
   body[data-share="pane"] .mc-field button.mc-attach{display:none}
   body[data-share="pane"] .mc-field{padding-left:16px}
   .msg-composer.dropping .mc-field{border-color:var(--accent);border-style:dashed}
+  /* The agent's slash commands, above the field while the message starts with
+     a slash: its name, what it takes, what it does, and — when it is not just
+     a turn in the timeline — where its result shows. */
+  .mc-slash{max-height:min(280px, 40vh);overflow-y:auto;margin:0 0 8px;padding:4px;border-radius:14px;
+    background:var(--panel);border:0.5px solid var(--panel3)}
+  .mc-slash[hidden]{display:none}
+  .mc-slash button{display:grid;grid-template-columns:auto 1fr;column-gap:8px;align-items:baseline;width:100%;
+    text-align:left;border:0;border-radius:10px;background:none;color:var(--text);padding:7px 10px;cursor:pointer;font:inherit}
+  .mc-slash button.on{background:var(--accent-14)}
+  .mc-slash .sc-name{font-family:var(--mono);font-size:var(--fs-sub);color:var(--accent);white-space:nowrap}
+  .mc-slash .sc-args{font-family:var(--mono);font-size:var(--fs-cap);color:var(--faint);margin-left:6px}
+  .mc-slash .sc-desc{font-size:var(--fs-cap);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mc-slash .sc-note{grid-column:2;font-size:var(--fs-cap);color:var(--attention)}
+  .mc-slash .sc-empty{padding:7px 10px;font-size:var(--fs-cap);color:var(--muted)}
   /* Attached files float above the field as thumbnails, each with its ×. */
   .mc-atts{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 8px;scrollbar-width:none}
   .mc-atts[hidden]{display:none}
@@ -706,6 +720,9 @@
       <div class="msg-composer" id="msgComposer" data-kind="agent">
         <div class="mc-kind" id="mcKind" hidden></div>
         <div class="mc-atts" id="mcAtts" hidden></div>
+        <!-- The agent's slash commands, while the message starts with one
+             (slash-complete.js). -->
+        <div class="mc-slash" id="mcSlash" role="listbox" aria-label="Commands" hidden></div>
         <div class="mc-field">
           <button id="msgAttach" class="mc-attach" type="button" title="Attach a file — or paste a screenshot"
                   aria-label="Attach a file" disabled>
@@ -829,6 +846,7 @@
 <script src="./pane-pick.js"></script>
 <script src="./composer-action.js"></script>
 <script src="./composer-attach.js"></script>
+<script src="./slash-complete.js"></script>
 <script src="./card-model.js"></script>
 <script src="./card-timeline.js"></script>
 <script>
@@ -873,6 +891,10 @@ function scrollbackForLeafCount(count){
 // renderSendButton reads it during load.
 let attachments = [];
 let attachSeq = 0;
+// The slash-command menu (slash-complete.js), up here for the same reason:
+// selecting a pane during load closes it.
+const slash = { catalogs: new Map(), items: [], sel: 0, open: false };
+const SLASH_TTL_MS = 60000;
 const SHARE_PANE = (() => {
   try { return new URLSearchParams(location.search).get('pane'); }
   catch (e) { return null; }
@@ -925,6 +947,7 @@ const S = {
 const FM_KEY = 'seahelm-first-mate';
 function setSelectedPane(key){
   if (S.selPane === FM_KEY && key !== FM_KEY && S.todoFilter) S.todoFilter = false;
+  if (S.selPane !== key) closeSlash();
   S.selPane = key;
   renderMateTodoToggle();
 }
@@ -2324,6 +2347,92 @@ function sendComposerText(byTap){
     renderTimelineToBottom();
   }
 }
+// ── slash commands ──────────────────────────────────────────────────────────
+// The selected pane's agent's commands, asked of the core when a message
+// starts with a slash and kept a minute (a skill added meanwhile shows up on
+// the next ask). The First Mate pane is left out: it is not the user's agent
+// to clear or reconfigure.
+
+function slashCatalog(key){
+  const pane = key && key !== FM_KEY && S.panes.get(key);
+  if (!pane || paneKindOf(pane).kind !== 'agent') return null;
+  const have = slash.catalogs.get(key);
+  const fresh = have && have.agent === pane.agent_type && Date.now() - have.at < SLASH_TTL_MS;
+  if (fresh || (have && have.loading)) return have;
+  const entry = { agent: pane.agent_type, at: Date.now(), loading: true, commands: (have && have.commands) || [] };
+  slash.catalogs.set(key, entry);
+  sendCommand('agent.commands', { pane_session_key: key, pane_id: pane.pane_id || key }, (r) => {
+    entry.loading = false;
+    if (r && r.ok) entry.commands = (r.result && r.result.commands) || [];
+    else entry.at = 0; // ask again next time
+    if (S.selPane === key) renderSlash();
+  });
+  return entry;
+}
+
+function closeSlash(){
+  slash.open = false;
+  slash.items = [];
+  const box = $('mcSlash');
+  if (box && !box.hidden) { box.hidden = true; box.innerHTML = ''; }
+}
+
+function renderSlash(){
+  const input = $('msgInput'), box = $('mcSlash');
+  if (!input || !box) return;
+  const q = document.activeElement === input
+    ? SeahelmSlashComplete.query(input.value, input.selectionStart) : null;
+  const catalog = q === null ? null : slashCatalog(S.selPane);
+  if (!catalog) { closeSlash(); return; }
+  const items = SeahelmSlashComplete.match(catalog.commands, q, 8);
+  if (!items.length && !catalog.loading) { closeSlash(); return; }
+  const same = slash.open && items.length === slash.items.length && items.every((c, i) => c === slash.items[i]);
+  if (!same) slash.sel = 0;
+  slash.items = items;
+  slash.open = items.length > 0;
+  box.innerHTML = items.length ? items.map((c, i) => {
+    const note = SeahelmSlashComplete.kindNote(c.kind);
+    return `<button type="button" role="option" data-slash="${i}" class="${i === slash.sel ? 'on' : ''}" aria-selected="${i === slash.sel}">`
+      + `<span class="sc-name">/${esc(c.name)}${c.args ? `<span class="sc-args">${esc(c.args)}</span>` : ''}</span>`
+      + `<span class="sc-desc">${esc(c.description || '')}</span>`
+      + (note ? `<span class="sc-note">${esc(note)}</span>` : '') + '</button>';
+  }).join('') : '<div class="sc-empty">Loading commands…</div>';
+  box.hidden = false;
+  const on = box.querySelector('button.on');
+  if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
+}
+
+function acceptSlash(i){
+  const input = $('msgInput'), c = slash.items[i];
+  if (!input || !c) return;
+  input.value = SeahelmSlashComplete.apply(input.value, c);
+  input.setSelectionRange(input.value.length, input.value.length);
+  closeSlash();
+  autoGrowComposer();
+  input.focus();
+}
+
+/** The keys the open menu takes before the composer does. True when used. */
+function slashKey(ev){
+  if (!slash.open || SeahelmComposerKeys.isComposing(ev)) return false;
+  const n = slash.items.length;
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    slash.sel = (slash.sel + (ev.key === 'ArrowDown' ? 1 : n - 1)) % n;
+    renderSlash();
+    return true;
+  }
+  if (ev.key === 'Tab' && !ev.shiftKey) { acceptSlash(slash.sel); return true; }
+  if (ev.key === 'Enter' && !ev.shiftKey) {
+    // Typed out in full already: Enter sends it, as in the agent's own menu.
+    const q = SeahelmSlashComplete.query($('msgInput').value, $('msgInput').selectionStart);
+    if (q === slash.items[slash.sel].name) { closeSlash(); return false; }
+    acceptSlash(slash.sel);
+    return true;
+  }
+  if (ev.key === 'Escape') { closeSlash(); return true; }
+  return false;
+}
+
 (function wireComposer(){
   const send = $('msgSend');
   const input = $('msgInput');
@@ -2333,7 +2442,20 @@ function sendComposerText(byTap){
     else sendComposerText(true);
   };
   if (input) input.addEventListener('input', autoGrowComposer);
+  if (input) input.addEventListener('input', renderSlash);
+  if (input) input.addEventListener('focus', renderSlash);
+  if (input) input.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== input) closeSlash(); }, 0));
+  const slashBox = $('mcSlash');
+  if (slashBox) {
+    // Pressing a row must not take focus from the field (that would close it).
+    slashBox.addEventListener('pointerdown', (ev) => ev.preventDefault());
+    slashBox.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-slash]');
+      if (b) acceptSlash(Number(b.dataset.slash));
+    });
+  }
   if (input) input.addEventListener('keydown', (ev) => {
+    if (slashKey(ev)) { ev.preventDefault(); return; }
     // Enter and Escape mean nothing here while an IME is composing — see
     // composer-keys.js.
     const action = SeahelmComposerKeys.composerKeyAction(ev);
