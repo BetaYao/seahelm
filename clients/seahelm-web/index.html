@@ -572,10 +572,23 @@
   .mc-field{display:flex;align-items:flex-end;gap:8px;border:0.5px solid var(--panel3);border-radius:22px;
     background:var(--panel);padding:0 0 0 16px}
   .mc-field:focus-within{border-color:var(--accent-30)}
+  /* Attach: a file or a pasted screenshot goes to the Mac and its path into
+     the message (composer-attach.js). Quiet beside the accent Send. */
+  .mc-field{padding-left:4px}
+  .mc-field button.mc-attach{width:40px;background:none;color:var(--muted);padding:0}
+  .mc-field button.mc-attach:hover{color:var(--text)}
+  .mc-field button.mc-attach:disabled{background:none;color:var(--faint)}
+  .mc-field button.mc-attach svg{stroke-width:2}
+  .mc-field button.mc-attach[data-busy]{color:var(--accent)}
+  .mc-field button.mc-attach[data-busy] svg{animation:fmpulse 1s ease-in-out infinite alternate}
+  @keyframes fmpulse{from{opacity:1}to{opacity:.35}}
+  body[data-share="pane"] .mc-field button.mc-attach{display:none}
+  body[data-share="pane"] .mc-field{padding-left:16px}
+  .msg-composer.dropping .mc-field{border-color:var(--accent);border-style:dashed}
   /* A bare terminal runs what you type: a $ prompt and a monospace field, so a
      command line never passes for a chat box at a glance. */
   .msg-composer[data-kind="shell"] .mc-kind{color:var(--shell);font-family:var(--mono)}
-  .msg-composer[data-kind="shell"] .mc-field{border-radius:14px;border-color:rgba(179,164,242,.4);padding-left:12px}
+  .msg-composer[data-kind="shell"] .mc-field{border-radius:14px;border-color:rgba(179,164,242,.4);padding-left:4px}
   .msg-composer[data-kind="shell"] .mc-prompt{display:block;flex:none;align-self:center;
     font-family:var(--mono);font-size:16px;color:var(--shell);user-select:none}
   .msg-composer[data-kind="shell"] .mc-field textarea{font-family:var(--mono)}
@@ -674,6 +687,11 @@
       <div class="msg-composer" id="msgComposer" data-kind="agent">
         <div class="mc-kind" id="mcKind" hidden></div>
         <div class="mc-field">
+          <button id="msgAttach" class="mc-attach" type="button" title="Attach a file — or paste a screenshot"
+                  aria-label="Attach a file" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>
+          </button>
+          <input id="msgFile" type="file" multiple hidden>
           <span class="mc-prompt" aria-hidden="true">$</span>
           <textarea id="msgInput" rows="1" placeholder="Send to this pane…" autocomplete="off" aria-label="Message"></textarea>
           <!-- Send, stop and the pane's status in one control — see
@@ -790,6 +808,7 @@
 <script src="./composer-keys.js"></script>
 <script src="./pane-pick.js"></script>
 <script src="./composer-action.js"></script>
+<script src="./composer-attach.js"></script>
 <script src="./card-model.js"></script>
 <script src="./card-timeline.js"></script>
 <script>
@@ -2196,6 +2215,7 @@ function renderComposerKind(pane){
 /** The composer's one button: what it will do, and what the pane is doing.
  *  An icon carries no label, so both have to be visible on it. */
 function renderSendButton(){
+  renderAttachButton();
   const btn = $('msgSend'), input = $('msgInput');
   if (!btn) return;
   const pane = (S.selPane && S.panes.get(S.selPane)) || null;
@@ -2288,7 +2308,87 @@ function sendComposerText(byTap){
       if (key && isLinked()) sendCommand('pane.send_keys', { pane_id: paneId, keys: ['esc'] });
     }
   });
+
+  // Attach: the button picks files, a paste with a file in it (a screenshot)
+  // or a drop onto the composer attaches it.
+  const attach = $('msgAttach');
+  const picker = $('msgFile');
+  if (attach && picker) {
+    attach.onclick = () => { picker.value = ''; picker.click(); };
+    picker.onchange = () => attachFiles(Array.from(picker.files || []));
+  }
+  if (input) input.addEventListener('paste', (ev) => {
+    const files = SeahelmComposerAttach.filesOf(ev.clipboardData);
+    if (!files.length) return;
+    // A file copied in Finder also pastes its name as text; the path replaces it.
+    ev.preventDefault();
+    attachFiles(files);
+  });
+  const composerEl = $('msgComposer');
+  if (composerEl) {
+    const hasFiles = (ev) => Array.from((ev.dataTransfer && ev.dataTransfer.types) || []).includes('Files');
+    composerEl.addEventListener('dragover', (ev) => {
+      if (!hasFiles(ev) || !canAttach()) return;
+      ev.preventDefault();
+      composerEl.classList.add('dropping');
+    });
+    composerEl.addEventListener('dragleave', () => composerEl.classList.remove('dropping'));
+    composerEl.addEventListener('drop', (ev) => {
+      composerEl.classList.remove('dropping');
+      if (!hasFiles(ev) || !canAttach()) return;
+      ev.preventDefault();
+      attachFiles(SeahelmComposerAttach.filesOf(ev.dataTransfer));
+    });
+  }
 })();
+
+/** Files can go: a pane is selected over a gateway link, and this is not a
+ *  share page (the gateway refuses those). */
+function canAttach(){
+  return !!S.selPane && S.transport === 'gateway' && isLinked() && !SHARE_PANE;
+}
+let attachPending = 0;
+function renderAttachButton(){
+  const b = $('msgAttach');
+  if (!b) return;
+  b.disabled = !canAttach();
+  if (attachPending) b.dataset.busy = ''; else delete b.dataset.busy;
+}
+/** Send each file to the Mac and put its path into the message where the
+ *  caret is, in the order they finish. */
+function attachFiles(files){
+  if (!files.length) return;
+  if (!canAttach()) { showActionToast('Not connected — nothing attached', true); return; }
+  for (const file of files) {
+    const why = SeahelmComposerAttach.refusal(file);
+    if (why) { showActionToast(why, true); continue; }
+    const name = SeahelmComposerAttach.uploadName(file, new Date());
+    attachPending++;
+    renderAttachButton();
+    let settled = false;
+    const done = () => { if (settled) return; settled = true; attachPending--; renderAttachButton(); };
+    file.arrayBuffer().then((buf) => {
+      sendCommand('file.upload', { name, b64: SeahelmComposerAttach.toBase64(buf) }, (r) => {
+        done();
+        const path = r && r.ok !== false && r.result && r.result.path;
+        if (!path) {
+          showActionToast(linkLost(r) ? `Connection lost — ${name} not attached`
+            : `${name}: ${(r && r.error && r.error.message) || 'not attached'}`, true);
+          return;
+        }
+        const input = $('msgInput');
+        if (!input) return;
+        const at = SeahelmComposerAttach.insertPath(input.value, input.selectionStart, input.selectionEnd, path);
+        input.value = at.value;
+        input.focus();
+        input.setSelectionRange(at.caret, at.caret);
+        autoGrowComposer();
+        renderSendButton();
+      });
+      if (!isLinked()) done();   // dropped before it went: sendCommand never replies
+    }, () => { done(); showActionToast(`${name} could not be read`, true); });
+  }
+}
 
 
 /** Ask the Mac to group the fleet the way its dashboard would. */
