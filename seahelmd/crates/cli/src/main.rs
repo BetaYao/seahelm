@@ -492,7 +492,31 @@ fn env_path(name: &str) -> Option<std::path::PathBuf> {
     std::env::var_os(name).filter(|p| !p.is_empty()).map(Into::into)
 }
 
+/// `$SEAHELM_SOCKET_PATH` names the app's socket only; the core's is
+/// `$SEAHELM_CORE_SOCKET`. Pointing the first somewhere of your own (a
+/// scratch app) while leaving the second unset still sends every core verb
+/// — `pane list`, `pane run`, … — to the live core, so say so, once.
+fn core_socket_warning(app: Option<&std::ffi::OsStr>, core: Option<&std::ffi::OsStr>, home: &std::path::Path) -> Option<String> {
+    let app = app.filter(|p| !p.is_empty())?;
+    if core.is_some_and(|p| !p.is_empty()) || std::path::Path::new(app) == home.join(".config/seahelm/seahelm.sock") {
+        return None;
+    }
+    Some(format!(
+        "seahelm: SEAHELM_SOCKET_PATH is set but SEAHELM_CORE_SOCKET is not: pane, wait and event verbs go to the default seahelm-core ({}); set SEAHELM_CORE_SOCKET to reach another one",
+        home.join(".config/seahelm/core.sock").display()
+    ))
+}
+
 fn socket_path(side: Side) -> std::path::PathBuf {
+    if matches!(side, Side::Core) {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| {
+            let (app, core) = (std::env::var_os("SEAHELM_SOCKET_PATH"), std::env::var_os("SEAHELM_CORE_SOCKET"));
+            if let Some(w) = core_socket_warning(app.as_deref(), core.as_deref(), &home()) {
+                eprintln!("{w}");
+            }
+        });
+    }
     match side {
         Side::App => env_path("SEAHELM_SOCKET_PATH").unwrap_or_else(|| home().join(".config/seahelm/seahelm.sock")),
         Side::Core => env_path("SEAHELM_CORE_SOCKET").unwrap_or_else(|| {
@@ -675,6 +699,17 @@ impl TakeOrArray for Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn warns_when_only_the_app_socket_is_redirected() {
+        use std::ffi::OsStr;
+        let home = std::path::Path::new("/h");
+        assert!(super::core_socket_warning(Some(OsStr::new("/tmp/x.sock")), None, home).is_some());
+        assert!(super::core_socket_warning(Some(OsStr::new("/tmp/x.sock")), Some(OsStr::new("/tmp/c.sock")), home).is_none());
+        // Panes get the default exported: nothing to warn about.
+        assert!(super::core_socket_warning(Some(OsStr::new("/h/.config/seahelm/seahelm.sock")), None, home).is_none());
+        assert!(super::core_socket_warning(None, None, home).is_none());
+    }
+
     use super::*;
 
     #[test]
