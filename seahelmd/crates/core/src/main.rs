@@ -15,6 +15,7 @@
 //! over `~/.config/seahelm/core.sock` (see docs/status-core-port.md).
 
 mod actions;
+mod agent_commands;
 mod bridge;
 mod claude_trust;
 mod cli;

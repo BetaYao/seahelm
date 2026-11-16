@@ -697,6 +697,22 @@ impl Core {
                 }
                 Ok(json!({"forgot": forgot}))
             }
+            // The slash commands the pane's agent takes, for a composer to
+            // complete (agent_commands.rs). Read-only: sending one is
+            // `pane.send_text` like any message.
+            "agent.commands" => {
+                let hint = str_param(&p, "pane_id").or_else(|| str_param(&p, "pane_session_key"));
+                let Some(info) = hint.and_then(|h| {
+                    let st = self.lock();
+                    let id = st.registry.resolve(Some(&h), "")?;
+                    st.registry.pane(&id).map(|p| (p.agent_type, p.worktree_path.clone()))
+                }) else {
+                    return Reply::Value(Err(RpcError::invalid_params("unknown pane")));
+                };
+                let codex_home = std::env::var_os("CODEX_HOME").map(std::path::PathBuf::from);
+                let commands = crate::agent_commands::catalog(info.0, &info.1, &hooks::home_dir(), codex_home.as_deref());
+                Ok(json!({"agent": serde_json::to_value(info.0).unwrap_or_default(), "commands": commands}))
+            }
             // The user names a pane; an empty title gives it back its own.
             "pane.rename" => {
                 let hint = str_param(&p, "pane_id").or_else(|| str_param(&p, "pane_session_key"));

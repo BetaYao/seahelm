@@ -332,7 +332,7 @@ impl Session {
             }
             // A guest does not get to reshape the owner's terminal.
             "pane.vt_size" => refuse(),
-            "pane.vt_open" | "pane.vt_close" | "pane.vt_keepalive" | "pane.send_keys" | "pane.send_text" | "pane.seen" | "message.history" => {
+            "pane.vt_open" | "pane.vt_close" | "pane.vt_keepalive" | "pane.send_keys" | "pane.send_text" | "pane.seen" | "message.history" | "agent.commands" => {
                 let refs: Vec<&str> = ["pane_session_key", "pane_id"].iter().filter_map(|k| str_of(p, k)).collect();
                 if !refs.is_empty() && refs.iter().all(|r| s.names(r)) {
                     None
