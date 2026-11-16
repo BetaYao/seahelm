@@ -5,15 +5,57 @@ final class ConfigTests: XCTestCase {
 
     // MARK: - Default Config
 
+    private func object(_ data: Data) throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
     func testSaveKeepsKeysOtherProgramsWrite() throws {
         let existing = Data(#"{"first_mate_language": "zh", "first_mate_quiet_hours": "23:00-08:00", "telegram": {"token": "x"}, "workspace_paths": ["/old"]}"#.utf8)
         let encoded = Data(#"{"workspace_paths": ["/new"]}"#.utf8)
-        let merged = try XCTUnwrap(JSONSerialization.jsonObject(with: Config.keepingForeignKeys(encoded, existing: existing)) as? [String: Any])
+        let merged = try object(Config.merged(encoded, existing: existing, base: nil))
         XCTAssertEqual(merged["first_mate_language"] as? String, "zh")
         XCTAssertEqual(merged["first_mate_quiet_hours"] as? String, "23:00-08:00")
         XCTAssertEqual(merged["workspace_paths"] as? [String], ["/new"], "the app's own keys win")
         XCTAssertNil(merged["telegram"], "keys the gateway imported stay dropped")
-        XCTAssertEqual(Config.keepingForeignKeys(encoded, existing: nil), encoded)
+        XCTAssertEqual(Config.merged(encoded, existing: nil, base: nil), encoded)
+    }
+
+    /// config.json edited under the app (by hand, by the core's
+    /// `autopilot.configure`): a save that did not touch the key keeps the edit,
+    /// on the first save after it and on every one after that.
+    func testSaveKeepsAnOutsideEditToAKeyTheAppLeftAlone() throws {
+        let base = Data(#"{"autopilot_enabled": false, "workspace_paths": ["/a"]}"#.utf8)
+        let disk = Data(#"{"autopilot_enabled": true, "workspace_paths": ["/a"]}"#.utf8)
+        let mine = Data(#"{"autopilot_enabled": false, "workspace_paths": ["/a", "/b"]}"#.utf8)
+        let first = try object(Config.merged(mine, existing: disk, base: base))
+        XCTAssertEqual(first["autopilot_enabled"] as? Bool, true)
+        XCTAssertEqual(first["workspace_paths"] as? [String], ["/a", "/b"])
+        // The write makes `mine` the new base; the app still holds false.
+        let second = try object(Config.merged(mine, existing: Config.merged(mine, existing: disk, base: base), base: mine))
+        XCTAssertEqual(second["autopilot_enabled"] as? Bool, true)
+    }
+
+    func testSaveWritesAKeyTheAppChangedAndDropsOneItCleared() throws {
+        let base = Data(#"{"autopilot_enabled": false, "selected_worktree_path": "/w"}"#.utf8)
+        let disk = base
+        let mine = Data(#"{"autopilot_enabled": true}"#.utf8)
+        let merged = try object(Config.merged(mine, existing: disk, base: base))
+        XCTAssertEqual(merged["autopilot_enabled"] as? Bool, true)
+        XCTAssertNil(merged["selected_worktree_path"], "cleared in the app, so gone from the file")
+    }
+
+    /// One value of the wrong type costs only that key.
+    func testDecodeSkipsAValueOfTheWrongType() throws {
+        let json = Data(#"""
+        {"auto_update": false, "workspace_paths": ["/a"], "theme_mode": 7, "agent_yolo": true,
+         "split_layouts": {"/a": {"bogus": 1}}}
+        """#.utf8)
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        XCTAssertEqual(config.workspacePaths, ["/a"])
+        XCTAssertTrue(config.agentYolo)
+        XCTAssertEqual(config.themeMode, "system")
+        XCTAssertTrue(config.autoUpdate.enabled)
+        XCTAssertTrue(config.splitLayouts.isEmpty)
     }
 
     func testDefaultConfig() {

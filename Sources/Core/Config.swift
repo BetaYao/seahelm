@@ -65,7 +65,7 @@ struct Config: Codable {
     /// Reclaim the render cost of panes that have been off screen a while.
     var autoSleep: AutoSleepConfig
 
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case workspacePaths = "workspace_paths"
         case activeWorkspaceIndex = "active_workspace_index"
         case terminalRowCacheSize = "terminal_row_cache_size"
@@ -137,51 +137,58 @@ struct Config: Codable {
         autoSleep = .default
     }
 
+    /// Every key is read on its own: a value of the wrong type (a hand edit,
+    /// an older or newer app) falls back to that key's default and is logged,
+    /// and the rest of the file still loads. Before, one bad key failed the
+    /// whole decode, the app ran on defaults, and its next save wrote those
+    /// defaults over the workspace list and every layout.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        workspacePaths = try container.decodeIfPresent([String].self, forKey: .workspacePaths) ?? []
-        activeWorkspaceIndex = try container.decodeIfPresent(Int.self, forKey: .activeWorkspaceIndex) ?? 0
-        terminalRowCacheSize = try container.decodeIfPresent(Int.self, forKey: .terminalRowCacheSize) ?? 200
-        agentDetect = (try container.decodeIfPresent(AgentDetectConfig.self, forKey: .agentDetect) ?? .default)
+        workspacePaths = container.lenient([String].self, forKey: .workspacePaths) ?? []
+        activeWorkspaceIndex = container.lenient(Int.self, forKey: .activeWorkspaceIndex) ?? 0
+        terminalRowCacheSize = container.lenient(Int.self, forKey: .terminalRowCacheSize) ?? 200
+        agentDetect = (container.lenient(AgentDetectConfig.self, forKey: .agentDetect) ?? .default)
             .includingMissingDefaultPanes()
-        webhook = try container.decodeIfPresent(WebhookConfig.self, forKey: .webhook) ?? WebhookConfig()
-        autoUpdate = try container.decodeIfPresent(UpdateConfig.self, forKey: .autoUpdate) ?? UpdateConfig()
-        cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
-        themeMode = try container.decodeIfPresent(String.self, forKey: .themeMode) ?? "system"
-        terminalThemeMode = try container.decodeIfPresent(String.self, forKey: .terminalThemeMode)
+        webhook = container.lenient(WebhookConfig.self, forKey: .webhook) ?? WebhookConfig()
+        autoUpdate = container.lenient(UpdateConfig.self, forKey: .autoUpdate) ?? UpdateConfig()
+        cardOrder = container.lenient([String].self, forKey: .cardOrder) ?? []
+        themeMode = container.lenient(String.self, forKey: .themeMode) ?? "system"
+        terminalThemeMode = container.lenient(String.self, forKey: .terminalThemeMode)
             ?? TerminalThemeMode.app.rawValue
-        worktreeStartedAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeStartedAt) ?? [:]
-        worktreeLastActivityAt = try container.decodeIfPresent([String: String].self, forKey: .worktreeLastActivityAt) ?? [:]
-        splitLayouts = try container.decodeIfPresent([String: CodableSplitNode].self, forKey: .splitLayouts) ?? [:]
-        activeTabRepoPath = try container.decodeIfPresent(String.self, forKey: .activeTabRepoPath)
-        selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
-        activeWorktreePaths = try container.decodeIfPresent([String: String].self, forKey: .activeWorktreePaths) ?? [:]
-        focusedPaneIds = try container.decodeIfPresent([String: String].self, forKey: .focusedPaneIds) ?? [:]
-        islandEnabled = try container.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
-        autopilotEnabled = try container.decodeIfPresent(Bool.self, forKey: .autopilotEnabled) ?? false
-        autopilotPaused = try container.decodeIfPresent(Bool.self, forKey: .autopilotPaused) ?? false
-        autopilotAutonomy = try container.decodeIfPresent([String: String].self, forKey: .autopilotAutonomy) ?? [:]
-        autopilotAgent = try container.decodeIfPresent(String.self, forKey: .autopilotAgent) ?? AgentType.claudeCode.rawValue
-        sidebarWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 300
-        sidebarCollapsed = try container.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed) ?? false
-        let pane = try container.decodeIfPresent(String.self, forKey: .sidebarActivePane)
+        worktreeStartedAt = container.lenient([String: String].self, forKey: .worktreeStartedAt) ?? [:]
+        worktreeLastActivityAt = container.lenient([String: String].self, forKey: .worktreeLastActivityAt) ?? [:]
+        // One unreadable layout costs that worktree its splits, not every worktree.
+        splitLayouts = (container.lenient([String: Lossy<CodableSplitNode>].self, forKey: .splitLayouts) ?? [:])
+            .compactMapValues(\.value)
+        activeTabRepoPath = container.lenient(String.self, forKey: .activeTabRepoPath)
+        selectedWorktreePath = container.lenient(String.self, forKey: .selectedWorktreePath)
+        activeWorktreePaths = container.lenient([String: String].self, forKey: .activeWorktreePaths) ?? [:]
+        focusedPaneIds = container.lenient([String: String].self, forKey: .focusedPaneIds) ?? [:]
+        islandEnabled = container.lenient(Bool.self, forKey: .islandEnabled) ?? true
+        autopilotEnabled = container.lenient(Bool.self, forKey: .autopilotEnabled) ?? false
+        autopilotPaused = container.lenient(Bool.self, forKey: .autopilotPaused) ?? false
+        autopilotAutonomy = container.lenient([String: String].self, forKey: .autopilotAutonomy) ?? [:]
+        autopilotAgent = container.lenient(String.self, forKey: .autopilotAgent) ?? AgentType.claudeCode.rawValue
+        sidebarWidth = container.lenient(CGFloat.self, forKey: .sidebarWidth) ?? 300
+        sidebarCollapsed = container.lenient(Bool.self, forKey: .sidebarCollapsed) ?? false
+        let pane = container.lenient(String.self, forKey: .sidebarActivePane)
         sidebarActivePane = ChromeLeftPane(rawValue: pane ?? "")?.rawValue
             ?? ChromeLeftPane.firstMate.rawValue
         // Missing key = legacy install → already launched. Explicit false = fresh.
         if container.contains(.onboardingCompleted) {
-            onboardingCompleted = try container.decode(Bool.self, forKey: .onboardingCompleted)
+            onboardingCompleted = container.lenient(Bool.self, forKey: .onboardingCompleted) ?? true
         } else {
             onboardingCompleted = true
         }
-        defaultAgent = try container.decodeIfPresent(String.self, forKey: .defaultAgent)
+        defaultAgent = container.lenient(String.self, forKey: .defaultAgent)
             ?? AgentType.claudeCode.rawValue
-        agentYolo = try container.decodeIfPresent(Bool.self, forKey: .agentYolo) ?? false
-        autoForkPanes = try container.decodeIfPresent(Bool.self, forKey: .autoForkPanes) ?? true
-        enabledHookAgents = try container.decodeIfPresent([String].self, forKey: .enabledHookAgents) ?? []
-        notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound) ?? "default"
-        confirmBeforeQuit = try container.decodeIfPresent(Bool.self, forKey: .confirmBeforeQuit) ?? true
-        agentMemoryGuard = try container.decodeIfPresent(AgentMemoryGuardConfig.self, forKey: .agentMemoryGuard) ?? .default
-        autoSleep = try container.decodeIfPresent(AutoSleepConfig.self, forKey: .autoSleep) ?? .default
+        agentYolo = container.lenient(Bool.self, forKey: .agentYolo) ?? false
+        autoForkPanes = container.lenient(Bool.self, forKey: .autoForkPanes) ?? true
+        enabledHookAgents = container.lenient([String].self, forKey: .enabledHookAgents) ?? []
+        notificationSound = container.lenient(String.self, forKey: .notificationSound) ?? "default"
+        confirmBeforeQuit = container.lenient(Bool.self, forKey: .confirmBeforeQuit) ?? true
+        agentMemoryGuard = container.lenient(AgentMemoryGuardConfig.self, forKey: .agentMemoryGuard) ?? .default
+        autoSleep = container.lenient(AutoSleepConfig.self, forKey: .autoSleep) ?? .default
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
@@ -232,15 +239,35 @@ struct Config: Codable {
         do {
             let data = try Data(contentsOf: configPath)
             var config = try JSONDecoder().decode(Config.self, from: data)
+            setBaseline(data)
             if config.migrateCollidingPaneSessions() { config.save() }
             return config
         } catch {
             NSLog("Failed to load config: \(error)")
+            // Only a file that is not a JSON object gets here (every key is
+            // read on its own). Keep it, and keep this run from writing over
+            // it: the defaults below hold no workspaces and no layouts, and
+            // saving them would make the loss permanent.
+            keepUnreadableCopy()
+            writesBlocked = true
             // A corrupt/undecodable config is NOT a fresh install — falling back
             // to defaults here would re-run first-launch setup over it.
             var fallback = Config()
             fallback.onboardingCompleted = true
             return fallback
+        }
+    }
+
+    /// `config.unreadable-<time>.json` beside the file, so a hand edit gone
+    /// wrong can be repaired instead of retyped.
+    private static func keepUnreadableCopy() {
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let copy = configDir.appendingPathComponent("config.unreadable-\(stamp).json")
+        do {
+            try FileManager.default.copyItem(at: configPath, to: copy)
+            NSLog("Config: kept the unreadable file as \(copy.path); not writing config.json this run")
+        } catch {
+            NSLog("Config: could not keep a copy of the unreadable file: \(error)")
         }
     }
 
@@ -285,6 +312,18 @@ struct Config: Codable {
     /// Identity of the currently scheduled debounced write.
     private static var pendingSaveGeneration = UUID()
 
+    /// The file could not be read at launch: nothing is written this run.
+    private static var writesBlocked = false
+    /// The app's view of the file as of its last load or write — what it read,
+    /// then what it encoded — so a save can tell a key the app changed from a
+    /// key someone else changed on disk meanwhile (`merged`).
+    private static var baseline: Data?
+    private static let baselineLock = NSLock()
+
+    private static func setBaseline(_ data: Data?) {
+        baselineLock.lock(); baseline = data; baselineLock.unlock()
+    }
+
     /// Synchronous write. Use when a later `Config.load()` on this same turn of
     /// the run loop must observe the change — the debounced `save()` would still
     /// be pending and the reader would get the stale file.
@@ -295,37 +334,74 @@ struct Config: Codable {
         Config.pendingSaveWorkItem = nil
         Config.pendingSaveGeneration = UUID()
         Config.pendingSaveLock.unlock()
-        let toWrite = self
+        Config.write(self)
+    }
+
+    /// Unit tests run inside the app and build throwaway configs; a save from
+    /// one must never reach the user's real file.
+    private static let isUnitTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
+    private static func write(_ config: Config) {
+        guard !writesBlocked, !isUnitTest else { return }
         do {
-            try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            Config.keepPreGatewayCopy()
-            let data = Config.keepingForeignKeys(try encoder.encode(toWrite), existing: try? Data(contentsOf: Config.configPath))
-            try data.write(to: Config.configPath, options: .atomic)
+            keepPreGatewayCopy()
+            let encoded = try encoder.encode(config)
+            baselineLock.lock()
+            let base = baseline
+            baselineLock.unlock()
+            let data = merged(encoded, existing: try? Data(contentsOf: configPath), base: base)
+            try data.write(to: configPath, options: .atomic)
+            setBaseline(encoded)
         } catch {
             NSLog("Failed to save config: \(error)")
         }
     }
 
-    /// Keys this app does not model but other programs write into the same
-    /// file — seahelm-core's (`first_mate_language`, `first_mate_quiet_hours`,
-    /// …) and the GPUI client's — survive a save: without this, the app's
-    /// next save silently dropped them. The keys the gateway imported
-    /// (`droppedForeignKeys`) are still dropped on purpose.
+    /// The keys seahelm-gateway imported; dropped from the file on purpose.
     static let droppedForeignKeys: Set<String> = ["mqtt", "host_gateway", "telegram"]
+    private static let ownKeys = Set(CodingKeys.allCases.map(\.rawValue))
 
-    static func keepingForeignKeys(_ encoded: Data, existing: Data?) -> Data {
-        guard let existing,
-              let old = try? JSONSerialization.jsonObject(with: existing) as? [String: Any],
-              var new = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any] else { return encoded }
-        var added = false
-        for (key, value) in old where new[key] == nil && !droppedForeignKeys.contains(key) {
-            new[key] = value
-            added = true
+    /// What a save writes. Other programs write the same file — seahelm-core
+    /// (`autopilot.configure`, `first_mate_language`, …), the GPUI client,
+    /// seahelm-web through the core, and the user by hand — so:
+    /// - a key this app does not model is kept as the file has it;
+    /// - a key it does model is written from `encoded` only if the app changed
+    ///   it since `base` (its last load or write). One the app left alone keeps
+    ///   whatever the file says now: before, any save (a layout change will do)
+    ///   put the app's stale copy back, so turning First Mate on by editing
+    ///   config.json was undone before the core read it.
+    /// Without a base (no file at launch) the app's keys win, as before.
+    static func merged(_ encoded: Data, existing: Data?, base: Data?) -> Data {
+        func object(_ data: Data?) -> [String: Any]? {
+            data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         }
-        guard added, let merged = try? JSONSerialization.data(withJSONObject: new, options: [.prettyPrinted, .sortedKeys]) else { return encoded }
-        return merged
+        func same(_ a: Any?, _ b: Any?) -> Bool {
+            switch (a, b) {
+            case (nil, nil): return true
+            case let (a?, b?): return (a as AnyObject).isEqual(b)
+            default: return false
+            }
+        }
+        guard let mine = object(encoded), let theirs = object(existing) else { return encoded }
+        let baseObject = object(base)
+        var out: [String: Any] = [:]
+        for key in Set(mine.keys).union(theirs.keys) where !droppedForeignKeys.contains(key) {
+            let value: Any?
+            if !ownKeys.contains(key) {
+                value = theirs[key]
+            } else if let baseObject, same(mine[key], baseObject[key]) {
+                value = theirs[key]
+            } else {
+                value = mine[key] ?? (baseObject == nil ? theirs[key] : nil)
+            }
+            if let value { out[key] = value }
+        }
+        let options: JSONSerialization.WritingOptions = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? JSONSerialization.data(withJSONObject: out, options: options) else { return encoded }
+        return same(out as NSDictionary, mine as NSDictionary) ? encoded : data
     }
 
     /// The keys seahelm-gateway imports on its first start (`mqtt`,
@@ -356,16 +432,7 @@ struct Config: Codable {
         let configCopy = self
         let generation = UUID()
         let workItem = DispatchWorkItem {
-            do {
-                try FileManager.default.createDirectory(at: Config.configDir, withIntermediateDirectories: true)
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                Config.keepPreGatewayCopy()
-                let data = Config.keepingForeignKeys(try encoder.encode(configCopy), existing: try? Data(contentsOf: Config.configPath))
-                try data.write(to: Config.configPath, options: .atomic)
-            } catch {
-                NSLog("Failed to save config: \(error)")
-            }
+            Config.write(configCopy)
             Config.pendingSaveLock.lock()
             if Config.pendingSaveGeneration == generation {
                 Config.pendingSaveWorkItem = nil
@@ -378,6 +445,25 @@ struct Config: Codable {
         Config.pendingSaveGeneration = generation
         Config.pendingSaveLock.unlock()
         Config.saveQueue.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+    }
+}
+
+/// Decodes to nil instead of throwing, so one bad entry of a collection does
+/// not take the others with it.
+struct Lossy<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+}
+
+extension KeyedDecodingContainer {
+    /// `decodeIfPresent` that logs a value of the wrong shape and reads it as absent.
+    func lenient<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        do {
+            return try decodeIfPresent(type, forKey: key)
+        } catch {
+            NSLog("Config: ignoring \(key.stringValue), not a \(type): \(error)")
+            return nil
+        }
     }
 }
 

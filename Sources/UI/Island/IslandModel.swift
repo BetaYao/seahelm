@@ -135,6 +135,7 @@ final class IslandModel {
     var onSendToFirstMate: ((String) -> Bool)?
     /// Stop First Mate's turn (Esc into its session).
     var onInterruptFirstMate: (() -> Void)?
+    var onTurnOnFirstMate: (() -> Void)?
     /// What is wrong that the user has to hear (`IslandWarning`): the core not
     /// answering, or the control channel held by another instance.
     var warning: IslandWarning?
@@ -303,6 +304,10 @@ final class IslandModel {
 
     func dismissCard(_ card: Card) {
         onDismissOrder?(card)
+    }
+
+    func turnOnFirstMate() {
+        onTurnOnFirstMate?()
     }
 
     func stopFirstMate() {
