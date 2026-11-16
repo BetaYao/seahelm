@@ -27,7 +27,7 @@ fn setup() -> Registry {
 /// What `makeEvent` built, after the hooks crate's decoder.
 fn webhook(r: &mut Registry, kind: Option<EventKind>, now: f64) -> HookResult {
     let input = HookInput {
-        pane_hint: None,
+        pane_hint: Some(TID.into()),
         cwd: WT.into(),
         source: "claude-code".into(),
         kind,
@@ -154,7 +154,7 @@ fn agent_stop_uses_polled_status_as_old_status() {
 fn hook_types_the_pane_and_carries_the_final_message() {
     let mut r = setup();
     let input = HookInput {
-        pane_hint: None,
+        pane_hint: Some(TID.into()),
         cwd: format!("{WT}/src"),
         source: "claude-code".into(),
         kind: Some(stop(true)),
@@ -198,7 +198,7 @@ fn note_assistant_message_does_not_touch_status() {
     let mut r = setup();
     poll(&mut r, 0.0, vec![]);
     assert_eq!(
-        r.note_assistant_message(None, WT, "  summary  ", T0 + 1.0)
+        r.note_assistant_message(Some(TID), WT, "  summary  ", T0 + 1.0)
             .as_deref(),
         Some(TID)
     );
@@ -206,6 +206,25 @@ fn note_assistant_message_does_not_touch_status() {
     assert_eq!(p.last_assistant_message, "summary");
     assert_eq!(p.last_message, "summary");
     assert_eq!(p.status, Running);
-    assert_eq!(r.note_assistant_message(None, WT, "   ", T0), None);
+    assert_eq!(r.note_assistant_message(Some(TID), WT, "   ", T0), None);
     assert_eq!(r.note_assistant_message(None, "/elsewhere", "x", T0), None);
+}
+
+/// An agent outside every pane (no hint at all) working in a tracked
+/// worktree is no pane's: not its timeline, its session or its cards.
+#[test]
+fn a_hook_naming_no_pane_belongs_to_none() {
+    let mut r = setup();
+    let input = HookInput {
+        pane_hint: None,
+        cwd: format!("{WT}/src"),
+        source: "codex".into(),
+        kind: Some(stop(true)),
+        last_assistant_message: Some("someone else's reply".into()),
+    };
+    let res = r.ingest_hook(input, &|_| false, &authority_of, T0);
+    assert_eq!(res.pane, None);
+    assert!(res.outcome.is_none());
+    assert_eq!(r.pane(TID).unwrap().agent_type, AgentType::Unknown, "it does not type the pane either");
+    assert_eq!(r.note_assistant_message(None, WT, "x", T0), None);
 }
