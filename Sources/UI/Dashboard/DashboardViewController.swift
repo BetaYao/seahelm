@@ -158,9 +158,6 @@ class DashboardViewController: NSViewController {
     /// File / changelog overlay title for the chrome terminal header (`nil` = restore pane title).
     var onCenterOverlayTitleChange: ((String?) -> Void)?
 
-    /// Fires when the edit-mode toggle's availability or on-state changes, so the
-    /// chrome header can enable/dim/light its icon. `(available, isOn)`.
-    var onEditModeStateChange: ((Bool, Bool) -> Void)?
     /// Last worktree the user actually committed into (split/terminal). Backs the
     /// mode-1 ⇄ mode-2 back-key toggle.
     private(set) var lastCommittedWorktreePath: String?
@@ -223,20 +220,18 @@ class DashboardViewController: NSViewController {
     private var centerOverlay: CenterOverlayView?
     private var centerOverlayOnDismiss: (() -> Void)?
 
-    // MARK: - Edit-mode (split file-preview layout)
+    // MARK: - Document pane
 
-    /// Per-worktree preview-set + edit-mode model (decoupled from display mode).
-    let previewSets = PreviewSetController()
-    /// The two-column edit container, created lazily and reused across worktrees.
-    private var editLayoutContainer: EditLayoutContainerView?
+    /// Each worktree's document pane (`SplitNode.document`), by worktree path.
+    /// Lives here rather than in a container: containers are dropped and
+    /// rebuilt, and the embed hands the pane to whichever one shows the tree.
+    var documentPanes: [String: DocumentPaneView] = [:]
 
-    /// Edit mode's tab strips are owned by the window chrome header (one row of
-    /// chrome instead of two). The dashboard drives their contents and selection
-    /// but does not own the views.
-    var editStripsProvider: (() -> (terminal: EditTabStripView, preview: EditTabStripView)?)?
-    /// Compact / edit: which header strip mode to show.
+    /// The compact pane tab strip is owned by the window chrome header. The
+    /// dashboard drives its contents and selection but does not own the view.
+    var paneStripProvider: (() -> EditTabStripView?)?
+    /// Compact: whether the header shows the pane tab strip.
     var onHoistedStripsChange: ((HeaderStripMode) -> Void)?
-    var onEditStripRatioChange: ((CGFloat) -> Void)?
 
     /// Narrow-window compact presentation (fleet collapsed + optional pane tabs).
     private(set) var isCompactActive = false
@@ -251,55 +246,34 @@ class DashboardViewController: NSViewController {
     /// Re-apply zoom / pane tab strip after split, close, or focus changes.
     func refreshCompactPresentationIfNeeded() {
         if let split = activeSplitContainer {
-            finalizeEditLayout(focusTerminal: false, tree: split.tree)
+            finalizePaneLayout(focusTerminal: false, tree: split.tree)
         } else {
             syncHoistedStrips()
         }
     }
 
-    /// True when the terminal column is presenting panes as tabs (edit or compact).
+    /// True when compact is presenting the worktree's panes as tabs (the
+    /// document pane is one of them).
     var wantsPaneTabFocus: Bool {
-        let leafCount = activeSplitContainer?.tree?.allLeaves.count ?? 0
-        return CompactMode.shouldShowPaneTabs(
-            compactActive: isCompactActive,
-            leafCount: leafCount,
-            editMode: isEditModeActive
-        )
+        CompactMode.shouldShowPaneTabs(compactActive: isCompactActive,
+                                       paneCount: activeSplitContainer?.tree?.paneIds.count ?? 0)
     }
 
-    /// True once the chrome's strips have had their callbacks wired to this VC.
-    private var editStripCallbacksWired = false
+    /// True once the chrome's strip has had its callbacks wired to this VC.
+    private var paneStripCallbacksWired = false
 
-    /// The chrome-owned strips, with their callbacks wired on first use.
-    private func chromeEditStrips() -> (terminal: EditTabStripView, preview: EditTabStripView)? {
-        guard let strips = editStripsProvider?() else { return nil }
-        if !editStripCallbacksWired {
-            editStripCallbacksWired = true
-            strips.terminal.onSelect = { [weak self] id in self?.selectTerminalTab(id) }
-            strips.preview.onSelect = { [weak self] id in self?.selectPreviewTab(id) }
-            strips.preview.onClose = { [weak self] id in self?.closePreviewTab(id) }
+    /// The chrome-owned pane tab strip, its callbacks wired on first use.
+    private func chromePaneStrip() -> EditTabStripView? {
+        guard let strip = paneStripProvider?() else { return nil }
+        if !paneStripCallbacksWired {
+            paneStripCallbacksWired = true
+            strip.onSelect = { [weak self] id in self?.selectPaneTab(id) }
         }
-        return strips
-    }
-    /// Built preview content views keyed by file path (preserves editor state
-    /// across tab switches). Torn down on explicit tab close / worktree deletion.
-    private var previewContentCache: [String: NSView] = [:]
-
-    /// Where the terminal `SplitContainerView` should live right now — the edit
-    /// container's terminal host when edit mode is attached, else the focus panel.
-    private var currentTerminalContainer: NSView {
-        if let edit = editLayoutContainer, edit.superview != nil { return edit.terminalHost }
-        return leftRightFocusPanel.terminalContainer
+        return strip
     }
 
     private var currentWorktreePath: String? {
         (agents.first(where: { $0.id == selectedWorktreeId }) ?? agents.first)?.worktreePath
-    }
-
-    /// True when the selected worktree is showing the split edit layout.
-    var isEditModeActive: Bool {
-        guard let wt = currentWorktreePath else { return false }
-        return previewSets.isEditMode(for: wt) && editLayoutContainer?.superview != nil
     }
 
     // `?` keyboard cheat-sheet overlay. The command line itself is the Island's
@@ -515,8 +489,8 @@ class DashboardViewController: NSViewController {
             reembedSplitContainerIfDetached()
         }
         syncSidePanelToSelection()
-        // Keep edit-mode terminal tab titles current (strip diffs internally).
-        refreshEditModeTabsIfActive()
+        // Keep compact pane tab titles current (the strip diffs internally).
+        refreshPaneTabsIfActive()
     }
 
     private func syncSidePanelToSelection() {
@@ -913,10 +887,7 @@ class DashboardViewController: NSViewController {
         guard let agent = agents.first(where: { $0.id == selectedWorktreeId }) ?? agents.first else { return }
         let worktreePath = agent.worktreePath
 
-        // Attach/detach the edit container for THIS worktree's mode before we pick
-        // the embed target — currentTerminalContainer depends on it.
-        prepareEditContainer(forWorktree: worktreePath)
-        let container = currentTerminalContainer
+        let container = leftRightFocusPanel.terminalContainer
 
         // Skip re-embed if the same split container is already active for this
         // worktree — but still hand it the keyboard when asked (e.g. committing
@@ -924,7 +895,7 @@ class DashboardViewController: NSViewController {
         if let active = activeSplitContainer,
            active.superview === container,
            activeSplitWorktreePath == worktreePath {
-            finalizeEditLayout(focusTerminal: focusTerminal)
+            finalizePaneLayout(focusTerminal: focusTerminal)
             return
         }
 
@@ -976,6 +947,14 @@ class DashboardViewController: NSViewController {
         splitView.alphaValue = previousSplitView == nil ? 1 : 0
         container.addSubview(splitView)
         splitView.tree = tree
+        // The document pane lives in the dashboard, not the container; a tree
+        // that kept its leaf without the pane (it was dropped) loses the leaf.
+        if tree.documentId != nil, let pane = documentPanes[worktreePath] {
+            splitView.documentView = pane
+        } else {
+            tree.removeDocument()
+            splitView.documentView = nil
+        }
         activeSplitContainer = splitView
         activeSplitWorktreePath = worktreePath
 
@@ -994,31 +973,24 @@ class DashboardViewController: NSViewController {
         }
         syncSidePanelToSelection()
 
-        finalizeEditLayout(focusTerminal: focusTerminal, tree: tree)
+        finalizePaneLayout(focusTerminal: focusTerminal, tree: tree)
     }
 
-    /// Shared tail for `embedSplitContainerForSelectedPane`: applies zoom + tab
-    /// strips in edit/compact (or restores the spatial split), then takes keyboard
-    /// focus when asked. Never re-enters embed (no recursion).
-    private func finalizeEditLayout(focusTerminal: Bool, tree: SplitTree? = nil) {
-        let editMode = editLayoutContainer?.superview != nil
-        let leafCount = (tree ?? activeSplitContainer?.tree)?.allLeaves.count ?? 0
-        let paneTabs = CompactMode.shouldShowPaneTabs(
-            compactActive: isCompactActive,
-            leafCount: leafCount,
-            editMode: editMode
-        )
+    /// Shared tail for `embedSplitContainerForSelectedPane`: applies zoom + the
+    /// pane tab strip in compact (or restores the spatial split), then takes
+    /// keyboard focus when asked. Never re-enters embed (no recursion).
+    private func finalizePaneLayout(focusTerminal: Bool, tree: SplitTree? = nil) {
+        let paneCount = (tree ?? activeSplitContainer?.tree)?.paneIds.count ?? 0
+        let paneTabs = CompactMode.shouldShowPaneTabs(compactActive: isCompactActive, paneCount: paneCount)
         if paneTabs {
             applyZoomToFocusedLeaf()
             refreshPaneTabs()
-            if editMode { updatePreviewContent() }
         } else if let container = activeSplitContainer, container.zoomedLeafId != nil {
             // Leaving tab presentation: drop the zoom so the spatial split returns.
             container.zoomedLeafId = nil
             container.layoutTree()
         }
         syncHoistedStrips()
-        notifyEditModeState()
 
         // Focus the active leaf — defer to let the view hierarchy settle.
         // Skipped during nav preview so the dashboard VC keeps first responder.
@@ -1032,27 +1004,17 @@ class DashboardViewController: NSViewController {
     }
 
     private func syncHoistedStrips() {
-        let editMode = editLayoutContainer?.superview != nil
-        let leafCount = activeSplitContainer?.tree?.allLeaves.count ?? 0
-        let mode: HeaderStripMode
-        if editMode {
-            mode = .edit(ratio: editLayoutContainer?.currentRatio ?? 0.5)
-        } else if CompactMode.shouldShowPaneTabs(
-            compactActive: isCompactActive,
-            leafCount: leafCount,
-            editMode: false
-        ) {
-            mode = .terminalOnly
-        } else {
-            mode = .none
-        }
-        onHoistedStripsChange?(mode)
+        onHoistedStripsChange?(wantsPaneTabFocus ? .terminalOnly : .none)
     }
 
     /// Make the active split leaf's Ghostty view first responder (immediate +
     /// deferred attempt, in case the hierarchy hasn't settled yet).
     private func focusActiveTerminalLeaf(tree: SplitTree? = nil) {
         guard let tree = tree ?? activeSplitContainer?.tree else { return }
+        if tree.documentFocused, let pane = activeSplitContainer?.documentView {
+            pane.focusContent()
+            return
+        }
         let leafToFocus = tree.allLeaves.first(where: { $0.id == tree.focusedId }) ?? tree.allLeaves.first
         if let leaf = leafToFocus,
            let station = StationRegistry.shared.station(forId: leaf.stationId),
@@ -1077,12 +1039,11 @@ class DashboardViewController: NSViewController {
         }
         splitContainers.removeValue(forKey: path)
 
-        // Drop this worktree's preview set + any cached preview content views.
-        for file in previewSets.files(for: path) {
-            previewContentCache[file]?.removeFromSuperview()
-            previewContentCache.removeValue(forKey: file)
+        // The document pane outlives its container while its tree keeps the leaf;
+        // once the tree is gone (the worktree deleted) or has dropped it, so is it.
+        if stationManager?.tree(forPath: path)?.documentId == nil {
+            documentPanes.removeValue(forKey: path)
         }
-        previewSets.forget(worktree: path)
     }
 
     // MARK: - Dashboard Navigation (D-state)
@@ -1502,87 +1463,89 @@ extension DashboardViewController {
 }
 
 
-// MARK: - Edit mode (split file-preview layout)
+// MARK: - Document pane and pane tabs
 
 extension DashboardViewController {
 
-    /// Toggle the selected worktree between focus and edit layout. No-op if the
-    /// preview set is empty (nothing to show in the right column).
-    func toggleEditMode() {
-        guard let wt = currentWorktreePath, !previewSets.isEmpty(wt) else { return }
-        let goingEdit = !previewSets.isEditMode(for: wt)
-        previewSets.setEditMode(goingEdit, for: wt)
-        // Re-embed retargets the split into the right container (prepare attaches/
-        // detaches the edit shell). Don't steal terminal focus when entering edit.
-        embedSplitContainerForSelectedPane(focusTerminal: !goingEdit)
-        if goingEdit {
-            if let active = previewSets.activeFile(for: wt) { selectPreviewTab(active) }
+    // MARK: Document pane
+
+    /// Open a file or a change in the worktree's document pane: a pane of the
+    /// split tree (`SplitNode.document`), split from the focused pane the way
+    /// ⌘D splits it when the tree has none, reused when it has one.
+    func openDocument(_ item: DocumentPaneView.Item) {
+        guard let wt = currentWorktreePath else { return }
+        dismissCenterOverlay()
+        if activeSplitContainer == nil || activeSplitWorktreePath != wt {
+            embedSplitContainerForSelectedPane(focusTerminal: false)
+        }
+        guard let split = activeSplitContainer, let tree = split.tree else { return }
+        let pane = documentPane(for: wt)
+        if let docId = tree.documentId {
+            tree.focusedId = docId
         } else {
-            // Carry the active file across: focus mode shows it fullscreen.
-            dismissCenterOverlay()
-            if let active = previewSets.activeFile(for: wt) { presentFileOverlay(path: active) }
+            tree.insertDocument()
         }
-        notifyEditModeState()
+        // A terminal zoomed alone would hide the file just opened; compact
+        // re-zooms onto the document pane below.
+        split.zoomedLeafId = nil
+        split.documentView = pane
+        pane.open(item)
+        finalizePaneLayout(focusTerminal: false)
+        split.delegate?.splitContainer(split, didChangeFocus: tree.focusedId)
+        DispatchQueue.main.async { pane.focusContent() }
     }
 
-    private func notifyEditModeState() {
-        guard let wt = currentWorktreePath else {
-            onEditModeStateChange?(false, false)
-            return
-        }
-        onEditModeStateChange?(!previewSets.isEmpty(wt), previewSets.isEditMode(for: wt))
+    private func documentPane(for wt: String) -> DocumentPaneView {
+        if let pane = documentPanes[wt] { return pane }
+        let pane = DocumentPaneView()
+        pane.onEmpty = { [weak self] in self?.closeDocumentPane(worktree: wt) }
+        pane.onTabsChange = { [weak self] in self?.refreshPaneTabsIfActive() }
+        documentPanes[wt] = pane
+        return pane
     }
 
-    // MARK: Container attach / detach
-
-    /// Attach or detach the two-column edit shell for `wt`'s current mode. Runs
-    /// before the embed target is chosen; never re-enters embed.
-    private func prepareEditContainer(forWorktree wt: String) {
-        let container = leftRightFocusPanel.terminalContainer
-        if previewSets.isEditMode(for: wt) {
-            dismissCenterOverlay()
-            let edit = editLayoutContainer ?? makeEditContainer()
-            edit.updateRatio(previewSets.splitRatio(for: wt))
-            if edit.superview !== container {
-                edit.frame = container.bounds
-                edit.autoresizingMask = [.width, .height]
-                container.addSubview(edit)
+    /// The last tab closed: the document pane leaves the tree, its sibling
+    /// taking its place.
+    func closeDocumentPane(worktree wt: String) {
+        documentPanes.removeValue(forKey: wt)
+        guard let tree = stationManager?.tree(forPath: wt) else { return }
+        tree.removeDocument()
+        if let split = splitContainers[wt] {
+            if let zoomed = split.zoomedLeafId, !tree.root.containsPane(id: zoomed) {
+                split.zoomedLeafId = nil
             }
-        } else if let edit = editLayoutContainer {
-            edit.removeFromSuperview()
-            editLayoutContainer = nil
+            split.documentView = nil
+        }
+        if activeSplitWorktreePath == wt {
+            finalizePaneLayout(focusTerminal: true)
         }
     }
 
-    private func makeEditContainer() -> EditLayoutContainerView {
-        let ratio = currentWorktreePath.map { previewSets.splitRatio(for: $0) } ?? 0.5
-        let edit = EditLayoutContainerView(ratio: ratio)
-        edit.onRatioChange = { [weak self] r in
-            guard let self else { return }
-            self.onEditStripRatioChange?(r)
-            guard let wt = self.currentWorktreePath else { return }
-            self.previewSets.setSplitRatio(r, for: wt)
-        }
-        editLayoutContainer = edit
-        return edit
+    /// ⌘W while the document pane has focus closes its tab on screen (the last
+    /// tab, the pane). False when the document pane does not have focus.
+    func closeFocusedDocumentTab() -> Bool {
+        guard let wt = currentWorktreePath, activeSplitContainer?.tree?.documentFocused == true,
+              let pane = documentPanes[wt] else { return false }
+        pane.closeActive()
+        return true
     }
 
-    // MARK: Terminal tabs (LEFT column)
+    // MARK: Pane tabs (compact)
 
-    /// The focused leaf is the tab on show. Focus moves without going through the
+    /// The focused pane is the tab on show. Focus moves without going through the
     /// strip — a split focuses its new pane, a fleet pane row or `seahelm pane
     /// focus` sets `focusedId` — and preferring the old zoom there put focus back
     /// on the previous tab while the keyboard went to a pane nobody could see.
     private func applyZoomToFocusedLeaf() {
         guard let split = activeSplitContainer, let tree = split.tree else { return }
-        let leaves = tree.allLeaves
+        let panes = tree.paneIds
         let id: String
-        if leaves.contains(where: { $0.id == tree.focusedId }) {
+        if panes.contains(tree.focusedId) {
             id = tree.focusedId
-        } else if let zoomed = split.zoomedLeafId, leaves.contains(where: { $0.id == zoomed }) {
+        } else if let zoomed = split.zoomedLeafId, panes.contains(zoomed) {
             id = zoomed
-        } else if let first = leaves.first {
-            id = first.id
+        } else if let first = panes.first {
+            id = first
         } else {
             return
         }
@@ -1590,28 +1553,31 @@ extension DashboardViewController {
         split.setZoom(leafId: id, on: true)
     }
 
-    private func selectTerminalTab(_ leafId: String) {
+    private func selectPaneTab(_ paneId: String) {
         guard let split = activeSplitContainer, let tree = split.tree,
-              tree.allLeaves.contains(where: { $0.id == leafId }) else { return }
-        tree.focusedId = leafId
-        split.setZoom(leafId: leafId, on: true)
+              tree.paneIds.contains(paneId) else { return }
+        tree.focusedId = paneId
+        split.setZoom(leafId: paneId, on: true)
         refreshPaneTabs()
         focusZoomedLeaf()
     }
 
-    func editModeCycleTerminalTab(forward: Bool) {
+    func cyclePaneTab(forward: Bool) {
         guard let split = activeSplitContainer, let tree = split.tree else { return }
-        let leaves = tree.allLeaves
-        guard !leaves.isEmpty else { return }
+        let panes = tree.paneIds
+        guard !panes.isEmpty else { return }
         let current = split.zoomedLeafId ?? tree.focusedId
-        let idx = leaves.firstIndex(where: { $0.id == current }) ?? 0
-        let next = leaves[(idx + (forward ? 1 : leaves.count - 1)) % leaves.count]
-        selectTerminalTab(next.id)
+        let idx = panes.firstIndex(of: current) ?? 0
+        selectPaneTab(panes[(idx + (forward ? 1 : panes.count - 1)) % panes.count])
     }
 
     private func focusZoomedLeaf() {
         guard let split = activeSplitContainer, let tree = split.tree else { return }
         let id = split.zoomedLeafId ?? tree.focusedId
+        if id == tree.documentId {
+            split.documentView?.focusContent()
+            return
+        }
         guard let leaf = tree.allLeaves.first(where: { $0.id == id }),
               let view = split.surfaceViews[leaf.stationId] else { return }
         view.window?.makeFirstResponder(view)
@@ -1622,186 +1588,16 @@ extension DashboardViewController {
         }
     }
 
-    // MARK: Preview tabs (RIGHT column)
-
-    private func selectPreviewTab(_ path: String) {
-        guard let wt = currentWorktreePath else { return }
-        previewSets.setActive(path, for: wt)
-        updatePreviewContent()
-        refreshPaneTabs()
-    }
-
-    func editModeCyclePreviewTab(forward: Bool) {
-        guard let wt = currentWorktreePath else { return }
-        let files = previewSets.files(for: wt)
-        guard !files.isEmpty else { return }
-        let current = previewSets.activeFile(for: wt)
-        let idx = current.flatMap { files.firstIndex(of: $0) } ?? 0
-        let next = files[(idx + (forward ? 1 : files.count - 1)) % files.count]
-        selectPreviewTab(next)
-    }
-
-    private func closePreviewTab(_ path: String) {
-        guard let wt = currentWorktreePath else { return }
-        let doomed = previewContentCache.removeValue(forKey: path)
-        doomed?.removeFromSuperview()
-        // Defer CodeEdit teardown so the tab close isn't blocked on deinit.
-        if let doomed {
-            DispatchQueue.main.async { _ = doomed }
-        }
-        _ = previewSets.remove(path, from: wt)
-
-        if previewSets.isEmpty(wt) {
-            // Degrade to focus mode when the last preview closes.
-            previewSets.setEditMode(false, for: wt)
-            embedSplitContainerForSelectedPane(focusTerminal: true)
-        } else {
-            updatePreviewContent()
-            refreshPaneTabs()
-        }
-        notifyEditModeState()
-    }
-
-    /// Show the active preview file's content view in the right host, building +
-    /// caching it on first use so tab switches preserve editor state.
-    private func updatePreviewContent() {
-        guard let edit = editLayoutContainer, let wt = currentWorktreePath else { return }
-        let host = edit.previewHost
-        guard let active = previewSets.activeFile(for: wt) else {
-            host.subviews.forEach { $0.isHidden = true }
-            return
-        }
-        let content: NSView
-        if let cached = previewContentCache[active] {
-            content = cached
-        } else {
-            content = makePreviewContent(path: active)
-            previewContentCache[active] = content
-            content.translatesAutoresizingMaskIntoConstraints = false
-            host.addSubview(content)
-            NSLayoutConstraint.activate([
-                content.topAnchor.constraint(equalTo: host.topAnchor),
-                content.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-                content.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-            ])
-        }
-        if content.superview !== host {
-            content.removeFromSuperview()
-            content.translatesAutoresizingMaskIntoConstraints = false
-            host.addSubview(content)
-            NSLayoutConstraint.activate([
-                content.topAnchor.constraint(equalTo: host.topAnchor),
-                content.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-                content.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-            ])
-        }
-        for sub in host.subviews { sub.isHidden = (sub !== content) }
-    }
-
-    /// Build the content view for a preview tab, wrapped in the same
-    /// `CenterOverlayView` chrome the focus-mode overlay uses (Close / Save /
-    /// Preview toolbar + Cmd+S + Esc) so the two modes are identical. The
-    /// toolbar's Close closes this tab.
-    ///
-    /// Text files show a spinner first while bytes are read off-main, then the
-    /// cache entry is swapped for the real editor so the click stays responsive.
-    private func makePreviewContent(path: String) -> NSView {
-        let onClose: () -> Void = { [weak self] in self?.closePreviewTab(path) }
-        if let media = MediaPreviewView.make(path: path) {
-            return CenterOverlayView(content: media, onClose: onClose)
-        }
-
-        let loading = CenterOverlayView(content: EditorLoadingView(), onClose: onClose)
-        // Register before the async hop so a fast disk read can't miss the
-        // identity check (updatePreviewContent also assigns this same ref).
-        previewContentCache[path] = loading
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let text = FileContentView.readContent(at: path)
-            DispatchQueue.main.async {
-                guard let self else { return }
-                // Tab closed or superseded while we were reading — drop the result.
-                guard self.previewContentCache[path] === loading else { return }
-                let replacement = self.buildPreviewOverlayView(
-                    path: path, text: text, onClose: onClose
-                )
-                self.previewContentCache[path] = replacement
-                loading.removeFromSuperview()
-                DispatchQueue.main.async { _ = loading }
-                if let wt = self.currentWorktreePath,
-                   self.previewSets.activeFile(for: wt) == path {
-                    self.updatePreviewContent()
-                }
-            }
-        }
-        return loading
-    }
-
-    /// Shared builder: already-resolved text → editor/fallback wrapped in
-    /// `CenterOverlayView`, with Save/Preview wiring for editable text.
-    private func buildPreviewOverlayView(
-        path: String,
-        text: String?,
-        onClose: @escaping () -> Void
-    ) -> NSView {
-        if let text {
-            let editor = CodeEditorView(fileURL: URL(fileURLWithPath: path), text: text)
-            return wrapEditorInOverlay(editor, onClose: onClose)
-        }
-        let fallback = MediaPreviewView.fallback(path: path) ?? FileContentView(path: path)
-        return CenterOverlayView(content: fallback, onClose: onClose)
-    }
-
-    /// Wire Save / Preview / dirty chrome around a loaded `CodeEditorView`.
-    private func wrapEditorInOverlay(
-        _ editor: CodeEditorView,
-        onClose: @escaping () -> Void
-    ) -> CenterOverlayView {
-        weak var overlayRef: CenterOverlayView?
-        let overlay = CenterOverlayView(
-            content: editor,
-            onSave: { [weak editor] in editor?.save() },
-            onPreview: editor.isPreviewable ? { [weak editor] in
-                guard let editor else { return }
-                overlayRef?.setPreviewing(editor.togglePreview())
-            } : nil,
-            onClose: onClose
-        )
-        overlayRef = overlay
-        editor.onDirtyChange = { [weak overlay] dirty in
-            overlay?.setDirty(dirty)
-        }
-        return overlay
-    }
-
-    // MARK: Tab strip refresh
-
     private func refreshPaneTabs() {
-        guard wantsPaneTabFocus, let wt = currentWorktreePath else { return }
-
-        let tree = activeSplitContainer?.tree
-        let leaves = tree?.allLeaves ?? []
-        let selectedLeaf = activeSplitContainer?.zoomedLeafId ?? tree?.focusedId
-        let termItems = leaves.map { leaf in
-            EditTabStripView.Item(
-                id: leaf.id,
-                title: terminalTabTitle(leaf: leaf, worktree: wt),
-                closable: false
-            )
+        guard wantsPaneTabFocus, let wt = currentWorktreePath, let tree = activeSplitContainer?.tree else { return }
+        let leaves = Dictionary(uniqueKeysWithValues: tree.allLeaves.map { ($0.id, $0) })
+        let items = tree.paneIds.map { id -> EditTabStripView.Item in
+            let title = leaves[id].map { terminalTabTitle(leaf: $0, worktree: wt) }
+                ?? documentPanes[wt]?.title ?? "Files"
+            return EditTabStripView.Item(id: id, title: title, closable: false)
         }
-        chromeEditStrips()?.terminal.apply(items: termItems, selectedId: selectedLeaf)
-
-        guard isEditModeActive else { return }
-        let files = previewSets.files(for: wt)
-        let previewItems = files.map { path in
-            EditTabStripView.Item(
-                id: path,
-                title: URL(fileURLWithPath: path).lastPathComponent,
-                closable: true
-            )
-        }
-        chromeEditStrips()?.preview.apply(items: previewItems, selectedId: previewSets.activeFile(for: wt))
+        let selected = activeSplitContainer?.zoomedLeafId ?? tree.focusedId
+        chromePaneStrip()?.apply(items: items, selectedId: selected)
     }
 
     private func terminalTabTitle(leaf: SplitNode.LeafInfo, worktree: String) -> String {
@@ -1813,7 +1609,7 @@ extension DashboardViewController {
     }
 
     /// Status/title refresh path: keep pane tab labels current without rebuilding views.
-    func refreshEditModeTabsIfActive() {
+    func refreshPaneTabsIfActive() {
         guard wantsPaneTabFocus else { return }
         refreshPaneTabs()
     }
@@ -1827,86 +1623,15 @@ extension DashboardViewController: WorktreeSidePanelDelegate {
         dismissCompactDrawerIfNeeded()
     }
 
-    /// Open a file through the same viewer path as selecting it in the Files tab:
-    /// a right-column tab in edit mode, otherwise the fullscreen center overlay.
-    /// Used by the terminal pane's "Preview" context-menu action.
+    /// Open a file in the worktree's document pane. Used by the Files tab and
+    /// by the terminal pane's "Preview" context-menu action.
     func openFile(path: String) {
-        // Record the file into the (mode-decoupled) preview set. In edit mode it
-        // becomes a right-column tab; otherwise it opens as the fullscreen overlay.
-        guard let wt = currentWorktreePath else {
-            presentFileOverlay(path: path)
-            return
-        }
-        previewSets.add(path, to: wt)
-
-        if previewSets.isEditMode(for: wt) {
-            embedSplitContainerForSelectedPane(focusTerminal: false)
-            selectPreviewTab(path)
-        } else {
-            presentFileOverlay(path: path)
-        }
-        notifyEditModeState()
-    }
-
-    /// Present a file as the fullscreen center overlay (focus-mode viewer).
-    func presentFileOverlay(path: String) {
-        // Full path, not just the basename: the fullscreen viewer fills the
-        // window with no other cue about which of several same-named files
-        // (Contents.json, index.ts, mod.rs…) is on screen.
-        let title = (path as NSString).abbreviatingWithTildeInPath
-
-        // Images and audio/video get a native viewer. Everything else — including
-        // markdown and unregistered extensions — goes to the editor first.
-        if let media = MediaPreviewView.make(path: path) {
-            showCenterOverlay(media, title: title)
-            return
-        }
-
-        // Show a spinner immediately; file I/O + CodeEdit construction follow
-        // once bytes are ready so the file-tree click isn't blocked on disk.
-        let loadingOverlay = showCenterOverlay(EditorLoadingView(), title: title)
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let text = FileContentView.readContent(at: path)
-            DispatchQueue.main.async {
-                guard let self else { return }
-                // User closed or opened another file while we were reading.
-                guard self.centerOverlay === loadingOverlay else { return }
-
-                if let text {
-                    let editor = CodeEditorView(
-                        fileURL: URL(fileURLWithPath: path), text: text
-                    )
-                    weak var overlayRef: CenterOverlayView?
-                    let overlay = self.showCenterOverlay(
-                        editor,
-                        title: title,
-                        onSave: { [weak editor] in editor?.save() },
-                        onPreview: editor.isPreviewable ? { [weak editor] in
-                            guard let editor else { return }
-                            overlayRef?.setPreviewing(editor.togglePreview())
-                        } : nil
-                    )
-                    overlayRef = overlay
-                    editor.onDirtyChange = { [weak overlay] dirty in
-                        overlay?.setDirty(dirty)
-                    }
-                } else {
-                    // Binary / oversized: QuickLook, then the read-only placeholder.
-                    let fallback = MediaPreviewView.fallback(path: path)
-                        ?? FileContentView(path: path)
-                    self.showCenterOverlay(fallback, title: title)
-                }
-            }
-        }
+        openDocument(.file(path: path))
     }
 
     func sidePanel(_ vc: WorktreeSidePanelViewController, didSelectChange path: String) {
         let worktreePath = agents.first(where: { $0.id == selectedWorktreeId })?.worktreePath ?? ""
-        let fileName = URL(fileURLWithPath: path).lastPathComponent
-        let title = fileName.isEmpty ? "Changes" : fileName
-        showCenterOverlay(
-            DiffReviewView(worktreePath: worktreePath, selectedPath: path),
-            title: title
-        )
+        openDocument(.change(worktreePath: worktreePath, path: path))
+        dismissCompactDrawerIfNeeded()
     }
 }

@@ -694,8 +694,10 @@ class MainWindowController: NSWindowController {
         // No-op: dashboard is always the only tab; individual project close is handled via dashboard UI.
     }
 
-    /// Cmd+W: close focused pane if multiple panes, otherwise close tab.
+    /// Cmd+W: close focused pane if multiple panes, otherwise close tab. With
+    /// the document pane focused, its tab on screen (`closeFocusedDocumentTab`).
     @objc func closePaneOrTab() {
+        if tabCoordinator.dashboardVC?.closeFocusedDocumentTab() == true { return }
         if let tree = tabCoordinator.dashboardVC?.activeSplitContainer?.tree,
            tree.leafCount > 1 {
             closeFocusedPane()
@@ -833,17 +835,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
             self.windowChrome?.setOverlayTitle(title)
             self.updateTitleBar()
         }
-        // Edit-mode toggle availability + on-state drive the chrome header icon.
-        dashboard.onEditModeStateChange = { [weak self] available, isOn in
-            self?.windowChrome?.setEditMode(available: available, isOn: isOn)
-        }
-        // Edit / compact pane tab strips live on the chrome header row.
-        dashboard.editStripsProvider = { [weak self] in self?.windowChrome?.editStrips }
+        // The compact pane tab strip lives on the chrome header row.
+        dashboard.paneStripProvider = { [weak self] in self?.windowChrome?.paneStrip }
         dashboard.onHoistedStripsChange = { [weak self] mode in
             self?.windowChrome?.setHoistedStrips(mode)
-        }
-        dashboard.onEditStripRatioChange = { [weak self] ratio in
-            self?.windowChrome?.setEditStripRatio(ratio)
         }
         // Keep chrome header icon tint in sync when dashboard changes side.
         dashboard.onActiveToolChanged = { [weak self] pane in
@@ -1456,7 +1451,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
         } ?? ""
         windowChrome?.updateTerminalTitle(repo: repo, pane: paneTitle + away)
         updateForkOffer(station: focusedPane?.station)
-        windowChrome?.updateWorktreeContext(Self.worktreeContext(repo: repo, pane: agent))
         refreshHeaderMemory(sessionKey: focusedPaneSessionKey(worktreePath: path))
     }
 
@@ -1510,15 +1504,6 @@ dashboard.stationManager = terminalCoordinator.stationManager
         }
     }
 
-    /// `repo · branch`, skipping either half when it is missing or would repeat the
-    /// other — the fleet row builds its branch label the same way.
-    static func worktreeContext(repo: String, pane: WorktreeRowInfo) -> String {
-        let branch = pane.thread.isEmpty ? pane.name : pane.thread
-        let parts = [repo, branch]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return Array(NSOrderedSet(array: parts)).compactMap { $0 as? String }.joined(separator: " · ")
-    }
 
 
     // MARK: - Forwarding to TabCoordinator
@@ -1554,16 +1539,10 @@ dashboard.stationManager = terminalCoordinator.stationManager
     }
 
     func moveFocus(_ axis: SplitAxis, positive: Bool) {
-        // In edit mode the terminal split is presented as tabs, so spatial focus
-        // movement becomes tab cycling: horizontal walks the terminal tabs, and
-        // vertical walks the preview tabs on the right.
+        // Compact presents the panes as tabs, so spatial focus movement becomes
+        // tab cycling: either axis walks the strip.
         if let dashboard = tabCoordinator.dashboardVC, dashboard.wantsPaneTabFocus {
-            if axis == .vertical, dashboard.isEditModeActive {
-                dashboard.editModeCyclePreviewTab(forward: positive)
-            } else {
-                // Compact has only the pane strip: either axis walks it.
-                dashboard.editModeCycleTerminalTab(forward: positive)
-            }
+            dashboard.cyclePaneTab(forward: positive)
             return
         }
         terminalCoordinator.moveFocus(axis, positive: positive)
@@ -1711,9 +1690,6 @@ extension MainWindowController: ChromeHeaderDelegate {
         toggleChromeCollapsed()
     }
 
-    func chromeDidToggleEditMode() {
-        tabCoordinator.dashboardVC?.toggleEditMode()
-    }
 }
 
 // MARK: - Theme

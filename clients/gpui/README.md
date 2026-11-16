@@ -98,7 +98,7 @@ everything already queued, up to 256 KiB.
 
 - Light theme fills (sidebar, rows, hairlines) are worked out from the
   light semantic colours, not measured off the app as the dark ones were.
-- The side panels (Files, Changes), edit mode, sharing, PR badges, First
+- The side panels (Files, Changes), sharing, PR badges, First
   Mate and the per-group buttons are the macOS app's and are not here.
 - Diff stats are measured against the merge-base with the default branch.
   The app counts "what still has to go in a PR" (merged-PR heads,

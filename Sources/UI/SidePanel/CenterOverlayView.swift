@@ -21,6 +21,12 @@ final class CenterOverlayView: NSView {
     /// terminal itself (First Mate), which should read like any selected pane and
     /// whose Esc belongs to the program inside it.
     private let chromeless: Bool
+    /// Inside a pane of the split (the document pane) rather than over the
+    /// terminals: Esc is left alone and ⌘S is taken only while the keyboard is
+    /// in this view. `performKeyEquivalent` reaches every view in the window,
+    /// so an overlay that stays on screen beside a terminal would otherwise
+    /// steal both from it (vim, a TUI).
+    private let embedded: Bool
     private var colorSchemeObserver: NSObjectProtocol?
 
     // MARK: Init
@@ -30,9 +36,11 @@ final class CenterOverlayView: NSView {
         onSave: (() -> Void)? = nil,
         onPreview: (() -> Void)? = nil,
         chromeless: Bool = false,
+        embedded: Bool = false,
         onClose: @escaping () -> Void
     ) {
         self.chromeless = chromeless
+        self.embedded = embedded
         self.onClose = onClose
         self.onSave = onSave
         self.onPreview = onPreview
@@ -200,10 +208,15 @@ final class CenterOverlayView: NSView {
 
     // MARK: Key handling
 
+    private var keyboardIsInside: Bool {
+        guard let responder = window?.firstResponder as? NSView else { return false }
+        return responder === self || responder.isDescendant(of: self)
+    }
+
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53, !chromeless { // Esc
+        if event.keyCode == 53, !chromeless, !embedded { // Esc
             onClose()
         } else {
             super.keyDown(with: event)
@@ -211,10 +224,11 @@ final class CenterOverlayView: NSView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.keyCode == 53, !chromeless {
+        if event.keyCode == 53, !chromeless, !embedded {
             onClose()
             return true
         }
+        if embedded, !keyboardIsInside { return super.performKeyEquivalent(with: event) }
         // Cmd+S → save (when editable).
         if onSave != nil,
            event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,

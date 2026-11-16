@@ -23,18 +23,15 @@ enum CompactMode {
         compactActive || userSidebarCollapsed
     }
 
-    /// Pane tab strip: edit mode always (preview column needs it); compact only with 2+ leaves.
-    static func shouldShowPaneTabs(compactActive: Bool, leafCount: Int, editMode: Bool) -> Bool {
-        if editMode { return true }
-        return compactActive && leafCount > 1
+    /// Pane tab strip: compact only, with 2+ panes (the document pane counts).
+    static func shouldShowPaneTabs(compactActive: Bool, paneCount: Int) -> Bool {
+        compactActive && paneCount > 1
     }
 }
 
-/// How the terminal header hosts tab strips (edit mode vs compact).
+/// Whether the terminal header hosts the compact pane tab strip.
 enum HeaderStripMode: Equatable {
     case none
-    /// Compact: only the terminal pane strip, full header width.
+    /// Compact: the pane tab strip, full header width.
     case terminalOnly
-    /// Edit mode: terminal + preview strips split by `ratio`.
-    case edit(ratio: CGFloat)
 }

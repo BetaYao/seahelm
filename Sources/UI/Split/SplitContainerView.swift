@@ -16,6 +16,16 @@ protocol SplitContainerDelegate: AnyObject {
 class SplitContainerView: NSView, DividerDelegate {
     var tree: SplitTree? { didSet { layoutTree() } }
     var surfaceViews: [String: NSView] = [:]
+    /// The worktree's document pane (`SplitNode.document`), placed at its
+    /// leaf's frame. Owned by the dashboard, which hands it to whichever
+    /// container shows the worktree.
+    var documentView: DocumentPaneView? {
+        didSet {
+            if oldValue !== documentView, oldValue?.superview === self { oldValue?.removeFromSuperview() }
+            wireDocumentView()
+            layoutTree()
+        }
+    }
     /// When set (and the leaf exists), only this leaf is shown, filling the
     /// container — tmux-style zoom. Others are hidden; dividers/overlays cleared.
     var zoomedLeafId: String?
@@ -77,6 +87,7 @@ class SplitContainerView: NSView, DividerDelegate {
 
     private var allVisibleLeavesEmbedded: Bool {
         guard let tree = tree else { return false }
+        if tree.documentId != nil, documentView?.superview !== self { return false }
         let leaves = zoomedLeafId.flatMap { z in tree.allLeaves.first { $0.id == z } }.map { [$0] }
             ?? tree.allLeaves
         return !leaves.isEmpty && leaves.allSatisfy { leaf in
@@ -85,14 +96,21 @@ class SplitContainerView: NSView, DividerDelegate {
         }
     }
 
+    /// The zoomed pane's id, when it is in the tree: a terminal or the document pane.
+    private func zoomedPaneId(in tree: SplitTree) -> String? {
+        guard let z = zoomedLeafId, tree.root.containsPane(id: z) else { return nil }
+        return z
+    }
+
     func layoutTree() {
         guard let tree = tree else { return }
-        let zoomLeaf = zoomedLeafId.flatMap { z in tree.allLeaves.first { $0.id == z } }
+        let zoomLeaf = zoomedPaneId(in: tree)
         if let zoomLeaf {
-            leafFrames = [zoomLeaf.id: bounds]
+            leafFrames = [zoomLeaf: bounds]
         } else {
             leafFrames = Self.computeFrames(node: tree.root, in: bounds)
         }
+        layoutDocumentView(tree: tree)
         // Hide zoomed-out leaves; only leaves with a computed frame are visible.
         for leaf in tree.allLeaves {
             surfaceViews[leaf.stationId]?.isHidden = (leafFrames[leaf.id] == nil)
@@ -240,13 +258,16 @@ class SplitContainerView: NSView, DividerDelegate {
     /// GhosttyNSView.setFrameSize already syncs the surface size with a debounce.
     private func applyFramesOnly() {
         guard let tree = tree else { return }
-        if let zoomLeaf = zoomedLeafId.flatMap({ z in tree.allLeaves.first { $0.id == z } }) {
-            leafFrames = [zoomLeaf.id: bounds]
+        if let zoomLeaf = zoomedPaneId(in: tree) {
+            leafFrames = [zoomLeaf: bounds]
         } else {
             leafFrames = Self.computeFrames(node: tree.root, in: bounds)
         }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        if let docId = tree.documentId, let frame = leafFrames[docId], documentView?.superview === self {
+            documentView?.frame = frame
+        }
         for leaf in tree.allLeaves {
             guard let frame = leafFrames[leaf.id],
                   let view = surfaceViews[leaf.stationId],
@@ -264,6 +285,39 @@ class SplitContainerView: NSView, DividerDelegate {
         CATransaction.commit()
     }
 
+    // MARK: - Document pane
+
+    private func layoutDocumentView(tree: SplitTree) {
+        guard let doc = documentView else { return }
+        guard let docId = tree.documentId, let frame = leafFrames[docId] else {
+            doc.isHidden = true
+            return
+        }
+        if doc.superview !== self {
+            doc.removeFromSuperview()
+            doc.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(doc)
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        doc.frame = frame
+        CATransaction.commit()
+        doc.isHidden = false
+        doc.setAccessibilityIdentifier("splitPane.document")
+    }
+
+    /// A click in the document pane makes it the focused pane, as a click in a
+    /// terminal does through `onFocusAcquired`.
+    private func wireDocumentView() {
+        documentView?.onFocusAcquired = { [weak self] in
+            guard let self, let docId = self.tree?.documentId else { return }
+            guard self.tree?.focusedId != docId else { return }
+            self.tree?.focusedId = docId
+            self.delegate?.splitContainer(self, didChangeFocus: docId)
+            self.updateDimOverlays()
+        }
+    }
+
     // MARK: - Inactive wash
 
     /// Mark every pane but the focused one as inactive. The scrim is drawn by the
@@ -275,8 +329,8 @@ class SplitContainerView: NSView, DividerDelegate {
             return
         }
 
-        // Single pane: nothing to tell apart, so no wash.
-        guard tree.leafCount > 1 else {
+        // Single pane: nothing to tell apart, so no wash. The document pane counts.
+        guard tree.leafCount + (tree.documentId == nil ? 0 : 1) > 1 else {
             surfaceViews.values.forEach { ($0 as? GhosttyNSView)?.setInactiveWash(false, animated: false) }
             return
         }
@@ -301,7 +355,7 @@ class SplitContainerView: NSView, DividerDelegate {
 
     private static func computeFramesRecursive(node: SplitNode, in rect: CGRect, result: inout [String: CGRect]) {
         switch node {
-        case .leaf(let id, _, _):
+        case .leaf(let id, _, _), .document(let id):
             result[id] = rect
         case .split(_, let axis, let ratio, let first, let second):
             let dividerSize = DividerView.thickness
@@ -381,7 +435,7 @@ class SplitContainerView: NSView, DividerDelegate {
 
     private func collectSplitIds(_ node: SplitNode) -> Set<String> {
         switch node {
-        case .leaf: return []
+        case .leaf, .document: return []
         case .split(let id, _, _, let first, let second):
             return Set([id]).union(collectSplitIds(first)).union(collectSplitIds(second))
         }
@@ -399,6 +453,10 @@ class SplitContainerView: NSView, DividerDelegate {
     func restoreFocusToActiveLeaf() {
         guard let tree else { return }
         let targetId = tree.focusedId
+        if tree.documentFocused {
+            documentView?.focusContent()
+            return
+        }
         if let leaf = tree.allLeaves.first(where: { $0.id == targetId }),
            let view = surfaceViews[leaf.stationId],
            window?.firstResponder !== view {
@@ -548,8 +606,9 @@ class SplitContainerView: NSView, DividerDelegate {
         var bestLeaf: String?
         var bestDistance: CGFloat = .greatestFiniteMagnitude
 
-        for leaf in tree.allLeaves where leaf.id != tree.focusedId {
-            guard let frame = leafFrames[leaf.id] else { continue }
+        let paneIds = tree.allLeaves.map(\.id) + (tree.documentId.map { [$0] } ?? [])
+        for leafId in paneIds where leafId != tree.focusedId {
+            guard let frame = leafFrames[leafId] else { continue }
             let leafCenter = CGPoint(x: frame.midX, y: frame.midY)
 
             let inDirection: Bool
@@ -572,7 +631,7 @@ class SplitContainerView: NSView, DividerDelegate {
             let dist = hypot(leafCenter.x - center.x, leafCenter.y - center.y)
             if dist < bestDistance {
                 bestDistance = dist
-                bestLeaf = leaf.id
+                bestLeaf = leafId
             }
         }
 

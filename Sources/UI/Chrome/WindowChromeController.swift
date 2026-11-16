@@ -180,34 +180,13 @@ final class WindowChromeController: NSViewController {
         terminalHeader.setWorktreeContextEnabled(enabled)
     }
 
-    /// Drive the terminal header's edit-mode toggle (availability + on-state).
-    func setEditMode(available: Bool, isOn: Bool) {
-        terminalHeader.setEditMode(available: available, isOn: isOn)
-    }
-
-    /// `repo · branch` for the columns on screen. Only surfaces in edit mode, where
-    /// the per-column tab strips already name the panes but nothing names the worktree.
-    func updateWorktreeContext(_ context: String) {
-        terminalHeader.setWorktreeContext(context)
-    }
-
-    /// Edit mode's column tab strips live on the header row, so the two-column
-    /// layout costs one row of chrome instead of two. The header owns the strips;
-    /// the dashboard populates them through `editStrips`.
-    var editStrips: (terminal: EditTabStripView, preview: EditTabStripView) {
-        (terminalHeader.editTerminalStrip, terminalHeader.editPreviewStrip)
-    }
-
-    func setEditStripsActive(_ active: Bool, ratio: CGFloat) {
-        terminalHeader.setEditStripsActive(active, ratio: ratio)
-    }
+    /// Compact's pane tab strip lives on the header row, so presenting panes
+    /// as tabs costs no extra row. The header owns the strip; the dashboard
+    /// populates it through `paneStrip`.
+    var paneStrip: EditTabStripView { terminalHeader.paneStrip }
 
     func setHoistedStrips(_ mode: HeaderStripMode) {
         terminalHeader.setHoistedStrips(mode)
-    }
-
-    func setEditStripRatio(_ ratio: CGFloat) {
-        terminalHeader.setEditStripRatio(ratio)
     }
 
     /// Compact: sidebar peeks as a left drawer over the terminal (no push).
