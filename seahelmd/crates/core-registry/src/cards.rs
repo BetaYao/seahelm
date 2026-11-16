@@ -218,6 +218,9 @@ pub enum Input {
     /// Return, as a write of its own after a short pause: a TUI reads a
     /// `\r` in the same burst as pasted text as a newline, not a submit.
     Submit,
+    /// A key that confirms in place of Return (`/model`'s `s`), timed as
+    /// Return is and pressed, never pasted: a picker ignores pasted text.
+    Key(String),
 }
 
 /// What answering a card asks of the caller.
@@ -501,7 +504,12 @@ impl Cards {
             }
             CardKind::Choice => {
                 self.resolve(id, CardState::Answered, Some(label.to_string()), via, now);
-                Ok(Answer::Keys { pane: card.pane.clone(), inputs: arrows(tapped, selected().unwrap_or(card.flags.cursor)), confirm_review: false })
+                let mut inputs = arrows(tapped, selected().unwrap_or(card.flags.cursor));
+                if let Some(key) = &card.flags.confirm_key {
+                    inputs.pop();
+                    inputs.push(Input::Key(key.clone()));
+                }
+                Ok(Answer::Keys { pane: card.pane.clone(), inputs, confirm_review: false })
             }
             CardKind::Question => {
                 let count = card.options.len();
@@ -1116,6 +1124,17 @@ mod tests {
         let a = q.answer("c-1", "Yes", Some(screen), 2.0).unwrap();
         let Answer::Keys { inputs, .. } = a else { panic!() };
         assert_eq!(inputs, vec![Input::Bytes(KEY_UP.into()), Input::Submit]);
+    }
+
+    /// `/model`'s card keeps the pick to this session: `s`, not Return.
+    #[test]
+    fn a_picker_with_a_session_key_is_answered_with_it() {
+        let mut q = Cards::new();
+        let flags = QuestionFlags { cursor: 1, confirm_key: Some("s".into()), ..QuestionFlags::default() };
+        q.observe(&question("p1", EventSource::Scan, &["Default", "Opus", "Fable"], flags, vec![]), 1.0);
+        let screen = "Select model\n  1.  Default\n❯ 2.  Opus\n  3.  Fable\n";
+        let Answer::Keys { inputs, .. } = q.answer("c-1", "Fable", Some(screen), 2.0).unwrap() else { panic!() };
+        assert_eq!(inputs, vec![Input::Bytes(KEY_DOWN.into()), Input::Key("s".into())]);
     }
 
     #[test]

@@ -228,6 +228,7 @@ fn parses_a_slash_command_picker_with_text_under_its_list() {
     assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("Select model"));
     assert_eq!(choices::tidy_menu_label(&opts[1].label), "Opus 5.5 ✔ · For complex work and everyday tasks");
     assert_eq!(choices::tidy_menu_label(&opts[0].label), "Default (recommended) · Opus 5.5 · Best for everyday, complex tasks");
+    assert_eq!(choices::session_only_key(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("s"));
 }
 
 #[test]
@@ -263,4 +264,5 @@ fn a_permission_prompt_has_no_menu_title() {
     ]);
     assert_eq!(parse(&screen).len(), 2);
     assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES), None);
+    assert_eq!(choices::session_only_key(&screen, DEFAULT_BOTTOM_LINES), None);
 }

@@ -388,6 +388,11 @@ pub struct QuestionFlags {
     /// strings where an option has none, and empty when none has one.
     #[serde(default)]
     pub details: Vec<String>,
+    /// The key that takes the row under the cursor, when it is not Return:
+    /// `s` in Claude Code's `/model`, where Return would also save the pick
+    /// as the default for every new session and `s` keeps it to this one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

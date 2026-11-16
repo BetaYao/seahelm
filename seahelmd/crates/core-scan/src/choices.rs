@@ -189,6 +189,17 @@ pub fn tidy_menu_label(label: &str) -> String {
     label.split("  ").map(str::trim).filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ")
 }
 
+/// The key a picker offers for "this session only" (Claude Code's `/model`:
+/// "… · s to use this session only · …"), read off its footer. A card answers
+/// with it rather than Return, which would also change the user's default.
+pub fn session_only_key(screen: &str, bottom_lines: usize) -> Option<String> {
+    static R: OnceLock<Regex> = OnceLock::new();
+    let re = R.get_or_init(|| Regex::new(r"(?i)(?:^|·)\s*(\S) to use (?:it )?(?:for )?this session only").expect("session key regex"));
+    let lines: Vec<&str> = bottom(screen, bottom_lines).collect();
+    let last = lines.iter().rposition(|l| !trim_ws(l).is_empty())?;
+    re.captures(trim_ws(lines[last])).map(|c| c[1].to_string())
+}
+
 fn is_rule(line: &str) -> bool {
     let t = trim_ws(line);
     t.chars().count() >= 10 && t.chars().all(|c| matches!(c, '▔' | '▁' | '─' | '━' | '═'))
