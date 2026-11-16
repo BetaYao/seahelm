@@ -209,6 +209,32 @@ pub fn parse_worktrees(porcelain: &str) -> Vec<(String, String)> {
     out
 }
 
+/// A path `git worktree list` printed, as the checkout it means. In a
+/// submodule git lists the main worktree by its git dir (the superproject's
+/// `.git/modules/<name>`), which is no checkout: the checkout is the
+/// directory that git dir's `core.worktree` names.
+pub fn listed_checkout(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    if p.join(".git").exists() || !p.join("HEAD").is_file() {
+        return path.to_string();
+    }
+    let config = p.join("config");
+    let Some(rel) = git(path, &["config", "--file", &config.to_string_lossy(), "core.worktree"]) else { return path.to_string() };
+    let rel = rel.trim();
+    if rel.is_empty() {
+        return path.to_string();
+    }
+    let dir = p.join(rel);
+    dunce_canonical(&dir).unwrap_or_else(|| dir.to_string_lossy().into_owned())
+}
+
+fn dunce_canonical(p: &std::path::Path) -> Option<String> {
+    let c = p.canonicalize().ok()?.to_string_lossy().into_owned();
+    // Windows' canonical form is `\\?\C:\…`; git and the rest of the client
+    // spell it `C:\…`.
+    Some(c.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(c))
+}
+
 fn base_name(path: &str) -> String {
     std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path).to_string()
 }
@@ -226,6 +252,7 @@ pub fn read() -> Snapshot {
         let Some(list) = git(&project, &["worktree", "list", "--porcelain"]) else { continue };
         let items: Vec<Item> = parse_worktrees(&list)
             .into_iter()
+            .map(|(path, branch)| (listed_checkout(&path), branch))
             .enumerate()
             .map(|(i, (path, branch))| Item {
                 id: path.clone(),
@@ -339,6 +366,44 @@ pub fn git_stats(path: &str) -> Option<GitStats> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// In a submodule `git worktree list` names the main worktree by its git
+    /// dir; the row is the submodule's checkout.
+    #[test]
+    fn a_submodule_lists_its_checkout() {
+        let root = std::env::temp_dir().join(format!("gpui-sub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let run = |dir: &std::path::Path, args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        for name in ["olap", "huge"] {
+            std::fs::create_dir_all(root.join(name)).unwrap();
+            run(&root.join(name), &["init", "-q", "-b", "main"]);
+            run(&root.join(name), &["commit", "-q", "--allow-empty", "-m", "init"]);
+        }
+        let sub = root.join("olap").to_string_lossy().into_owned();
+        run(&root.join("huge"), &["-c", "protocol.file.allow=always", "submodule", "add", "-q", &sub, "olap"]);
+        let checkout = root.join("huge").join("olap");
+        let list = git(&checkout.to_string_lossy(), &["worktree", "list", "--porcelain"]).unwrap();
+        let (first, _) = parse_worktrees(&list).remove(0);
+        assert!(first.contains(".git"), "git lists the git dir: {first}");
+        assert_eq!(listed_checkout(&first), dunce_canonical(&checkout).unwrap());
+        assert_eq!(listed_checkout(&checkout.to_string_lossy()), checkout.to_string_lossy());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn times_read_as_the_app_writes_them() {

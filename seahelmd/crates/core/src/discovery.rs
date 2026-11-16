@@ -161,8 +161,10 @@ pub fn worktrees_of(repo: &str, filter: &Filter, list: impl Fn(&str) -> Option<S
     Some(
         parse_porcelain(&text)
             .into_iter()
-            .filter(|e| !e.bare && !e.prunable && Path::new(&e.path).join(".git").exists())
-            .map(|e| canon(&e.path))
+            .filter(|e| !e.bare && !e.prunable)
+            .map(|e| listed_checkout(&e.path))
+            .filter(|p| Path::new(p).join(".git").exists())
+            .map(|p| canon(&p))
             .filter(|p| filter.admits_worktree(p))
             .collect(),
     )
@@ -172,15 +174,56 @@ fn git_worktree_list(repo: &str) -> Option<String> {
     facts::git(Path::new(repo), &["worktree", "list", "--porcelain"])
 }
 
-/// A worktree's repository: its main checkout (the parent of the common
-/// git dir). None for anything not in a non-bare repository.
+/// A worktree's repository: its main checkout. None for anything not in a
+/// non-bare repository.
 pub fn repo_of(worktree: &str) -> Option<String> {
     let common = facts::git(Path::new(worktree), &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
-    let common = Path::new(common.trim());
-    if common.file_name()? != ".git" {
+    checkout_of_git_dir(Path::new(common.trim())).map(|p| canon(&p.to_string_lossy()))
+}
+
+/// The checkout a repository's (common) git dir belongs to: the parent of a
+/// `.git` directory, or — for a submodule, whose git dir lives in the
+/// superproject at `.git/modules/<name>` — the directory its `core.worktree`
+/// names. Taking the parent there named every submodule's repo `modules`.
+/// None for a bare repository.
+pub fn checkout_of_git_dir(git_dir: &Path) -> Option<PathBuf> {
+    if git_dir.file_name()? == ".git" {
+        return git_dir.parent().map(Path::to_path_buf);
+    }
+    let out = std::process::Command::new("git")
+        .arg("config")
+        .arg("--file")
+        .arg(git_dir.join("config"))
+        .arg("core.worktree")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let rel = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || rel.is_empty() {
         return None;
     }
-    Some(canon(&common.parent()?.to_string_lossy()))
+    let dir = git_dir.join(rel);
+    Some(dir.canonicalize().unwrap_or(dir))
+}
+
+/// A path `git worktree list` printed, as the checkout it means. In a
+/// submodule git lists the main worktree by its git dir
+/// (`.git/modules/<name>`), which is no checkout; anything else is kept.
+pub fn listed_checkout(path: &str) -> String {
+    let p = Path::new(path);
+    if p.join(".git").exists() || !p.join("HEAD").is_file() {
+        return path.to_string();
+    }
+    checkout_of_git_dir(p).map(|c| c.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string())
+}
+
+/// A worktree's main checkout, or "" when it is in no non-bare repository.
+pub fn main_checkout(worktree: &str) -> String {
+    facts::git(Path::new(worktree), &["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .and_then(|c| checkout_of_git_dir(Path::new(c.trim())))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 // MARK: the repo set
@@ -345,6 +388,29 @@ mod tests {
 
     fn s(p: &Path) -> String {
         canon(&p.to_string_lossy())
+    }
+
+    /// A submodule's git dir is the superproject's `.git/modules/<name>`, and
+    /// `git worktree list` there names that git dir as the main worktree. Its
+    /// repo is the submodule checkout, not `modules`, and the scan lists the
+    /// checkout, not the git dir.
+    #[test]
+    fn a_submodule_is_its_own_repo() {
+        let tmp = tempdir();
+        let sub = repo(tmp.path(), "olap");
+        let sup = repo(tmp.path(), "huge");
+        git(&sup, &["-c", "protocol.file.allow=always", "submodule", "add", "-q", &sub.to_string_lossy(), "olap"]);
+        let checkout = sup.join("olap");
+        let linked = tmp.path().join("olap-feat");
+        git(&checkout, &["worktree", "add", "-q", "-b", "feat", &linked.to_string_lossy()]);
+
+        assert_eq!(repo_of(&s(&linked)), Some(s(&checkout)));
+        assert_eq!(repo_of(&s(&checkout)), Some(s(&checkout)));
+        assert_eq!(main_checkout(&s(&linked)), s(&checkout));
+        assert_eq!(repo_of(&s(&sup)), Some(s(&sup)));
+
+        let listed = worktrees_of(&s(&checkout), &open_filter(), git_worktree_list).unwrap();
+        assert_eq!(listed, vec![s(&checkout), s(&linked)]);
     }
 
     /// tempfile names its directories `.tmpXXXX`, which the tool-state

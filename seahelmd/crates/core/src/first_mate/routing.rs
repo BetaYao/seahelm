@@ -8,9 +8,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 pub fn main_repo(path: &str) -> String {
-    super::facts::git(Path::new(path), &["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .and_then(|p| Path::new(p.trim()).parent().map(|p| p.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| path.into())
+    Some(crate::discovery::main_checkout(path)).filter(|r| !r.is_empty()).unwrap_or_else(|| path.into())
 }
 pub fn words(text: &str) -> String {
     text.split_whitespace().map(|s| s.to_lowercase()).collect::<Vec<_>>().join(" ")

@@ -100,7 +100,7 @@ enum WorktreeDeleter {
         let listOutput = runGit(args: ["worktree", "list", "--porcelain"], in: repoPath) ?? ""
         if let firstLine = listOutput.components(separatedBy: "\n").first,
            firstLine.hasPrefix("worktree ") {
-            let mainPath = String(firstLine.dropFirst("worktree ".count))
+            let mainPath = WorktreeDiscovery.listedCheckout(String(firstLine.dropFirst("worktree ".count)))
             // Compare resolved paths: git reports the real path while a caller
             // can hold one that reaches it through a symlink (any path under
             // /var, which is /private/var, and every macOS temporary directory).
@@ -292,7 +292,7 @@ enum WorktreeDeleter {
         let listOutput = runGit(args: ["worktree", "list", "--porcelain"], in: repoPath) ?? ""
         if let firstLine = listOutput.components(separatedBy: "\n").first,
            firstLine.hasPrefix("worktree ") {
-            let mainPath = String(firstLine.dropFirst("worktree ".count))
+            let mainPath = WorktreeDiscovery.listedCheckout(String(firstLine.dropFirst("worktree ".count)))
             if worktreePath == mainPath {
                 return WorktreeMergeCheck(
                     canDelete: false,

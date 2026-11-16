@@ -729,8 +729,7 @@ impl FirstMate {
             let fresh = self.git_info.get(&worktree).is_some_and(|(_, _, at)| at.elapsed() < Duration::from_secs(300));
             if !fresh {
                 let wt = Path::new(&worktree);
-                let common = facts::git(wt, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-                let repo = common.and_then(|c| Path::new(c.trim()).parent().map(|p| p.to_string_lossy().into_owned())).unwrap_or_default();
+                let repo = crate::discovery::main_checkout(&worktree);
                 let branch = facts::git(wt, &["rev-parse", "--abbrev-ref", "HEAD"]).map(|b| b.trim().to_string()).unwrap_or_default();
                 self.git_info.insert(worktree.clone(), (repo, branch, Instant::now()));
             }

@@ -451,8 +451,7 @@ pub fn worktree_delete(core: &Core, p: &Value) -> RpcResult {
         return Err(RpcError::invalid_params("worktree_path required"));
     }
     let dir = Path::new(&path);
-    let common = git(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok_or_else(|| RpcError::invalid_params("not a worktree"))?;
-    let main = Path::new(common.trim()).parent().map(Path::to_path_buf).unwrap_or_default();
+    let main = Some(crate::discovery::main_checkout(&path)).filter(|m| !m.is_empty()).map(std::path::PathBuf::from).ok_or_else(|| RpcError::invalid_params("not a worktree"))?;
     if same_dir(&main, dir) {
         return Err(RpcError::invalid_params("the main checkout is not deleted"));
     }
@@ -652,9 +651,8 @@ pub fn pane_new(core: &Core, p: &Value) -> RpcResult {
     start_plain_session(&session, &dir, launch.as_deref()).map_err(RpcError::internal)?;
     let field = |k: &str| like.as_ref().and_then(|r| r[k].as_str()).unwrap_or_default().to_string();
     let project = Some(field("project")).filter(|p| !p.is_empty()).unwrap_or_else(|| {
-        git(&dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
-            .and_then(|c| Path::new(c.trim()).parent().and_then(|r| r.file_name()).map(|n| n.to_string_lossy().into_owned()))
-            .unwrap_or_default()
+        let main = crate::discovery::main_checkout(&dir.to_string_lossy());
+        Path::new(&main).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
     });
     core.register_pane(Registration {
         pane: session.clone(),
