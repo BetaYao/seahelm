@@ -63,11 +63,13 @@
     return `/${command.name} ${rest}`;
   }
 
-  /** What sending it does, when that is not just a turn in the timeline. */
-  function kindNote(kind) {
+  /** What sending it does, when that is not just a turn in the timeline.
+   *  Claude Code records a report's output in its transcript, which
+   *  seahelm-core puts on the timeline; Codex records none. */
+  function kindNote(kind, agent) {
     switch (kind) {
       case 'interactive': return 'opens in the terminal';
-      case 'info': return 'output in the terminal';
+      case 'info': return agent === 'claudeCode' ? '' : 'output in the terminal';
       case 'session': return 'ends or replaces the conversation';
       default: return '';
     }

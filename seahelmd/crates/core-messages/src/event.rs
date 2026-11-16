@@ -27,6 +27,12 @@ pub enum Kind {
     /// A card's lifecycle row in First Mate's timeline (no turn). Clients
     /// merge rows by `card_id`; clients that do not know this kind drop it.
     Card,
+    /// A slash command the agent ran without the model (`/context`,
+    /// `/model`), read from its transcript: `text` the command line, `tool`
+    /// its name, `detail` what it printed (`format: markdown` when it is
+    /// markdown rather than terminal text), `is_error` for an unknown or
+    /// failed one. No turn; clients that do not know the kind drop it.
+    Command,
 }
 
 impl Kind {
@@ -48,6 +54,7 @@ impl Kind {
             Kind::Note => "note",
             Kind::Brief => "brief",
             Kind::Card => "card",
+            Kind::Command => "command",
         }
     }
 
@@ -63,6 +70,7 @@ impl Kind {
             "note" => Kind::Note,
             "brief" => Kind::Brief,
             "card" => Kind::Card,
+            "command" => Kind::Command,
             _ => return None,
         })
     }
@@ -94,6 +102,8 @@ pub struct Message {
     pub state: Option<String>,
     pub option: Option<String>,
     pub via: Option<String>,
+    /// How `detail` is written, when not plain text: `markdown`.
+    pub format: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -124,6 +134,7 @@ impl Message {
             state: None,
             option: None,
             via: None,
+            format: None,
         }
     }
 
@@ -171,6 +182,7 @@ impl Message {
         opt("state", self.state.as_ref().map(|v| json!(v)));
         opt("option", self.option.as_ref().map(|v| json!(v)));
         opt("via", self.via.as_ref().map(|v| json!(v)));
+        opt("format", self.format.as_ref().map(|v| json!(v)));
         if self.count > 1 {
             d.insert("count".into(), json!(self.count));
         }
@@ -209,6 +221,7 @@ impl Message {
             state: s("state"),
             option: s("option"),
             via: s("via"),
+            format: s("format"),
         })
     }
 }

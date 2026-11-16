@@ -502,6 +502,16 @@
   .tl-asst{margin:12px 0 10px;font-size:var(--fs-body);line-height:1.55;color:var(--text);word-break:break-word}
   .tl-notice{margin:6px 0;font-size:var(--fs-sub);color:var(--muted)}
 .tl-note{margin:6px 0;font-size:var(--fs-sub);color:var(--muted);font-style:italic}
+  /* A slash command the agent ran itself (/context, /model): the command
+     where the user's words would be, its output under it. */
+  .tl-cmd{display:flex;flex-direction:column;align-items:flex-end;margin:20px 0 14px;padding-left:15%}
+  .tl-cmd > code{font-family:var(--mono);font-size:var(--fs-sub);color:var(--accent);background:var(--accent-14);
+    border-radius:10px;padding:5px 10px}
+  .tl-cmd.err > code{color:var(--danger);background:var(--danger-16)}
+  .tl-cmd-out{align-self:stretch;margin:8px 0 0;padding:8px 12px;border-radius:10px;background:var(--panel);
+    font-size:var(--fs-sub);color:var(--text2);overflow:auto;max-height:min(420px, 60vh)}
+  pre.tl-cmd-out{font-family:var(--mono);font-size:var(--fs-mono);white-space:pre;line-height:1.35}
+  .tl-cmd.err .tl-cmd-out{color:var(--danger)}
   .tl-brief{margin:10px 0;padding:8px 10px;border:1px solid var(--sep);border-radius:8px;font-size:var(--fs-sub);line-height:1.5;color:var(--text);word-break:break-word}
   .tl-brief b{display:block;margin-bottom:2px;font-weight:600}
   .tl-thinking{margin:10px 0 8px;font-size:var(--fs-sub);line-height:1.55;color:var(--muted);word-break:break-word}
@@ -1744,6 +1754,16 @@ function messageRowHTML(m){
       return `<div class="tl-brief"><b>${esc(title)}</b>`
         + rest.map(l => `<div>${esc(l)}</div>`).join('') + `</div>`;
     }
+    case 'command': {
+      // Run by the agent itself, no turn (seahelm-core reads it from the
+      // transcript). Markdown when the agent wrote a rendering of its report.
+      const out = !m.detail ? ''
+        // A one-line result ("Set model to `Opus 5.5`") is written as markdown
+        // too; laid-out terminal text keeps its columns.
+        : m.format === 'markdown' || !m.detail.includes('\n') ? `<div class="tl-cmd-out md">${SeahelmMarkdown.render(m.detail)}</div>`
+        : `<pre class="tl-cmd-out">${esc(m.detail)}</pre>`;
+      return `<div class="tl-cmd${m.is_error ? ' err' : ''}"><code>${esc(m.text || '')}</code>${out}</div>`;
+    }
     case 'thinking':
       return `<div class="tl-thinking md">${SeahelmMarkdown.render(m.text || '')}</div>`;
     default:
@@ -2431,7 +2451,7 @@ function renderSlash(){
   slash.items = items;
   slash.open = items.length > 0;
   box.innerHTML = items.length ? items.map((c, i) => {
-    const note = SeahelmSlashComplete.kindNote(c.kind);
+    const note = SeahelmSlashComplete.kindNote(c.kind, catalog.agent);
     return `<button type="button" role="option" data-slash="${i}" class="${i === slash.sel ? 'on' : ''}" aria-selected="${i === slash.sel}">`
       + `<span class="sc-name">/${esc(c.name)}${c.args ? `<span class="sc-args">${esc(c.args)}</span>` : ''}</span>`
       + `<span class="sc-desc">${esc(c.description || '')}</span>`
