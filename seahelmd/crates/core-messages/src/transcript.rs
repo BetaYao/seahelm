@@ -15,12 +15,31 @@ use seahelm_core_hooks::suggest::strip_sentinel;
 use seahelm_core_hooks::cursor_store::{self, Message as CursorMessage};
 use seahelm_core_types::Timestamp;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Entry {
     /// Visible thinking or a reasoning summary, rather than what it says.
     pub thinking: bool,
     pub text: String,
     pub timestamp: Option<Timestamp>,
+    /// A slash command the agent ran itself, with what it printed: `text` is
+    /// the command line as typed.
+    pub command: Option<CommandRun>,
+}
+
+/// A command Claude Code ran without the model (`/context`, `/model`), as
+/// its transcript records it: the command, then its output once it is done
+/// (a picker's only when it closes). Commands that expand into a prompt
+/// (a skill, a custom command) record no output and are no run: their turn
+/// reaches the timeline the usual way.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CommandRun {
+    pub name: String,
+    /// What it printed, escape codes stripped; empty when nothing (`/clear`).
+    pub output: String,
+    /// `output` is markdown (Claude Code's own rendering of a report, such as
+    /// `/context`'s table) rather than terminal text.
+    pub markdown: bool,
+    pub error: bool,
 }
 
 /// The model an agent last answered with, as its transcript names it.
@@ -39,6 +58,9 @@ pub struct Tail {
     /// The latest model each transcript named, kept across reads: Codex names
     /// it once a turn, so most reads see none.
     models: HashMap<String, Model>,
+    /// A command whose output has not been written yet (a picker still open),
+    /// per transcript: `(command line, name, timestamp)`.
+    pending_commands: HashMap<String, (String, String, Option<Timestamp>)>,
 }
 
 /// Cursor uses a root-list position and blob hash rather than its non-unique
@@ -110,7 +132,7 @@ impl Default for Tail {
 
 impl Tail {
     pub fn new(first_read: u64) -> Self {
-        Tail { first_read, offsets: HashMap::new(), models: HashMap::new() }
+        Tail { first_read, offsets: HashMap::new(), models: HashMap::new(), pending_commands: HashMap::new() }
     }
 
     /// The model `path` last named, as of the last `new_prose` for it.
@@ -148,18 +170,159 @@ impl Tail {
                 None => return Vec::new(),
             }
         }
-        let mut entries = Vec::new();
+        let mut entries: Vec<Entry> = Vec::new();
+        let fresh = |t: Option<Timestamp>| known.is_some() || t.is_some_and(|t| t > since);
+        let mut last_was_output = false;
         for line in body.split(|&b| b == b'\n') {
             let Ok(v) = serde_json::from_slice::<Value>(line) else { continue };
             if let Some(m) = model(&v) {
                 self.models.insert(path.into(), m);
             }
-            if let Some(e) = prose_value(&v).filter(|e| known.is_some() || e.timestamp.is_some_and(|t| t > since)) {
+            let timestamp = v.get("timestamp").and_then(Value::as_str).and_then(parse_iso8601);
+            match local_command(&v) {
+                Some(Local::Started { line, name }) => {
+                    self.pending_commands.insert(path.into(), (line, name, timestamp));
+                    last_was_output = false;
+                    continue;
+                }
+                Some(Local::Output { text, error }) => {
+                    last_was_output = false;
+                    if let Some((line, name, at)) = self.pending_commands.remove(path) {
+                        if fresh(timestamp.or(at)) {
+                            entries.push(Entry {
+                                text: line,
+                                timestamp: timestamp.or(at),
+                                command: Some(CommandRun { name, output: text, markdown: false, error }),
+                                ..Entry::default()
+                            });
+                            last_was_output = true;
+                        }
+                    }
+                    continue;
+                }
+                Some(Local::Report(markdown)) => {
+                    // Claude Code's markdown of the report it just printed.
+                    if last_was_output {
+                        if let Some(run) = entries.last_mut().and_then(|e| e.command.as_mut()) {
+                            run.output = markdown;
+                            run.markdown = true;
+                        }
+                    }
+                    last_was_output = false;
+                    continue;
+                }
+                Some(Local::Unknown(name)) => {
+                    self.pending_commands.remove(path);
+                    if fresh(timestamp) {
+                        entries.push(Entry {
+                            text: format!("/{name}"),
+                            timestamp,
+                            command: Some(CommandRun { name, output: "Unknown command".into(), markdown: false, error: true }),
+                            ..Entry::default()
+                        });
+                    }
+                    last_was_output = false;
+                    continue;
+                }
+                None => {}
+            }
+            last_was_output = false;
+            if let Some(e) = prose_value(&v).filter(|e| fresh(e.timestamp)) {
                 entries.push(e);
             }
         }
         entries
     }
+}
+
+/// What a transcript line says about a local command.
+enum Local {
+    /// `<command-name>/x</command-name>…<command-args>…`: typed, not done yet.
+    Started { line: String, name: String },
+    /// `<local-command-stdout>…` (or `-stderr`): what it printed.
+    Output { text: String, error: bool },
+    /// A markdown rendering of the report just printed (an `isMeta` user line
+    /// starting with a heading).
+    Report(String),
+    /// `Unknown command: /x`.
+    Unknown(String),
+}
+
+/// Claude Code writes these as `system` lines (`subtype: local_command` /
+/// `informational`), and wrote them as `user` lines before that.
+fn local_command(v: &Value) -> Option<Local> {
+    let ty = v.get("type").and_then(Value::as_str)?;
+    if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let content = match ty {
+        "system" => v.get("content").and_then(Value::as_str)?,
+        "user" => v.pointer("/message/content").and_then(Value::as_str)?,
+        _ => return None,
+    };
+    let meta = v.get("isMeta").and_then(Value::as_bool) == Some(true);
+    if ty == "system" && v.get("subtype").and_then(Value::as_str) == Some("informational") {
+        let name = content.strip_prefix("Unknown command: /")?;
+        let name = name.split_whitespace().next()?;
+        return Some(Local::Unknown(name.to_string()));
+    }
+    if let Some(name) = between(content, "<command-name>", "</command-name>") {
+        let name = name.trim().trim_start_matches('/').to_string();
+        if name.is_empty() || meta {
+            return None;
+        }
+        let args = between(content, "<command-args>", "</command-args>").unwrap_or("").trim();
+        let line = if args.is_empty() { format!("/{name}") } else { format!("/{name} {args}") };
+        return Some(Local::Started { line, name });
+    }
+    for (tag, error) in [("local-command-stdout", false), ("local-command-stderr", true)] {
+        if let Some(text) = between(content, &format!("<{tag}>"), &format!("</{tag}>")) {
+            return Some(Local::Output { text: strip_ansi(text).trim().to_string(), error });
+        }
+    }
+    if ty == "user" && meta && content.starts_with("## ") {
+        return Some(Local::Report(content.trim().to_string()));
+    }
+    None
+}
+
+fn between<'a>(s: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let start = s.find(open)? + open.len();
+    let end = s[start..].find(close)? + start;
+    Some(&s[start..end])
+}
+
+/// Terminal text without its escape sequences (CSI colours, OSC titles).
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\u{7}' || (c == '\u{1b}' && chars.peek() == Some(&'\\')) {
+                        if c == '\u{1b}' {
+                            chars.next();
+                        }
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn cursor_message_prose(message: &CursorMessage) -> Option<Entry> {
@@ -179,7 +342,7 @@ fn cursor_message_prose(message: &CursorMessage) -> Option<Entry> {
     };
     let text = strip_sentinel(&text);
     let text = text.trim();
-    (!text.is_empty()).then(|| Entry { thinking: false, text: text.to_string(), timestamp: None })
+    (!text.is_empty()).then(|| Entry { text: text.to_string(), ..Entry::default() })
 }
 
 /// The prose in one transcript line, if any.
@@ -241,10 +404,10 @@ fn prose_value(v: &Value) -> Option<Entry> {
     // The same cleaning the Stop hook's final message gets, so the two compare equal.
     let text = strip_sentinel(&said.join("\n"));
     if !text.is_empty() {
-        return Some(Entry { thinking: false, text, timestamp });
+        return Some(Entry { text, timestamp, ..Entry::default() });
     }
     let thinking = thought.join("\n").trim().to_string();
-    (!thinking.is_empty()).then_some(Entry { thinking: true, text: thinking, timestamp })
+    (!thinking.is_empty()).then_some(Entry { thinking: true, text: thinking, timestamp, ..Entry::default() })
 }
 
 /// `2026-11-03T09:30:00.123Z` or with a `±hh:mm` offset → Unix seconds.
@@ -420,6 +583,64 @@ mod tests {
         f.write(&(json!({"type": "user", "message": {"role": "user", "content": "go on"}}).to_string() + "\n"));
         tail.new_prose(&f.path(), 0.0);
         assert_eq!(tail.model(&f.path()).map(|m| m.name.as_str()), Some("claude-opus-5-5"));
+    }
+
+    fn sys(subtype: &str, content: &str, at: i64) -> String {
+        json!({"type": "system", "subtype": subtype, "content": content, "isMeta": false, "timestamp": stamp(at)}).to_string()
+    }
+
+    fn cmd(name: &str, args: &str) -> String {
+        format!("<command-name>/{name}</command-name>\n            <command-message>{name}</command-message>\n            <command-args>{args}</command-args>")
+    }
+
+    fn runs(e: &[Entry]) -> Vec<(String, String, bool, bool)> {
+        e.iter().filter_map(|e| e.command.as_ref().map(|c| (e.text.clone(), c.output.clone(), c.markdown, c.error))).collect()
+    }
+
+    #[test]
+    fn a_local_command_is_read_with_its_output_and_markdown_report() {
+        let mut f = File::new();
+        let caveat = json!({"type": "user", "isMeta": true, "timestamp": stamp(999), "message": {"role": "user",
+            "content": "<local-command-caveat>The command below was run directly in Claude Code</local-command-caveat>"}}).to_string();
+        let report = json!({"type": "user", "isMeta": true, "timestamp": stamp(1001), "message": {"role": "user",
+            "content": "## Context Usage\n\n**Tokens:** 27.8k / 1m (3%)"}}).to_string();
+        f.write(&[caveat, sys("local_command", &cmd("context", ""), 1000),
+            sys("local_command", "<local-command-stdout> \u{1b}[1mContext Usage\u{1b}[22m\n\u{1b}[38;2;1;2;3m⛀ ⛁\u{1b}[39m</local-command-stdout>", 1001),
+            report, say("after", 1002)].join("\n"));
+        f.write("\n");
+        let got = Tail::default().new_prose(&f.path(), 0.0);
+        assert_eq!(runs(&got), [("/context".to_string(), "## Context Usage\n\n**Tokens:** 27.8k / 1m (3%)".to_string(), true, false)]);
+        assert_eq!(texts(&got).last(), Some(&"after"), "prose still read, the caveat and report are not prose");
+    }
+
+    #[test]
+    fn a_pickers_output_waits_for_it_to_close_and_old_style_user_lines_count() {
+        let mut f = File::new();
+        let user = |content: &str, at: i64| json!({"type": "user", "timestamp": stamp(at), "message": {"role": "user", "content": content}}).to_string();
+        f.write(&(user(&cmd("model", ""), 1000) + "\n"));
+        let mut tail = Tail::default();
+        assert!(runs(&tail.new_prose(&f.path(), 0.0)).is_empty(), "still open");
+        f.write(&(user("<local-command-stdout>Set model to `Opus 5.5`</local-command-stdout>", 1010) + "\n"));
+        assert_eq!(runs(&tail.new_prose(&f.path(), 0.0)), [("/model".to_string(), "Set model to `Opus 5.5`".to_string(), false, false)]);
+    }
+
+    #[test]
+    fn a_prompt_command_is_no_run_and_an_unknown_one_says_so() {
+        let mut f = File::new();
+        let lines = [
+            sys("local_command", &cmd("ship", "main"), 1000),
+            say("Shipping main.", 1001),
+            sys("informational", "Unknown command: /todos", 1002),
+            sys("local_command", &cmd("clear", ""), 1003),
+            sys("local_command", "<local-command-stdout></local-command-stdout>", 1003),
+        ];
+        f.write(&(lines.join("\n") + "\n"));
+        let got = Tail::default().new_prose(&f.path(), 0.0);
+        assert_eq!(runs(&got), [
+            ("/todos".to_string(), "Unknown command".to_string(), false, true),
+            ("/clear".to_string(), String::new(), false, false),
+        ]);
+        assert_eq!(texts(&got)[0], "Shipping main.");
     }
 
     #[test]

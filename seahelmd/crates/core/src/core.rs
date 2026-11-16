@@ -52,6 +52,10 @@ pub struct Core {
     /// Where each transcript was read to; its own lock, so reading one never
     /// holds `state`.
     transcripts: Mutex<seahelm_core_messages::Tail>,
+    /// The transcript each pane's hooks last named, to read again after a
+    /// slash command typed into it: a command the agent runs itself fires no
+    /// hook, so nothing else would read its output before the next turn.
+    transcript_paths: Mutex<HashMap<String, String>>,
     /// Stable pane handles (`#n`) for the command language.
     pub(crate) handles: Arc<Mutex<seahelm_core_command::Handles>>,
     /// Per worktree: its repo root and branch, and when they were read.
@@ -284,6 +288,7 @@ impl Core {
             first_mate: std::sync::OnceLock::new(),
             observer: std::sync::OnceLock::new(),
             transcripts: Mutex::new(seahelm_core_messages::Tail::default()),
+            transcript_paths: Mutex::new(HashMap::new()),
 
             handles,
             git_cache: Mutex::new(HashMap::new()),
@@ -493,6 +498,7 @@ impl Core {
                 let prose = wanted.map(|request| {
                     let entries = match request.source {
                         TranscriptSource::File(path) => {
+                            self.transcript_paths.lock().unwrap_or_else(|e| e.into_inner()).insert(request.pane.clone(), path.clone());
                             let mut tail = self.transcripts.lock().unwrap_or_else(|e| e.into_inner());
                             let entries = tail.new_prose(&path, request.since);
                             transcript_model = tail.model(&path).cloned();
@@ -508,13 +514,7 @@ impl Core {
                 let before_messages = st.messages.seq();
                 if let Some((pane, alias, entries)) = prose {
                     if st.registry.pane(&pane).is_some() {
-                        let rows = entries
-                            .into_iter()
-                            .map(|e| {
-                                let kind = if e.thinking { seahelm_core_messages::Kind::Thinking } else { seahelm_core_messages::Kind::Assistant };
-                                seahelm_core_messages::Message::new(&alias, &pane, kind, e.timestamp.unwrap_or(now)).with_text(e.text)
-                            })
-                            .collect();
+                        let rows = entries.into_iter().map(|e| transcript_row(&alias, &pane, e, now)).collect();
                         st.messages.append(rows);
                     }
                 }
@@ -745,7 +745,14 @@ impl Core {
             "pane.wait_for_output" | "wait.output" => crate::actions::wait_output(&self, &p),
             "usage.summary" => Ok(crate::usage::summary(now)),
             "cards.list" => Ok(json!({"cards": self.lock().cards.to_json()})),
-            "pane.read" | "pane.run" | "pane.send_text" | "pane.send_keys" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
+            "pane.send_text" | "pane.send_keys" => {
+                let sent = self.act(method, &p);
+                if sent.is_ok() {
+                    self.follow_slash_command(method, &p);
+                }
+                sent
+            }
+            "pane.read" | "pane.run" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" => first_mate::task_sources::rpc(method, &p),
@@ -1244,6 +1251,44 @@ impl Core {
             "pane.close" => crate::actions::pane_close(self, p),
             other => Err(RpcError::not_found(other)),
         }
+    }
+
+    /// Text sent into a pane that starts with a slash may be a command the
+    /// agent runs itself (`/context`), which fires no hook: read the pane's
+    /// transcript a few times over the next seconds, so its output reaches
+    /// the timeline now rather than with the next turn. Keys too: they may
+    /// close a picker such a command opened (`/model`), which only then
+    /// writes what it did.
+    fn follow_slash_command(self: &Arc<Self>, method: &str, p: &Value) {
+        if method == "pane.send_text" && !str_param(p, "text").is_some_and(|t| t.trim_start().starts_with('/')) {
+            return;
+        }
+        let Some(key) = str_param(p, "pane_id").or_else(|| str_param(p, "pane_session_key")).and_then(|h| self.resolve_pane(&h)) else { return };
+        let Some(path) = self.transcript_paths.lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned() else { return };
+        let core = Arc::downgrade(self);
+        std::thread::spawn(move || {
+            for wait in [1.5, 3.0, 8.0] {
+                std::thread::sleep(Duration::from_secs_f64(wait));
+                let Some(core) = core.upgrade() else { return };
+                core.read_transcript_into(&key, &path);
+            }
+        });
+    }
+
+    /// Whatever `path` gained since its last read, onto `pane`'s timeline.
+    fn read_transcript_into(&self, pane: &str, path: &str) {
+        let since = self.lock().messages.last_ts(pane).unwrap_or(now() - 300.0);
+        let entries = self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).new_prose(path, since);
+        if entries.is_empty() {
+            return;
+        }
+        let at = now();
+        let mut st = self.lock();
+        let Some(alias) = st.registry.pane(pane).map(|p| p.alias.clone().unwrap_or_else(|| pane.to_string())) else { return };
+        let rows = entries.into_iter().map(|e| transcript_row(&alias, pane, e, at)).collect();
+        st.messages.append(rows);
+        drop(st);
+        self.changed.notify_all();
     }
 
     pub fn resolve_pane(&self, hint: &str) -> Option<String> {
@@ -1836,6 +1881,29 @@ fn presence_of(method: &str, p: &Value) -> Option<first_mate::presence::Channel>
 
 /// Prompts just appended (after `after`, recent, not First Mate's, not
 /// seahelm's own `[seahelm …]` lines), as (pane, text).
+/// One transcript entry as a timeline row: prose, thinking, or a command the
+/// agent ran itself with what it printed.
+fn transcript_row(alias: &str, pane: &str, e: seahelm_core_messages::transcript::Entry, now: Timestamp) -> seahelm_core_messages::Message {
+    use seahelm_core_messages::{Kind, Message};
+    let at = e.timestamp.unwrap_or(now);
+    let Some(run) = e.command else {
+        let kind = if e.thinking { Kind::Thinking } else { Kind::Assistant };
+        return Message::new(alias, pane, kind, at).with_text(e.text);
+    };
+    let mut row = Message::new(alias, pane, Kind::Command, at).with_text(e.text);
+    row.tool = Some(run.name);
+    if !run.output.is_empty() {
+        row.detail = Some(run.output);
+    }
+    if run.markdown {
+        row.format = Some("markdown".into());
+    }
+    if run.error {
+        row.is_error = Some(true);
+    }
+    row
+}
+
 fn user_prompts(st: &State, after: u64, now: Timestamp) -> Vec<(String, String)> {
     let Some(r) = st.messages.replay(after) else { return Vec::new() };
     r.messages
@@ -3150,7 +3218,7 @@ mod card_timeline_tests {
         state.register(registration());
         for (i, text) in ["Inspect the file.", "Now fix the problem."].iter().enumerate() {
             let payload = json!({"source":"cursor", "session_id":"chat", "event":"tool_use_start", "cwd":"/workspace/saas-mono", "seahelm_pane_id":"seahelm-pane-1", "data":{"tool_name":"Shell", "tool_input":{"command":format!("command-{i}")}}});
-            state.cursor_hook("seahelm-pane-1", "client-pane-1", vec![seahelm_core_messages::transcript::Entry { thinking:false, text:text.to_string(), timestamp:None }], payload, 100.0 + i as f64 * 10.0);
+            state.cursor_hook("seahelm-pane-1", "client-pane-1", vec![seahelm_core_messages::transcript::Entry { text:text.to_string(), ..Default::default() }], payload, 100.0 + i as f64 * 10.0);
         }
         let rows = state.messages.snapshot(Some("seahelm-pane-1"));
         let relevant: Vec<_> = rows.iter().filter(|row| matches!(row.kind, seahelm_core_messages::Kind::Assistant | seahelm_core_messages::Kind::Tool)).collect();

@@ -44,6 +44,7 @@ check(apply('/comp keep the plan', { name: 'compact' }) === '/compact keep the p
 
 check(kindNote('interactive') === 'opens in the terminal', 'a picker says where it opens');
 check(kindNote('prompt') === '', 'a prompt is just a turn');
+check(kindNote('info', 'claudeCode') === '' && kindNote('info', 'codex') === 'output in the terminal', "a report reaches the timeline from Claude Code's transcript only");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
