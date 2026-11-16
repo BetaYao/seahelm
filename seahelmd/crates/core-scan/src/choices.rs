@@ -23,6 +23,11 @@ use crate::manifest::trim_ws;
 /// How far up from the bottom a dialog is looked for.
 pub const DEFAULT_BOTTOM_LINES: usize = 25;
 
+/// Lines of text a picker may draw between its list and its footer and still
+/// be live: Claude Code's `/model` puts a "↓ 4 more" row, its effort control
+/// and a tip there.
+const MENU_FOOTER_GAP: usize = 6;
+
 /// One numbered choice.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChoiceOption {
@@ -55,10 +60,14 @@ pub fn parse(screen: &str, bottom_lines: usize) -> Vec<ChoiceOption> {
     let mut current: Vec<ChoiceOption> = Vec::new();
     let mut last_valid: Vec<ChoiceOption> = Vec::new();
     let mut continuation_column = usize::MAX;
+    // Lines of real content since the last finished list. Any makes that list
+    // stale, unless a picker's footer follows them closely.
+    let mut since_list = 0usize;
 
-    fn finish(current: &mut Vec<ChoiceOption>, last_valid: &mut Vec<ChoiceOption>, column: &mut usize) {
+    fn finish(current: &mut Vec<ChoiceOption>, last_valid: &mut Vec<ChoiceOption>, column: &mut usize, since: &mut usize) {
         if current.len() >= 2 && current.iter().any(|o| o.selected) {
             *last_valid = std::mem::take(current);
+            *since = 0;
         }
         current.clear();
         *column = usize::MAX;
@@ -68,10 +77,10 @@ pub fn parse(screen: &str, bottom_lines: usize) -> Vec<ChoiceOption> {
         if let Some(caps) = line_pattern().captures(s) {
             if let Ok(idx) = caps[2].parse::<usize>() {
                 if idx == 1 {
-                    finish(&mut current, &mut last_valid, &mut continuation_column);
+                    finish(&mut current, &mut last_valid, &mut continuation_column, &mut since_list);
                 }
                 if idx != current.len() + 1 {
-                    finish(&mut current, &mut last_valid, &mut continuation_column);
+                    finish(&mut current, &mut last_valid, &mut continuation_column, &mut since_list);
                     continue;
                 }
                 let label = caps.get(3).expect("group 3");
@@ -84,9 +93,15 @@ pub fn parse(screen: &str, bottom_lines: usize) -> Vec<ChoiceOption> {
         let trimmed = trim_ws(s);
         if current.is_empty() {
             // Only harmless chrome may trail a completed run. Any real content
-            // means an older list in the viewport is stale.
-            if !trimmed.is_empty() && !is_trailing_chrome(trimmed) {
-                last_valid.clear();
+            // means an older list in the viewport is stale — unless it is a
+            // picker's own text, which its footer closes.
+            if trimmed.is_empty() {
+                continue;
+            }
+            if is_menu_footer(trimmed) && since_list <= MENU_FOOTER_GAP {
+                since_list = 0;
+            } else if !is_trailing_chrome(trimmed) {
+                since_list += 1;
             }
             continue;
         }
@@ -98,10 +113,13 @@ pub fn parse(screen: &str, bottom_lines: usize) -> Vec<ChoiceOption> {
         } else {
             // A footer (Codex's "Press enter to confirm") ends the list but
             // must not discard the options above it.
-            finish(&mut current, &mut last_valid, &mut continuation_column);
+            finish(&mut current, &mut last_valid, &mut continuation_column, &mut since_list);
         }
     }
-    finish(&mut current, &mut last_valid, &mut continuation_column);
+    finish(&mut current, &mut last_valid, &mut continuation_column, &mut since_list);
+    if since_list > 0 {
+        last_valid.clear();
+    }
     if last_valid.is_empty() {
         return unnumbered(screen, bottom_lines);
     }
@@ -137,6 +155,43 @@ fn unnumbered(screen: &str, bottom_lines: usize) -> Vec<ChoiceOption> {
         return Vec::new();
     }
     rows.into_iter().enumerate().map(|(i, (label, selected, _))| ChoiceOption { index: i + 1, label, selected }).collect()
+}
+
+/// The footer a selection menu draws under itself: Claude Code's pickers
+/// ("Enter to set as default · … · Esc to cancel"), its permission prompt
+/// ("Esc to cancel · Tab to amend").
+fn is_menu_footer(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.starts_with("enter to ") || lower.contains("esc to cancel") || lower.contains("esc to exit")
+}
+
+/// The title of a picker a slash command opened, for its card: the first line
+/// under the rule Claude Code draws over it ("Select model"), when the screen
+/// ends in a picker's "Enter to …" footer. None for a permission prompt, whose
+/// card keeps saying what it is waiting for.
+pub fn menu_title(screen: &str, bottom_lines: usize) -> Option<String> {
+    let lines: Vec<&str> = bottom(screen, bottom_lines).collect();
+    let last = lines.iter().rposition(|l| !trim_ws(l).is_empty())?;
+    if !trim_ws(lines[last]).to_lowercase().starts_with("enter to ") {
+        return None;
+    }
+    let rule = lines[..last].iter().rposition(|l| is_rule(l))?;
+    let title = lines[rule + 1..last].iter().map(|l| trim_ws(l)).find(|t| !t.is_empty())?;
+    if line_pattern().is_match(title) || title.starts_with(['❯', '›']) {
+        return None;
+    }
+    Some(title.to_string())
+}
+
+/// A picker's option as a card shows it: the columns it is drawn in
+/// ("Opus 5.5 ✔             For complex work") joined by " · ".
+pub fn tidy_menu_label(label: &str) -> String {
+    label.split("  ").map(str::trim).filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ")
+}
+
+fn is_rule(line: &str) -> bool {
+    let t = trim_ws(line);
+    t.chars().count() >= 10 && t.chars().all(|c| matches!(c, '▔' | '▁' | '─' | '━' | '═'))
 }
 
 /// Whether the screen is Claude's AskUserQuestion dialog (a question, or its

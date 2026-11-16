@@ -244,9 +244,16 @@ impl PaneScanner {
             // Where the cursor was when the dialog was read: an unnumbered
             // menu shows no number to find it by when the card is answered.
             let cursor = options.iter().position(|o| o.selected).unwrap_or(0);
+            // A picker a slash command opened (`/model`) says what it is; a
+            // permission prompt is what the agent is waiting for.
+            let menu = choices::menu_title(content, choices::DEFAULT_BOTTOM_LINES);
+            let options = options
+                .into_iter()
+                .map(|o| if menu.is_some() { choices::tidy_menu_label(&o.label) } else { o.label })
+                .collect();
             EventKind::Question {
-                prompt: format!("{} requires approval", agent_type.display_name()),
-                options: options.into_iter().map(|o| o.label).collect(),
+                prompt: menu.unwrap_or_else(|| format!("{} requires approval", agent_type.display_name())),
+                options,
                 followups: Vec::new(),
                 flags: QuestionFlags { cursor, ..QuestionFlags::default() },
             }
