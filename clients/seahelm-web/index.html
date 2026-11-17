@@ -1004,14 +1004,16 @@ const S = {
   // VT terminal: `open` is the pane key currently streaming
   // One entry per mirrored pane, keyed by paneSessionKey; `focus` is the pane
   // keystrokes reach, `worktree` is the layout currently mounted.
-  vt:{ panes:new Map(), focus:null, worktree:null, tree:null, mode:'mirror',
+  // `surface` is what the mounted worktree shows, 'text' or 'vt'.
+  vt:{ panes:new Map(), focus:null, worktree:null, tree:null, mode:'mirror', surface:null,
        scrollback:VT_SCROLLBACK_DEEP },
   // MessageStream timeline (text mode). Keyed by pane_session_key.
   messages:{},
   // Paging older timeline pages in, per pane: {loading, done}.
   history:{},
-  // 'text' | 'vt' — phone/narrow defaults to text so VT is opt-in.
-  surfaceMode: null,
+  // Pane key → 'text' | 'vt', loaded by surfaceModes(); a pane not in it
+  // takes defaultSurfaceMode() (phone/narrow: text, so VT is opt-in).
+  surfaceModes: null,
   // paneSessionKey → {cols, rows}, learned from vt.snapshot and remembered so
   // the next mount can decide its layout without attaching first. Persisted
   // because that decision happens *before* anything attaches: on a cold visit
@@ -2357,19 +2359,43 @@ function interruptPane(){
   });
 }
 
-const SURFACE_KEY = 'seahelm_surface_mode';
+// Timeline or Terminal is chosen per pane: a shell pane read as a terminal
+// and an agent pane read as a timeline sit side by side in one worktree, and
+// switching one leaves the others as they were. A pane never chosen for opens
+// as the screen suits (the timeline on a phone). Remembered by pane key, the
+// most recent choices kept.
+const SURFACE_KEY = 'seahelm_surface_modes';
+const SURFACE_KEEP = 200;
+try { localStorage.removeItem('seahelm_surface_mode'); } catch (e) {}   // the old page-wide choice
 function defaultSurfaceMode(){
   return (window.innerWidth || 900) <= 760 ? 'text' : 'vt';
 }
+function surfaceModes(){
+  if (!S.surfaceModes) {
+    let stored = {};
+    try { stored = JSON.parse(localStorage.getItem(SURFACE_KEY) || '{}') || {}; } catch (e) {}
+    S.surfaceModes = new Map(Object.entries(stored).filter(([, v]) => v === 'text' || v === 'vt'));
+  }
+  return S.surfaceModes;
+}
+/** The surface a pane shows. First Mate is a conversation on the web, never
+ *  its terminal: the switch is hidden on it. */
+function surfaceModeOf(key){
+  if (key === FM_KEY) return 'text';
+  const v = key && surfaceModes().get(key);
+  return v === 'text' || v === 'vt' ? v : defaultSurfaceMode();
+}
+function rememberSurfaceMode(key, mode){
+  if (!key || key === FM_KEY) return;
+  const modes = surfaceModes();
+  if (modes.get(key) === mode) return;
+  modes.delete(key);                     // re-inserted last: the newest is kept longest
+  modes.set(key, mode);
+  while (modes.size > SURFACE_KEEP) modes.delete(modes.keys().next().value);
+  try { localStorage.setItem(SURFACE_KEY, JSON.stringify(Object.fromEntries(modes))); } catch (e) {}
+}
 function loadSurfaceMode(){
-  // First Mate is a conversation on the web, never its terminal: the mode
-  // switch is hidden on it and the stored choice is kept for other panes.
-  if (S.selPane === FM_KEY) return 'text';
-  if (S.surfaceMode === 'text' || S.surfaceMode === 'vt') return S.surfaceMode;
-  const v = localStorage.getItem(SURFACE_KEY);
-  if (v === 'text' || v === 'vt') { S.surfaceMode = v; return v; }
-  S.surfaceMode = defaultSurfaceMode();
-  return S.surfaceMode;
+  return surfaceModeOf(S.selPane);
 }
 function applySurfaceMode(){
   const text = loadSurfaceMode() === 'text';
@@ -2411,13 +2437,16 @@ function setSurfaceMode(mode){
   if (S.selPane === FM_KEY) return;
   const next = mode === 'vt' ? 'vt' : 'text';
   const prev = loadSurfaceMode();
-  S.surfaceMode = next;
-  localStorage.setItem(SURFACE_KEY, S.surfaceMode);
+  rememberSurfaceMode(S.selPane, next);
   renderSurfaceBadge();
   applySurfaceMode();
   renderSuggestions();      // the card sits above whichever bar this mode has
   if (next === prev) return;
-  if (next === 'text') {
+  showSurface(next);
+}
+/** Put the selected pane's surface on screen in place of the other one. */
+function showSurface(mode){
+  if (mode === 'text') {
     if (S.vt.panes.size) unmountPanes();
     if (S.selPane) renderMessageTimeline(S.selPane);
   } else if (S.sel) {
@@ -4627,6 +4656,9 @@ function renderDetail(){
   wrap.classList.remove('empty');
   // Already showing this worktree — a tab only changes which pane.
   if (S.vt.worktree === S.sel){
+    // Unless that pane is read the other way: each pane keeps its own.
+    const want = loadSurfaceMode();
+    if (want !== S.vt.surface){ showSurface(want); return; }
     // Text mode attaches nothing, so `S.vt.panes` is empty and focusPane has
     // nothing to move: switching panes here means painting the new one.
     if (loadSurfaceMode() === 'text'){
@@ -4779,11 +4811,16 @@ function mountPanes(tree, focusKey, path){
     // The composer sends to `S.selPane`; when the chosen pane is not in this
     // layout, the tabs have to follow or they name a pane the text will not reach.
     if (key && key !== S.selPane) { setSelectedPane(key); renderTree(); }
+  }
+  if (loadSurfaceMode() === 'text') {
+    const key = S.selPane;
+    S.vt.surface = 'text';
     S.vt.focus = key;
     applySurfaceMode();
     if (key) renderMessageTimeline(key);
     return;
   }
+  S.vt.surface = 'vt';
 
   applySurfaceMode();
   const preferMirror = loadVtMode() === 'mirror';
@@ -4866,6 +4903,7 @@ function unmountPanes(){
   S.vt.focus = null;
   S.vt.worktree = null;
   S.vt.tree = null;
+  S.vt.surface = null;
   renderTermKeys();
 }
 
@@ -5008,6 +5046,8 @@ function focusPane(key){
   for (const [k, entry] of S.vt.panes) entry.el.classList.toggle('on', k === key);
   // Clicking into a mirrored pane is choosing it: the tabs follow.
   if (key && key !== S.selPane && S.panes.has(key)) {
+    // Its terminal is what was picked, whatever that pane showed before.
+    if (S.vt.panes.has(key)) rememberSurfaceMode(key, 'vt');
     setSelectedPane(key);
     if (S.sel) lastPaneByPath.set(S.sel, key);
     renderDetailChrome();
