@@ -374,3 +374,42 @@ fn reads_codex_session_key() {
     assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("Select Reasoning Level for GPT-6-Sol"));
     assert_eq!(choices::session_only_key(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("s"));
 }
+
+/// Codex 0.167's command approval: no rule, the question first.
+#[test]
+fn reads_codex_command_approval() {
+    let screen = lines(&[
+        "• Earlier reply from Codex.",
+        "",
+        "",
+        "",
+        "",
+        "  Would you like to run the following command?",
+        "",
+        "  Environment: local",
+        "",
+        "  Reason: Do you want to allow creating /tmp/x?",
+        "",
+        "  $ touch /tmp/x",
+        "",
+        "",
+        "› 1. Yes, proceed (y)",
+        "  2. Yes, and don't ask again for commands that start with `touch /tmp/x` (p)",
+        "  3. No, and tell Codex what to do differently (esc)",
+        "",
+        "  Press enter to confirm or esc to cancel",
+    ]);
+    assert_eq!(parse(&screen).len(), 3);
+    assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES), None);
+    let d = choices::dialog(&screen).expect("dialog");
+    assert_eq!(d.title, "");
+    assert_eq!(d.question, "Would you like to run the following command?");
+    assert_eq!(d.body, "Environment: local\nReason: Do you want to allow creating /tmp/x?\n$ touch /tmp/x");
+}
+
+#[test]
+fn an_unruled_dialog_stops_at_the_conversation() {
+    let screen = lines(&["› my prompt", "  Allow this?", "  $ ls", "› 1. Yes", "  2. No"]);
+    let d = choices::dialog(&screen).expect("dialog");
+    assert_eq!((d.title.as_str(), d.question.as_str(), d.body.as_str()), ("", "Allow this?", "$ ls"));
+}

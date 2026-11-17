@@ -171,8 +171,10 @@ mod pane_scanner {
         let out = p.poll(&snap(1, screen), None);
         assert_eq!(observed(&out), Waiting);
         match out.question {
-            Some(EventKind::Question { prompt, options, .. }) => {
-                assert_eq!(prompt, "Claude Code requires approval");
+            Some(EventKind::Question { prompt, options, flags, .. }) => {
+                // The dialog says what it asks; read off the screen.
+                assert_eq!(prompt, "Do you want to proceed?");
+                assert_eq!(flags.header, "Bash command");
                 assert_eq!(options, ["Yes", "Yes, and don't ask again", "No"]);
             }
             other => panic!("expected a question, got {other:?}"),
