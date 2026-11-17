@@ -262,12 +262,12 @@ const DIALOG_BODY_CHARS: usize = 1500;
 pub fn dialog(screen: &str) -> Option<Dialog> {
     let lines: Vec<&str> = screen.split('\n').collect();
     let first = lines.iter().rposition(|l| line_pattern().captures(l).is_some_and(|c| &c[2] == "1"))?;
-    let top = lines[..first].iter().rposition(|l| is_rule(l))?;
-    if first - top > 80 {
-        return None;
-    }
+    let start = match lines[..first].iter().rposition(|l| is_rule(l)).filter(|&r| first - r <= 80) {
+        Some(rule) => rule + 1,
+        None => unruled_start(&lines, first)?,
+    };
     let mut kept: Vec<String> = Vec::new();
-    for l in &lines[top + 1..first] {
+    for l in &lines[start..first] {
         let t = trim_ws(l).trim_matches(|c| c == '│' || c == '┃').trim();
         // Dotted rules inside the box, blank lines, the countdown to an
         // automatic refusal (it changes every second), and Claude Code's own
@@ -280,8 +280,13 @@ pub fn dialog(screen: &str) -> Option<Dialog> {
     if kept.is_empty() {
         return None;
     }
-    let title = kept.remove(0);
-    let question = if kept.last().is_some_and(|l| l.ends_with('?')) { kept.pop().unwrap_or_default() } else { String::new() };
+    let mut title = kept.remove(0);
+    let mut question = if kept.last().is_some_and(|l| l.ends_with('?')) { kept.pop().unwrap_or_default() } else { String::new() };
+    // Codex asks first ("Would you like to run the following command?") and
+    // shows what after: that opening line is the question.
+    if question.is_empty() && title.ends_with('?') {
+        question = std::mem::take(&mut title);
+    }
     let mut cut = kept.len() > DIALOG_BODY_LINES;
     kept.truncate(DIALOG_BODY_LINES);
     let mut body = kept.join("\n");
@@ -293,6 +298,31 @@ pub fn dialog(screen: &str) -> Option<Dialog> {
         body.push('…');
     }
     Some(Dialog { title, question, body })
+}
+
+/// Where a dialog drawn without a rule starts (Codex's approvals): the
+/// first line of the text over the list, which ends going up at a gap of 3
+/// blank rows, at the conversation (`›` the user's prompt, `•` Codex's own
+/// lines), or 30 rows up. None when there is no text over the list.
+fn unruled_start(lines: &[&str], first: usize) -> Option<usize> {
+    let mut start = None;
+    let mut blank = 0;
+    for at in (first.saturating_sub(30)..first).rev() {
+        let t = trim_ws(lines[at]);
+        if t.is_empty() {
+            blank += 1;
+            if blank >= 3 {
+                break;
+            }
+            continue;
+        }
+        if t.starts_with(['›', '•', '╰', '└']) {
+            break;
+        }
+        blank = 0;
+        start = Some(at);
+    }
+    start
 }
 
 fn is_dotted_rule(t: &str) -> bool {
