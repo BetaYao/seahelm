@@ -196,3 +196,73 @@ fn unnumbered_menus_need_the_footer_and_one_cursor() {
     let o = parse("some text\n ❯ a\n   b\n Enter to confirm · Esc to cancel");
     assert_eq!(o.len(), 2);
 }
+
+/// Claude Code 2.1's `/model`: its effort row and a tip sit between the list
+/// and the footer, and must not make the list stale.
+const MODEL_PICKER: &[&str] = &[
+    " ▐▛███▛█   Claude Code v2.1.326",
+    "",
+    "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔",
+    "   Select model",
+    "   Switch between Claude models. Your pick becomes the default for new sessions. For other or older models, use ",
+    "   --model.",
+    "",
+    "     1.  Default (recommended)  Opus 5.5 · Best for everyday, complex tasks",
+    "   ❯ 2.  Opus 5.5 ✔             For complex work and everyday tasks",
+    "     3.  Fable 5.2              For your toughest challenges",
+    "     ▸   More models             ",
+    "",
+    "   ◐ Medium effort (default) ←/→ to adjust",
+    "",
+    "   Use /fast to turn on fast mode (Opus 5.5).",
+    "",
+    "   Enter to set as default · s to use this session only · Esc to cancel",
+];
+
+#[test]
+fn parses_a_slash_command_picker_with_text_under_its_list() {
+    let screen = lines(MODEL_PICKER);
+    let opts = parse(&screen);
+    assert_eq!(indices(&opts), [1, 2, 3]);
+    assert!(opts[1].selected);
+    assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("Select model"));
+    assert_eq!(choices::tidy_menu_label(&opts[1].label), "Opus 5.5 ✔ · For complex work and everyday tasks");
+    assert_eq!(choices::tidy_menu_label(&opts[0].label), "Default (recommended) · Opus 5.5 · Best for everyday, complex tasks");
+    assert_eq!(choices::session_only_key(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("s"));
+}
+
+#[test]
+fn a_picker_list_is_stale_once_its_footer_is_gone() {
+    // Closed: the list is in the scrollback, the agent's reply under it.
+    let mut l: Vec<&str> = MODEL_PICKER[..MODEL_PICKER.len() - 2].to_vec();
+    l.extend(["", "⎿  Set model to Fable 5.2", "", "> ", "  ? for shortcuts"]);
+    let screen = lines(&l);
+    assert!(parse(&screen).is_empty());
+    assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES), None);
+}
+
+#[test]
+fn a_footer_far_below_an_old_list_does_not_revive_it() {
+    let mut l = vec!["❯ 1. Yes", "  2. No"];
+    let filler = ["output a", "output b", "output c", "output d", "output e", "output f", "output g", "output h"];
+    l.extend(filler);
+    l.push("Esc to cancel");
+    assert!(parse(&lines(&l)).is_empty());
+}
+
+#[test]
+fn a_permission_prompt_has_no_menu_title() {
+    let screen = lines(&[
+        "────────────────────────────────",
+        " Bash command",
+        "   ls",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. No",
+        "",
+        " Esc to cancel · Tab to amend",
+    ]);
+    assert_eq!(parse(&screen).len(), 2);
+    assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES), None);
+    assert_eq!(choices::session_only_key(&screen, DEFAULT_BOTTOM_LINES), None);
+}

@@ -2624,6 +2624,12 @@ fn press(pane: &str, inputs: &[Input], agent: bool) -> Result<()> {
                 }
                 b"\r".to_vec()
             }
+            Input::Key(k) => {
+                if i > 0 {
+                    std::thread::sleep(SUBMIT_DELAY);
+                }
+                k.as_bytes().to_vec()
+            }
         };
         seahelmd::client::request(pane, &Msg::Send(bytes))?;
     }
