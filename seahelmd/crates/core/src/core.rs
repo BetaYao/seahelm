@@ -695,6 +695,9 @@ impl Core {
                 if st.custom_titles.remove(&key).is_some() {
                     st.save_custom_titles();
                 }
+                // Nor its conversation: a pane a client stops listing keeps
+                // it (see `release`); this is the word that it is gone.
+                st.messages.clear(&key);
                 Ok(json!({"forgot": forgot}))
             }
             // The slash commands the pane's agent takes, for a composer to
@@ -1965,7 +1968,18 @@ impl State {
         self.hook(payload, at);
     }
 
+    /// The pane is gone for good (closed by request, its worktree deleted):
+    /// its timeline goes too, on disk.
     fn unregister(&mut self, pane: &str) {
+        self.release(pane);
+        self.messages.clear(pane);
+    }
+
+    /// Stop watching the pane but keep its timeline. A client no longer
+    /// listing a pane is not proof it is gone: an app that quits or restarts
+    /// lists none for a moment, and its sessions run on. The app says a pane
+    /// is gone for good with `agent.forget`, which drops the timeline.
+    fn release(&mut self, pane: &str) {
         if let Some(worker) = self.cursor_workers.remove(pane) {
             worker.cancelled.store(true, std::sync::atomic::Ordering::Release);
             let _guard = worker.checkpoint_gate.lock().unwrap_or_else(|e| e.into_inner());
@@ -1980,8 +1994,6 @@ impl State {
             self.publish_cards();
         }
         self.registry.unregister(pane);
-        // Gone for good: its timeline goes too.
-        self.messages.clear(pane);
         if pane == fm_policy::SESSION {
             self.pending_card_rows.clear();
         }
@@ -2027,7 +2039,7 @@ impl State {
         }
         let n = seen.len();
         for k in claim_synced(&mut self.synced, seen) {
-            self.unregister(&k);
+            self.release(&k);
         }
         n
     }
@@ -2761,6 +2773,30 @@ mod sync_tests {
         let mut synced = set(&["a"]);
         assert!(claim_synced(&mut synced, set(&["a", "fork"])).is_empty());
         assert_eq!(claim_synced(&mut synced, set(&["a"])), vec!["fork".to_string()]);
+    }
+
+    /// The app listing nothing for a moment (quitting, relaunching against a
+    /// running core) drops the panes but not their conversations; only
+    /// `agent.forget` says one is gone for good.
+    #[test]
+    fn a_pane_dropped_by_sync_keeps_its_timeline_until_forgotten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let pane = json!({"pane_session_key": "seahelm-a", "pane_id": "A", "worktree_path": "/wt"});
+        core.lock().sync(&[pane.clone()]);
+        core.lock().messages.append(vec![seahelm_core_messages::Message::new("A", "seahelm-a", seahelm_core_messages::Kind::User, 1.0).with_text("hello")]);
+        assert_eq!(core.lock().messages.snapshot(Some("seahelm-a")).len(), 1);
+
+        core.lock().sync(&[]);
+        assert!(core.lock().registry.pane("seahelm-a").is_none());
+        assert_eq!(core.lock().messages.snapshot(Some("seahelm-a")).len(), 1, "unlisted is not closed");
+
+        core.lock().sync(&[pane]);
+        assert_eq!(core.lock().messages.snapshot(Some("seahelm-a")).len(), 1);
+
+        let Reply::Value(forgot) = Dispatch::call(core.clone(), "agent.forget", json!({"pane_session_key": "seahelm-a"})) else { panic!() };
+        forgot.unwrap();
+        assert!(core.lock().messages.snapshot(Some("seahelm-a")).is_empty());
     }
 
     /// A pane the app never listed (another client's, or a hook from outside
