@@ -253,11 +253,20 @@ impl PaneScanner {
                 .into_iter()
                 .map(|o| if menu.is_some() { choices::tidy_menu_label(&o.label) } else { o.label })
                 .collect();
+            // Otherwise the dialog itself: its title, its question, and what it
+            // shows between them, so the card says what is being approved.
+            let dialog = if menu.is_none() { choices::dialog(content) } else { None };
+            let generic = format!("{} requires approval", agent_type.display_name());
+            let (header, prompt, context) = match (menu, dialog) {
+                (Some(title), _) => (String::new(), title, String::new()),
+                (None, Some(d)) => (d.title, if d.question.is_empty() { generic } else { d.question }, d.body),
+                (None, None) => (String::new(), generic, String::new()),
+            };
             EventKind::Question {
-                prompt: menu.unwrap_or_else(|| format!("{} requires approval", agent_type.display_name())),
+                prompt,
                 options,
                 followups: Vec::new(),
-                flags: QuestionFlags { cursor, confirm_key, ..QuestionFlags::default() },
+                flags: QuestionFlags { cursor, confirm_key, header, context, ..QuestionFlags::default() },
             }
         });
         ScanOutput { event: Some(event), agent_type, command_line, question }

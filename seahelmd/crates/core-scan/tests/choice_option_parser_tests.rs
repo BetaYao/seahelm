@@ -266,3 +266,54 @@ fn a_permission_prompt_has_no_menu_title() {
     assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES), None);
     assert_eq!(choices::session_only_key(&screen, DEFAULT_BOTTOM_LINES), None);
 }
+
+#[test]
+fn reads_a_permission_dialog_taller_than_the_choice_window() {
+    let mut l = vec![
+        "earlier output",
+        "────────────────────────────────────────",
+        " Bash command",
+        "   Live test the start panel",
+        " ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
+    ];
+    let cmd: Vec<String> = (0..30).map(|i| format!("   │ line {i}")).collect();
+    l.extend(cmd.iter().map(String::as_str));
+    l.extend([
+        " ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
+        " This shell -c script runs rm and could not be checked",
+        " ⚠ Claude Code will automatically block this request in 1:10, to avoid holding up an unattended session",
+        "",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. No",
+        "",
+        " Esc to cancel · Tab to amend",
+    ]);
+    let d = choices::dialog(&lines(&l)).expect("dialog");
+    assert_eq!(d.title, "Bash command");
+    assert_eq!(d.question, "Do you want to proceed?");
+    assert!(d.body.starts_with("Live test the start panel\nline 0\n"));
+    assert!(d.body.ends_with('…'));
+    assert!(!d.body.contains("automatically block"));
+    // A short one keeps its warning lines, uncut.
+    let short = lines(&[
+        "────────────────────────────────────────",
+        " Bash command",
+        " Tip: auto mode handles these prompts for you",
+        "   rm -rf build",
+        " This command deletes files",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. No",
+    ]);
+    let d = choices::dialog(&short).expect("dialog");
+    assert_eq!(d.body, "rm -rf build\nThis command deletes files");
+    assert!(choices::dialog("❯ 1. Yes\n  2. No").is_none());
+}
+
+#[test]
+fn a_dialog_above_blank_rows_is_found() {
+    let mut l = vec!["Do you want to proceed?", "❯ 1. Yes", "  2. No", "", "Esc to cancel · Tab to amend"];
+    l.extend(std::iter::repeat("").take(30));
+    assert_eq!(parse(&lines(&l)).len(), 2);
+}

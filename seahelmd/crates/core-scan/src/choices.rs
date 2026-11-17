@@ -44,8 +44,13 @@ fn line_pattern() -> &'static Regex {
     R.get_or_init(|| Regex::new(r"^\s*([❯›>•*]?)\s*(\d+)\.\s+(.+?)\s*$").expect("choice regex"))
 }
 
+/// The last `bottom_lines` lines with text below them, so a fresh pane whose
+/// TUI fills only the top of the screen is read where its dialog is.
 fn bottom(screen: &str, bottom_lines: usize) -> impl Iterator<Item = &str> {
-    let lines: Vec<&str> = screen.split('\n').collect();
+    let mut lines: Vec<&str> = screen.split('\n').collect();
+    while lines.last().is_some_and(|l| trim_ws(l).is_empty()) {
+        lines.pop();
+    }
     let skip = lines.len().saturating_sub(bottom_lines);
     lines.into_iter().skip(skip)
 }
@@ -203,6 +208,66 @@ pub fn session_only_key(screen: &str, bottom_lines: usize) -> Option<String> {
 fn is_rule(line: &str) -> bool {
     let t = trim_ws(line);
     t.chars().count() >= 10 && t.chars().all(|c| matches!(c, '▔' | '▁' | '─' | '━' | '═'))
+}
+
+/// What a permission dialog says around its choices, read off the screen
+/// so a card can say what it is asking without the terminal.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Dialog {
+    /// Its first line ("Bash command", "Edit file").
+    pub title: String,
+    /// The line right above the choices when it asks ("Do you want to proceed?").
+    pub question: String,
+    /// What is between: the description, the command, the warnings.
+    pub body: String,
+}
+
+/// Lines of a dialog body kept for a card, and characters in all.
+const DIALOG_BODY_LINES: usize = 14;
+const DIALOG_BODY_CHARS: usize = 1500;
+
+/// The dialog the choice list at the bottom belongs to: everything from the
+/// rule Claude Code draws over it down to the list, on the whole screen (a
+/// long command makes it taller than the choice scan's window). None when
+/// there is no list or no rule above it.
+pub fn dialog(screen: &str) -> Option<Dialog> {
+    let lines: Vec<&str> = screen.split('\n').collect();
+    let first = lines.iter().rposition(|l| line_pattern().captures(l).is_some_and(|c| &c[2] == "1"))?;
+    let top = lines[..first].iter().rposition(|l| is_rule(l))?;
+    if first - top > 80 {
+        return None;
+    }
+    let mut kept: Vec<String> = Vec::new();
+    for l in &lines[top + 1..first] {
+        let t = trim_ws(l).trim_matches(|c| c == '│' || c == '┃').trim();
+        // Dotted rules inside the box, blank lines, the countdown to an
+        // automatic refusal (it changes every second), and Claude Code's own
+        // tips ("Tip: auto mode handles…"), which are not about this request.
+        if t.is_empty() || is_dotted_rule(t) || t.contains("will automatically block") || t.starts_with("Tip:") {
+            continue;
+        }
+        kept.push(t.to_string());
+    }
+    if kept.is_empty() {
+        return None;
+    }
+    let title = kept.remove(0);
+    let question = if kept.last().is_some_and(|l| l.ends_with('?')) { kept.pop().unwrap_or_default() } else { String::new() };
+    let mut cut = kept.len() > DIALOG_BODY_LINES;
+    kept.truncate(DIALOG_BODY_LINES);
+    let mut body = kept.join("\n");
+    if body.chars().count() > DIALOG_BODY_CHARS {
+        body = body.chars().take(DIALOG_BODY_CHARS).collect();
+        cut = true;
+    }
+    if cut {
+        body.push('…');
+    }
+    Some(Dialog { title, question, body })
+}
+
+fn is_dotted_rule(t: &str) -> bool {
+    t.chars().count() >= 10 && t.chars().all(|c| matches!(c, '┄' | '┈' | '╌' | '╍' | '┅' | '-' | ' ' | '·'))
 }
 
 /// Whether the screen is Claude's AskUserQuestion dialog (a question, or its
