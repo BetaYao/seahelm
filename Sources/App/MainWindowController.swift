@@ -1648,6 +1648,7 @@ extension MainWindowController: NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        CoreLink.shared.stop()
         closeAuxiliaryWindows()
         usageSummaryStore.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
@@ -1662,6 +1663,7 @@ extension MainWindowController: NSWindowDelegate {
     }
 
     func cleanupBeforeTermination() {
+        CoreLink.shared.stop()
         usageSummaryStore.stop()
         tabCoordinator.branchRefreshTimer?.invalidate()
         tabCoordinator.branchRefreshTimer = nil
