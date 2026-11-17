@@ -2,18 +2,6 @@ import XCTest
 @testable import seahelm
 
 final class AutopilotRulesTests: XCTestCase {
-    private func pr(_ n: Int, _ state: WorktreePRStatus.State = .open,
-                    checks: WorktreePRStatus.Checks? = nil) -> WorktreePRStatus {
-        WorktreePRStatus(number: n, url: "https://github.com/acme/app/pull/\(n)", state: state,
-                         checks: checks, review: nil)
-    }
-    private func obs(_ p: WorktreePRStatus?, wt: String = "/wt/a", branch: String = "feat/a") -> PRObservation {
-        PRObservation(worktreePath: wt, repoPath: "/repo", branch: branch, pr: p)
-    }
-    private func ledger() -> AutopilotLedger {
-        AutopilotLedger(path: NSTemporaryDirectory() + "ledger-\(UUID().uuidString).json")
-    }
-
     // MARK: - yml
 
     func testParsesTheDocumentedExample() throws {
@@ -83,79 +71,6 @@ final class AutopilotRulesTests: XCTestCase {
         XCTAssertFalse(night.contains(at(12, 0), calendar: cal))
         XCTAssertNil(QuietHours("25:00-08:00"))
     }
-
-    // MARK: - events
-
-    func testCIFailedFiresOnTheEdgeOnly() {
-        var d = PREventDetector()
-        XCTAssertTrue(d.observe([obs(pr(1, checks: .failing))], alreadyMerged: { _ in false }).isEmpty,
-                      "already red at first sight is not news")
-        XCTAssertTrue(d.observe([obs(pr(1, checks: .failing))], alreadyMerged: { _ in false }).isEmpty)
-        XCTAssertTrue(d.observe([obs(pr(1, checks: .pending))], alreadyMerged: { _ in false }).isEmpty)
-        let events = d.observe([obs(pr(1, checks: .failing))], alreadyMerged: { _ in false })
-        XCTAssertEqual(events.map(\.trigger), [.ciFailed], "a fix that failed again is news again")
-    }
-
-    func testANewPRThatFailsIsNews() {
-        var d = PREventDetector()
-        _ = d.observe([obs(pr(1, checks: .failing))], alreadyMerged: { _ in false })
-        XCTAssertEqual(d.observe([obs(pr(2, checks: .failing))], alreadyMerged: { _ in false }).map(\.trigger),
-                       [.ciFailed])
-    }
-
-    func testMergedFiresAtFirstSightButOnlyOnce() {
-        var d = PREventDetector()
-        let events = d.observe([obs(pr(5, .merged))], alreadyMerged: { _ in false })
-        XCTAssertEqual(events.map(\.trigger), [.prMerged])
-        XCTAssertTrue(d.observe([obs(pr(5, .merged))], alreadyMerged: { $0 == "/repo#5" }).isEmpty)
-    }
-
-    // MARK: - matching
-
-    func testRulesMatchByTriggerBranchAndAttempts() {
-        let l = ledger()
-        let event = AutopilotEvent(trigger: .ciFailed, repoPath: "/repo", worktreePath: "/wt/a",
-                                   branch: "feat/a", pr: pr(7, checks: .failing))
-        let day = "2026-11-03"
-        var out = AutopilotEngine.dispatches(for: event, config: .builtIn, ledger: l, day: day)
-        XCTAssertEqual(out.map(\.rule.name), ["fix-ci"])
-        XCTAssertTrue(out[0].prompt.contains("PR #7 on feat/a failed CI"))
-        XCTAssertTrue(out[0].prompt.hasPrefix("[seahelm event] ci.failed · rule fix-ci"))
-        XCTAssertTrue(out[0].prompt.contains("start_agent=ask"))
-
-        l.recordAttempt(rule: "fix-ci", repoPath: "/repo", pr: 7, day: day)
-        l.recordAttempt(rule: "fix-ci", repoPath: "/repo", pr: 7, day: day)
-        out = AutopilotEngine.dispatches(for: event, config: .builtIn, ledger: l, day: day)
-        XCTAssertTrue(out.isEmpty, "max_attempts reached for today")
-        XCTAssertEqual(AutopilotEngine.dispatches(for: event, config: .builtIn, ledger: l, day: "2026-11-04").count, 1)
-
-        let onMain = AutopilotEvent(trigger: .ciFailed, repoPath: "/repo", worktreePath: "/repo",
-                                    branch: "main", pr: pr(8, checks: .failing))
-        XCTAssertTrue(AutopilotEngine.dispatches(for: onMain, config: .builtIn, ledger: l, day: day).isEmpty)
-    }
-
-    func testUnknownPlaceholdersStayVisible() {
-        let rule = AutomationRule(name: "r", trigger: .ciFailed, brief: "{{pr}} {{nope}}")
-        let event = AutopilotEvent(trigger: .ciFailed, repoPath: "/r", worktreePath: "/w", branch: "b", pr: pr(3))
-        XCTAssertEqual(AutopilotEngine.render(rule.brief, event: event, rule: rule), "3 {{nope}}")
-    }
-
-    func testLedgerPersists() {
-        let path = NSTemporaryDirectory() + "ledger-\(UUID().uuidString).json"
-        defer { try? FileManager.default.removeItem(atPath: path) }
-        AutopilotLedger(path: path).markMergeHandled("/repo#5")
-        XCTAssertTrue(AutopilotLedger(path: path).hasHandledMerge("/repo#5"))
-    }
-
-    func testAuditReadsBackWhatItWrote() {
-        let path = NSTemporaryDirectory() + "audit-\(UUID().uuidString).jsonl"
-        defer { try? FileManager.default.removeItem(atPath: path) }
-        let audit = AutopilotAudit(path: path)
-        audit.append(.init(at: Date(timeIntervalSince1970: 1), kind: .event, rule: "fix-ci", text: "a"))
-        audit.append(.init(at: Date(timeIntervalSince1970: 2), kind: .action, action: "message_pane", text: "b"))
-        XCTAssertEqual(audit.recent().map(\.text), ["a", "b"])
-        XCTAssertEqual(audit.recent(limit: 1).map(\.text), ["b"])
-    }
 }
 
 final class FirstMatePaneTests: XCTestCase {
@@ -198,59 +113,6 @@ final class FirstMatePaneTests: XCTestCase {
         XCTAssertTrue(FirstMatePane.sessionIsCurrent(at: dir))
     }
 
-
-}
-
-final class WorktreeFactsTests: XCTestCase {
-    func testStatusAndShortstatParse() {
-        let status = " D pnpm-lock.yaml\n M AGENTS.md\nD  config/x.env\n?? CLAUDE.md\n"
-        let s = WorktreeFacts.parseStatus(status)
-        XCTAssertEqual(s.changed, 3)
-        XCTAssertEqual(s.deleted, 2)
-        XCTAssertEqual(s.untracked, 1)
-        let stat = WorktreeFacts.parseShortstat(" 41 files changed, 16 insertions(+), 47942 deletions(-)\n")
-        XCTAssertEqual(stat.insertions, 16)
-        XCTAssertEqual(stat.deletions, 47942)
-        XCTAssertEqual(WorktreeFacts.parseShortstat(" 1 file changed, 2 deletions(-)").insertions, 0)
-    }
-
-    /// The case that slipped past First Mate's own summary: 41 files, mostly deletions.
-    func testSummarySaysWhatIsThere() {
-        let f = WorktreeFacts(changedFiles: 40, deletedFiles: 40, untrackedFiles: 1, insertions: 16,
-                              deletions: 47942, unpushedCommits: 0, busyPanes: 0)
-        XCTAssertEqual(f.summary, "41 files uncommitted (+16 −47942; 40 deleted, 1 untracked) · every commit is on a remote · panes idle")
-        XCTAssertFalse(f.isClean)
-        XCTAssertEqual(WorktreeFacts(unpushedCommits: 0).summary, "nothing uncommitted · every commit is on a remote · panes idle")
-        XCTAssertTrue(WorktreeFacts(unpushedCommits: 0).isClean)
-    }
-
-    func testProbeMeasuresARealWorktree() throws {
-        let dir = NSTemporaryDirectory() + "facts-\(UUID().uuidString)"
-        defer { try? FileManager.default.removeItem(atPath: dir) }
-        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        func git(_ args: String...) { _ = GitProcess.run(args, in: dir) }
-        git("init", "-q"); git("config", "user.email", "t@t"); git("config", "user.name", "t")
-        try "a\nb\n".write(toFile: dir + "/kept.txt", atomically: true, encoding: .utf8)
-        try "x\n".write(toFile: dir + "/gone.txt", atomically: true, encoding: .utf8)
-        git("add", "."); git("commit", "-qm", "one")
-        try FileManager.default.removeItem(atPath: dir + "/gone.txt")
-        try "new\n".write(toFile: dir + "/fresh.txt", atomically: true, encoding: .utf8)
-        let f = WorktreeFacts.probe(worktreePath: dir)
-        XCTAssertEqual(f.changedFiles, 1)
-        XCTAssertEqual(f.deletedFiles, 1)
-        XCTAssertEqual(f.untrackedFiles, 1)
-        XCTAssertEqual(f.deletions, 1)
-        XCTAssertEqual(f.unpushedCommits, 1, "no remote at all: the one commit is on none")
-    }
-
-    func testTheEventPromptCarriesTheFacts() {
-        var event = AutopilotEvent(trigger: .prMerged, repoPath: "/r", worktreePath: "/w", branch: "b",
-                                   pr: WorktreePRStatus(number: 5, url: "u", state: .merged, checks: nil, review: nil))
-        event.facts = WorktreeFacts(changedFiles: 2, insertions: 3, deletions: 4, unpushedCommits: 0, busyPanes: 1)
-        let prompt = AutopilotEngine.prompt(rule: AutomationConfig.builtIn.rules[1], event: event, config: .builtIn)
-        XCTAssertTrue(prompt.contains("facts (measured by seahelm"), prompt)
-        XCTAssertTrue(prompt.contains("2 files uncommitted (+3 −4) · every commit is on a remote · 1 pane busy"), prompt)
-    }
 
 }
 

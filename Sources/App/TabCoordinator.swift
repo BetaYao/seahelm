@@ -1856,21 +1856,6 @@ class TabCoordinator {
         firstMate.start()
     }
 
-    /// Every PR-able worktree with its branch's PR as last fetched. Main and the
-    /// integration checkout are not PR work.
-    func prObservations() -> [PRObservation] {
-        allWorktrees.compactMap { entry in
-            let info = entry.info
-            guard !info.isMainWorktree, !info.branch.isEmpty,
-                  !IntegrationWorktreeStore.shared.isIntegrationWorktree(info.path) else { return nil }
-            return PRObservation(worktreePath: info.path, repoPath: worktreeRepoCache[info.path] ?? info.path,
-                                 branch: info.branch,
-                                 pr: WorktreePRStore.shared.status(worktreePath: info.path, branch: info.branch))
-        }
-    }
-
-
-
     /// Register every pane of a worktree's tree with Fleet — not just the first.
     /// A pane missing here cannot be resolved from its hook's SEAHELM_PANE_ID
     /// (`Fleet.handleWebhookEvent` only accepts a station that is a known agent),
