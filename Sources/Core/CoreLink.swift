@@ -45,6 +45,8 @@ final class CoreLink {
     private var adoptable: [String: String] = [:]
     private var timer: Timer?
     private var syncing = false
+    /// Set by `stop`: no sync is sent after it, nor one already gathering.
+    private var stopped = false
 
     /// Contents/Resources/bin/seahelm-core, else `$SEAHELM_CORE_BIN`.
     static var binary: String? {
@@ -59,6 +61,17 @@ final class CoreLink {
         unreachableSince = Date()
         ensure()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.sync() }
+    }
+
+    /// Stop showing the core the fleet, before the window tears its panes
+    /// down. Teardown empties `StationRegistry` while `Fleet` still lists the
+    /// panes, so a sync after it sends every pane without its session and the
+    /// core drops them all; the core goes on watching the sessions, which
+    /// outlive the app.
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        stopped = true
     }
 
     /// Start the core if nothing answers on its socket (`seahelm-core ensure`).
@@ -95,7 +108,7 @@ final class CoreLink {
     }
 
     private func sync() {
-        guard !syncing else { return }
+        guard !syncing, !stopped else { return }
         syncing = true
         let panes = self.panes()
         let worktrees = self.worktrees()
