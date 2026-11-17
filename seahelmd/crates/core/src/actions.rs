@@ -162,6 +162,25 @@ pub fn pane_run(core: &Core, p: &Value) -> RpcResult {
     Ok(json!({"sent": true, "pane_id": id}))
 }
 
+/// `pane.start_agent {pane_id, agent_type}`: start an agent in a pane that
+/// is a shell, as the app launches one (the yolo flag when `agent_yolo`). The
+/// line is cleared first (ctrl-u) so a half-typed command is not run with it.
+/// A pane that already runs an agent is refused: the text would be a prompt.
+pub fn pane_start_agent(core: &Core, p: &Value) -> RpcResult {
+    let id = pane(core, p)?;
+    if runs_agent(core, &id) {
+        return Err(RpcError::invalid_params("the pane already runs an agent"));
+    }
+    let agent = launchable(&s(p, "agent_type"))?;
+    let command = bare_command(agent, crate::first_mate::UserConfig::load().agent_yolo)
+        .ok_or_else(|| RpcError::invalid_params("that agent cannot be launched"))?;
+    send(&id, b"\x15")?;
+    send(&id, command.as_bytes())?;
+    std::thread::sleep(SUBMIT_DELAY);
+    send(&id, b"\r")?;
+    Ok(json!({"sent": true, "pane_id": id, "command": command}))
+}
+
 pub fn pane_send_text(core: &Core, p: &Value) -> RpcResult {
     let id = pane(core, p)?;
     let text = p.get("text").and_then(Value::as_str).unwrap_or_default();

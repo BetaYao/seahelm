@@ -464,6 +464,22 @@
   body[data-dock="mate"] #messageTimeline{--fs-body:14px;--fs-sub:12px;--fs-cap:11px;--fs-mono:12px}
   .tl{width:100%;max-width:760px;margin:0 auto}
   .tl-empty{padding:56px 8px;text-align:center;color:var(--muted);font-size:var(--fs-sub)}
+  /* A pane with no agent in it (a shell): Timeline has nothing to show, so it
+     offers to start one, or the terminal (renderStartAgent). */
+  .tl-start{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:12px;padding:32px 24px;text-align:center}
+  .tl-start h3{font-size:var(--fs-body);font-weight:650;color:var(--text)}
+  .tl-start p{font-size:var(--fs-sub);color:var(--muted);line-height:1.45;max-width:340px}
+  .tl-start-agents{display:flex;flex-direction:column;gap:8px;width:min(320px,100%);margin-top:4px}
+  .tl-start-agents button,.tl-start .tl-start-term{height:46px;border-radius:12px;border:0;cursor:pointer;
+    font-size:var(--fs-body);font-weight:600}
+  .tl-start-agents button{background:var(--accent);color:var(--accent-ink)}
+  .tl-start-agents button:disabled{opacity:.55;cursor:default}
+  .tl-start .tl-start-term{width:min(320px,100%);background:var(--panel2);color:var(--text2)}
+  .tl-start-or{font-size:var(--fs-cap);color:var(--muted)}
+  body[data-noagent] #msgComposer,
+  body[data-noagent] #replyBar,
+  body[data-noagent] #toBottom{display:none !important}
   .tl-more{padding:12px 0 2px;text-align:center;font-size:var(--fs-cap);color:var(--faint)}
   .tl-status{display:flex;align-items:center;gap:8px;margin:22px 0 12px;
     font-size:var(--fs-cap);color:var(--faint)}
@@ -1527,7 +1543,84 @@ function onPaneStatus(p){
     renderDetail();
   }
   refreshFleetSoon(false);
-  if (key === S.selPane) { renderSendButton(); markShownPaneSeen(); }
+  if (key === S.selPane) {
+    renderSendButton();
+    markShownPaneSeen();
+    // An agent started or quit: swap the timeline for the start panel or back.
+    if (startAgent.starting && startAgent.starting.key === key && !showsStartAgent(key)) startAgent.starting = null;
+    const host = $('messageTimeline');
+    if (loadSurfaceMode() === 'text' && host && showsStartAgent(key) !== (host.dataset.key === `start:${key}`)) {
+      renderMessageTimeline(key);
+    }
+  }
+}
+
+// ── Starting an agent in a shell pane ─────────────────────────────────────
+// A pane with only a shell in it has no timeline to show: Timeline offers the
+// agents installed on that machine (`worktree.options`), started in the pane
+// by seahelm-core (`pane.start_agent`), or the terminal itself.
+const startAgent = { agents: null, loading: false, starting: null };
+
+/** Timeline shows the start panel instead: a shell pane, not First Mate's. */
+function showsStartAgent(key){
+  if (!key || key === FM_KEY) return false;
+  const pane = S.panes.get(key);
+  return !!pane && paneKindOf(pane).kind === 'shell';
+}
+
+function renderStartAgent(host, key){
+  document.body.dataset.noagent = '';
+  if (startAgent.starting && startAgent.starting.key !== key) startAgent.starting = null;
+  // A share link may only talk to its pane, not start programs in it.
+  if (!SHARE_PANE && !startAgent.agents && !startAgent.loading && isLinked()) {
+    startAgent.loading = true;
+    sendCommand('worktree.options', {}, (r) => {
+      startAgent.loading = false;
+      startAgent.agents = (r && r.ok !== false && r.result && r.result.agents) || [];
+      if (S.selPane && showsStartAgent(S.selPane) && loadSurfaceMode() === 'text') renderMessageTimeline(S.selPane);
+    });
+  }
+  const starting = startAgent.starting;
+  const agents = startAgent.agents || [];
+  const list = SHARE_PANE ? ''
+    : !startAgent.agents ? '<p>Looking for agents on this machine…</p>'
+    : agents.length ? `<div class="tl-start-agents">${agents.map(a =>
+        `<button type="button" data-start-agent="${esc(a.id)}" ${starting ? 'disabled' : ''}>${
+          esc(starting && starting.id === a.id ? `Starting ${a.label}…` : `Start ${a.label}`)}</button>`).join('')}</div>`
+    : '<p>No agent is installed on this machine.</p>';
+  host.innerHTML = `<div class="tl-start">
+      <h3>No agent in this pane</h3>
+      <p>${SHARE_PANE ? 'This pane is a terminal.' : 'It is a terminal. Start an agent here, or use the terminal.'}</p>
+      ${list}
+      ${list ? '<span class="tl-start-or">or</span>' : ''}
+      <button type="button" class="tl-start-term" data-start-terminal>Switch to Terminal</button>
+    </div>`;
+  host.dataset.key = `start:${key}`;
+  tlShown = [];
+  host.scrollTop = 0;
+  renderTimelineToBottom();
+}
+
+function startAgentIn(key, agentId){
+  const agent = (startAgent.agents || []).find(a => a.id === agentId);
+  if (!agent || startAgent.starting) return;
+  startAgent.starting = { key, id: agent.id };
+  renderMessageTimeline(key);
+  sendCommand('pane.start_agent', { pane_id: key, agent_type: agent.id }, (r) => {
+    if (!r || r.ok === false) {
+      startAgent.starting = null;
+      showActionToast((r && r.error && r.error.message) || `Could not start ${agent.label}`, true);
+      if (S.selPane === key) renderMessageTimeline(key);
+      return;
+    }
+    // The panel stays until seahelm-core sees the agent (onPaneStatus); give
+    // the buttons back if it never does.
+    setTimeout(() => {
+      if (!startAgent.starting || startAgent.starting.key !== key) return;
+      startAgent.starting = null;
+      if (S.selPane === key && showsStartAgent(key)) renderMessageTimeline(key);
+    }, 20000);
+  });
 }
 
 /** The pane on screen has been looked at: tell the Mac, which clears its
@@ -1898,9 +1991,12 @@ function renderMessageTimeline(key, options = {}){
       : 'Pick a worktree from the list';
     host.innerHTML = `<div class="tl"><div class="tl-empty">${hint}</div></div>`;
     host.dataset.key = '';
+    delete document.body.dataset.noagent;
     renderTimelineToBottom();
     return;
   }
+  if (showsStartAgent(key)) { renderStartAgent(host, key); return; }
+  delete document.body.dataset.noagent;
   const all = S.messages[key] || [];
   const timeline = key === FM_KEY
     ? SeahelmCardTimeline.present(SeahelmCardTimeline.merge(all, S.cards, { cardsReady: S.cardsReady }), {
@@ -2129,6 +2225,9 @@ function sendTimelineCardAction(id, { index = null, dismiss = false } = {}){
 }
 
 $('messageTimeline').addEventListener('click', (ev) => {
+  const start = ev.target.closest('[data-start-agent]');
+  if (start) { startAgentIn(S.selPane, start.dataset.startAgent); return; }
+  if (ev.target.closest('[data-start-terminal]')) { setSurfaceMode('vt'); return; }
   const fold = ev.target.closest('[data-timeline-fold]');
   if (fold) {
     const id = fold.dataset.timelineFold;
@@ -2229,6 +2328,7 @@ function applySurfaceMode(){
   const keys = $('keyBar');
   if (keys) keys.hidden = text || !S.sel;
   document.body.dataset.surface = text ? 'text' : 'vt';
+  if (!text) delete document.body.dataset.noagent;
   const seg = $('surfaceBadge');
   if (seg) seg.hidden = S.selPane === FM_KEY;
   renderMateTodoToggle();

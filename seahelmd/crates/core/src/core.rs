@@ -190,7 +190,7 @@ pub const CLI_DIALECT: u64 = 1;
 /// Calls that act on the pane `pane_id` names, and so announce their caller
 /// (`ControlRouter.presenceMethods`).
 const PRESENCE_METHODS: &[&str] = &[
-    "pane.read", "pane.send_text", "pane.run", "pane.send_keys",
+    "pane.read", "pane.send_text", "pane.run", "pane.start_agent", "pane.send_keys",
     "pane.wait_for_output", "wait.output", "pane.wait_agent_status", "wait.agent_status",
 ];
 
@@ -752,7 +752,7 @@ impl Core {
                 }
                 sent
             }
-            "pane.read" | "pane.run" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
+            "pane.read" | "pane.run" | "pane.start_agent" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" => first_mate::task_sources::rpc(method, &p),
@@ -1243,6 +1243,7 @@ impl Core {
         match method {
             "pane.read" => crate::actions::pane_read(self, p),
             "pane.run" => crate::actions::pane_run(self, p),
+            "pane.start_agent" => crate::actions::pane_start_agent(self, p),
             "pane.send_text" => crate::actions::pane_send_text(self, p),
             "pane.send_keys" => crate::actions::pane_send_keys(self, p),
             "worktree.create" => crate::actions::worktree_create(self, p),
