@@ -102,6 +102,8 @@ pub struct Card {
     /// The line under each option, index for index with `options` ("" where
     /// one has none); empty when there are none.
     pub details: Vec<String>,
+    /// What a permission dialog shows above its question (the command), "" without.
+    pub context: String,
 }
 
 pub const DONE_LABEL: &str = "✔ Done";
@@ -132,6 +134,7 @@ impl Card {
             checked: v.get("checked").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as usize)).collect()).unwrap_or_default(),
             header: s("header").trim().to_string(),
             details: list("details").into_iter().map(|d: String| d.trim().to_string()).collect(),
+            context: s("context").trim().to_string(),
         })
     }
 
@@ -148,7 +151,7 @@ impl Card {
     /// Same card, same words: one Telegram message, however often it is
     /// rediscovered.
     pub fn packet_key(&self) -> String {
-        format!("{}\u{1F}{}\u{1F}{}", self.id, self.message, self.options.join("\u{1E}"))
+        format!("{}\u{1F}{}\u{1F}{}\u{1F}{}", self.id, self.message, self.options.join("\u{1E}"), self.context)
     }
 }
 
@@ -169,6 +172,10 @@ pub fn card_text(handle: Option<u64>, card: &Card) -> String {
     let prompt = message.trim();
     if !card.header.is_empty() {
         lines.push(format!("\n**{}**", card.header));
+    }
+    if !card.context.is_empty() {
+        // Fenced, so a command reads as one and its `*` or `_` stay literal.
+        lines.push(format!("```\n{}\n```", card.context.replace("```", "'''")));
     }
     if !prompt.is_empty() {
         lines.push(if card.header.is_empty() { format!("\n{prompt}") } else { prompt.to_string() });
@@ -399,7 +406,7 @@ mod tests {
     }
 
     fn card(id: &str, kind: &str, msg: &str) -> Card {
-        Card { id: id.into(), kind: kind.into(), pane: "p".into(), project: String::new(), branch: String::new(), message: msg.into(), options: vec!["a".into()], labels: vec!["a".into()], multi_select: false, checked: vec![], header: String::new(), details: vec![] }
+        Card { id: id.into(), kind: kind.into(), pane: "p".into(), project: String::new(), branch: String::new(), message: msg.into(), options: vec!["a".into()], labels: vec!["a".into()], multi_select: false, checked: vec![], header: String::new(), details: vec![], context: String::new() }
     }
 
     #[test]

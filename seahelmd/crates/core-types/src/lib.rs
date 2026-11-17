@@ -393,6 +393,10 @@ pub struct QuestionFlags {
     /// as the default for every new session and `s` keeps it to this one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm_key: Option<String>,
+    /// What a permission dialog read off the screen shows above its question
+    /// (the command, why it asks), for a card to show beside the buttons.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub context: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -71,6 +71,8 @@
       header: type === 'question' ? String(card.header || '').trim() : '',
       options,
       details: type === 'question' ? optionDetails(card, options) : [],
+      // A permission dialog's body read off the screen (the command it asks about).
+      context: type === 'question' ? String(card.context || '').trim() : '',
       multi_select: multi,
       checked: Array.isArray(card.checked) ? card.checked.slice() : [],
       danger: isDanger(card),

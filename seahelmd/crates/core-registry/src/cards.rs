@@ -181,6 +181,9 @@ impl Card {
         if !self.flags.details.is_empty() {
             v["details"] = json!(self.flags.details);
         }
+        if !self.flags.context.is_empty() {
+            v["context"] = json!(self.flags.context);
+        }
         if self.flags.multi_select {
             v["multi_select"] = json!(true);
             v["checked"] = json!(self.flags.checked);
@@ -685,7 +688,10 @@ fn arrows(row: usize, from: usize) -> Vec<Input> {
 
 /// The 0-based row the choice list's cursor is on, when one is on screen.
 fn selected_row(screen: &str) -> Option<usize> {
-    let lines: Vec<&str> = screen.lines().collect();
+    let mut lines: Vec<&str> = screen.lines().collect();
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
     let tail = &lines[lines.len().saturating_sub(25)..];
     let mut rows: Vec<bool> = Vec::new();
     for l in tail {

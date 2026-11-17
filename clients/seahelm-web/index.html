@@ -590,6 +590,9 @@
   /* AskUserQuestion: the question's tab title over it, a line under each option. */
   .rb-head .rb-hdr{display:block;margin-bottom:2px;font-size:var(--fs-sub);font-weight:500;color:var(--muted)}
   .rb-opts .rb-lbl{display:block}
+  /* A permission dialog's body read off the screen: the command it asks about. */
+  .rb-ctx{margin:8px 0 2px;padding:8px 10px;max-height:9.5em;overflow:auto;border-radius:8px;
+    background:var(--panel2);color:var(--text2);font:var(--fs-cap)/1.45 var(--mono);white-space:pre-wrap;word-break:break-word}
   .rb-opts .rb-desc{display:block;margin-top:3px;font-size:var(--fs-sub);font-weight:400;line-height:1.35;opacity:.72}
   .rb-opts.detailed button{text-align:left}
   .rb-opts.multi .rb-tick .rb-txt{flex:1;min-width:0}
@@ -3070,6 +3073,13 @@ function renderReplyBar(){
   skip.disabled = actionDisabled;
   skip.onclick = () => answer(null, false, true);
   card.appendChild(head);
+  // A permission dialog's command and warnings, as the terminal shows them.
+  if (question && e.context) {
+    const ctx = document.createElement('pre');
+    ctx.className = 'rb-ctx';
+    ctx.textContent = e.context;
+    card.appendChild(ctx);
+  }
   bar.appendChild(card);
   const opts = document.createElement('div');
   opts.className = 'rb-opts' + (multi ? ' multi' : '') + (details.length ? ' detailed' : '');
