@@ -167,25 +167,53 @@ fn unnumbered(screen: &str, bottom_lines: usize) -> Vec<ChoiceOption> {
 /// ("Esc to cancel · Tab to amend").
 fn is_menu_footer(text: &str) -> bool {
     let lower = text.to_lowercase();
-    lower.starts_with("enter to ") || lower.contains("esc to cancel") || lower.contains("esc to exit")
+    lower.starts_with("enter ") || lower.contains("esc to cancel") || lower.contains("esc to exit")
 }
 
-/// The title of a picker a slash command opened, for its card: the first line
-/// under the rule Claude Code draws over it ("Select model"), when the screen
-/// ends in a picker's "Enter to …" footer. None for a permission prompt, whose
-/// card keeps saying what it is waiting for.
+/// The title of a picker, for its card, when the screen ends in a picker's
+/// footer (`is_picker_footer`): the first line under the rule Claude Code
+/// draws over it ("Select model"), or, with no rule (Codex), the first line
+/// of the text above the list ("Select Model and Effort"). None for a permission prompt,
+/// whose card keeps saying what it is waiting for.
 pub fn menu_title(screen: &str, bottom_lines: usize) -> Option<String> {
     let lines: Vec<&str> = bottom(screen, bottom_lines).collect();
     let last = lines.iter().rposition(|l| !trim_ws(l).is_empty())?;
-    if !trim_ws(lines[last]).to_lowercase().starts_with("enter to ") {
+    if !is_picker_footer(trim_ws(lines[last])) {
         return None;
     }
-    let rule = lines[..last].iter().rposition(|l| is_rule(l))?;
-    let title = lines[rule + 1..last].iter().map(|l| trim_ws(l)).find(|t| !t.is_empty())?;
-    if line_pattern().is_match(title) || title.starts_with(['❯', '›']) {
+    // The list the footer closes: its first row.
+    let first = lines[..last].iter().rposition(|l| line_pattern().captures(l).is_some_and(|c| &c[2] == "1"))?;
+    let rule = lines[..first].iter().rposition(|l| is_rule(l)).filter(|&r| first - r <= 8);
+    let title = match rule {
+        Some(r) => lines[r + 1..first].iter().map(|l| trim_ws(l)).find(|t| !t.is_empty())?,
+        // The first line of the block of text above the list (blank rows may
+        // sit between): Codex's update prompt is a title then its notes.
+        None => {
+            let mut at = first;
+            while at > 0 && first - at < 4 && trim_ws(lines[at - 1]).is_empty() {
+                at -= 1;
+            }
+            let end = at;
+            while at > 0 && end - at < 4 && !trim_ws(lines[at - 1]).is_empty() {
+                at -= 1;
+            }
+            if at == end {
+                return None;
+            }
+            trim_ws(lines[at])
+        }
+    };
+    if line_pattern().is_match(title) || title.starts_with(['❯', '›', '│', '╰', '╭', '└', '┌']) {
         return None;
     }
     Some(title.to_string())
+}
+
+/// A picker's own footer ("Enter to set as default · …", "enter select ·
+/// esc back", "enter continue · esc skip"), as against a permission
+/// prompt's ("Esc to cancel · …", Codex's "Press enter to confirm …").
+fn is_picker_footer(text: &str) -> bool {
+    text.to_lowercase().starts_with("enter ")
 }
 
 /// A picker's option as a card shows it: the columns it is drawn in
@@ -195,11 +223,12 @@ pub fn tidy_menu_label(label: &str) -> String {
 }
 
 /// The key a picker offers for "this session only" (Claude Code's `/model`:
-/// "… · s to use this session only · …"), read off its footer. A card answers
+/// "… · s to use this session only · …", Codex's reasoning level: "enter
+/// default · s session · esc back"), read off its footer. A card answers
 /// with it rather than Return, which would also change the user's default.
 pub fn session_only_key(screen: &str, bottom_lines: usize) -> Option<String> {
     static R: OnceLock<Regex> = OnceLock::new();
-    let re = R.get_or_init(|| Regex::new(r"(?i)(?:^|·)\s*(\S) to use (?:it )?(?:for )?this session only").expect("session key regex"));
+    let re = R.get_or_init(|| Regex::new(r"(?i)(?:^|·)\s*(\S) (?:to use (?:it )?(?:for )?this session only|session)\s*(?:·|$)").expect("session key regex"));
     let lines: Vec<&str> = bottom(screen, bottom_lines).collect();
     let last = lines.iter().rposition(|l| !trim_ws(l).is_empty())?;
     re.captures(trim_ws(lines[last])).map(|c| c[1].to_string())

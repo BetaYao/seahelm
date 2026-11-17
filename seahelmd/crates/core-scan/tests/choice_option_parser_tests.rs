@@ -317,3 +317,60 @@ fn a_dialog_above_blank_rows_is_found() {
     l.extend(std::iter::repeat("").take(30));
     assert_eq!(parse(&lines(&l)).len(), 2);
 }
+
+/// Codex 0.167's `/model`: no rule over it, the title a few blank rows above.
+#[test]
+fn reads_codex_model_picker() {
+    let screen = lines(&[
+        "  >_ OpenAI Codex (v0.167.0)",
+        "",
+        "  Select Model and Effort",
+        "",
+        "",
+        "  1. GPT-6.1-Sol           Latest workhorse model for coding and everyday work.",
+        "  2. GPT-6-Astra           Frontier intelligence for the most demanding work.",
+        "› 3. GPT-6-Luna (current)  Fast and affordable model for easier tasks.",
+        "",
+        "  enter select · esc back",
+    ]);
+    let opts = parse(&screen);
+    assert_eq!(indices(&opts), [1, 2, 3]);
+    assert!(opts[2].selected);
+    assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("Select Model and Effort"));
+    assert_eq!(choices::tidy_menu_label(&opts[2].label), "GPT-6-Luna (current) · Fast and affordable model for easier tasks.");
+    assert_eq!(choices::session_only_key(&screen, DEFAULT_BOTTOM_LINES), None);
+}
+
+#[test]
+fn a_rule_far_above_a_picker_is_not_its_title_rule() {
+    let mut l = vec!["────────────────────────────────", "  old prompt"];
+    l.extend(std::iter::repeat("  output").take(10));
+    l.extend(["", "  Pick one", "", "› 1. A", "  2. B", "", "  enter select · esc back"]);
+    assert_eq!(choices::menu_title(&lines(&l), DEFAULT_BOTTOM_LINES).as_deref(), Some("Pick one"));
+}
+
+#[test]
+fn reads_codex_update_prompt_title() {
+    let screen = lines(&[
+        "  Update available · 0.167.0 → 0.169.0",
+        "  Release notes: https://github.com/openai/codex/releases/latest",
+        "› 1. Update now (runs `brew upgrade --cask codex`)",
+        "  2. Skip",
+        "  3. Skip until next version",
+        "  enter continue · esc skip",
+    ]);
+    assert_eq!(parse(&screen).len(), 3);
+    assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("Update available · 0.167.0 → 0.169.0"));
+}
+
+#[test]
+fn reads_codex_session_key() {
+    let screen = lines(&[
+        "  Select Reasoning Level for GPT-6-Sol",
+        "  1. Low               Fast responses with lighter reasoning",
+        "› 2. Medium (default)  Balances speed and reasoning depth for everyday tasks",
+        "  enter default · s session · esc back",
+    ]);
+    assert_eq!(choices::menu_title(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("Select Reasoning Level for GPT-6-Sol"));
+    assert_eq!(choices::session_only_key(&screen, DEFAULT_BOTTOM_LINES).as_deref(), Some("s"));
+}
