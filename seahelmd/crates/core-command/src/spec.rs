@@ -45,6 +45,7 @@ pub const ALL: &[Spec] = &[
 
 pub const ADDRESSING: &str = "`#7` is a pane. `@branch` (or `@repo/branch`) is a worktree; `@repo` is a repo.";
 pub const PROSE_LINE: &str = "Anything without a slash goes to whoever you are talking to.";
+pub const AGENT_LINE: &str = "The agent's own slash command (`//compact` sends `/compact`), to whoever you are talking to.";
 
 pub fn find(verb: &str) -> Option<&'static Spec> {
     let v = verb.to_lowercase();
@@ -52,7 +53,7 @@ pub fn find(verb: &str) -> Option<&'static Spec> {
 }
 
 pub fn help() -> String {
-    let mut lines = vec!["**Commands**".to_string(), String::new(), format!("`<anything>` — {PROSE_LINE}")];
+    let mut lines = vec!["**Commands**".to_string(), String::new(), format!("`<anything>` — {PROSE_LINE}"), format!("`//<command>` — {AGENT_LINE}")];
     lines.extend(ALL.iter().map(|s| format!("`{}` — {}", s.usage, s.summary)));
     lines.push(String::new());
     lines.push(ADDRESSING.into());

@@ -752,7 +752,14 @@ impl Core {
                 }
                 sent
             }
-            "pane.read" | "pane.run" | "pane.start_agent" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
+            "pane.run" => {
+                let sent = self.act(method, &p);
+                if sent.is_ok() {
+                    self.follow_slash_command(method, &p);
+                }
+                sent
+            }
+            "pane.read" | "pane.start_agent" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" => first_mate::task_sources::rpc(method, &p),
@@ -1260,8 +1267,13 @@ impl Core {
     /// the timeline now rather than with the next turn. Keys too: they may
     /// close a picker such a command opened (`/model`), which only then
     /// writes what it did.
-    fn follow_slash_command(self: &Arc<Self>, method: &str, p: &Value) {
-        if method == "pane.send_text" && !str_param(p, "text").is_some_and(|t| t.trim_start().starts_with('/')) {
+    pub(crate) fn follow_slash_command(self: &Arc<Self>, method: &str, p: &Value) {
+        let typed = match method {
+            "pane.send_text" => str_param(p, "text"),
+            "pane.run" => str_param(p, "command"),
+            _ => None,
+        };
+        if method != "pane.send_keys" && !typed.is_some_and(|t| t.trim_start().starts_with('/')) {
             return;
         }
         let Some(key) = str_param(p, "pane_id").or_else(|| str_param(p, "pane_session_key")).and_then(|h| self.resolve_pane(&h)) else { return };
