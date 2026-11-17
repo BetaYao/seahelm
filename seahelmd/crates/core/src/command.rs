@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -14,7 +15,7 @@ use seahelm_core_messages::Message;
 use crate::core::Core;
 use crate::first_mate::facts::git;
 
-pub struct CoreHost<'a>(pub &'a Core);
+pub struct CoreHost<'a>(pub &'a Arc<Core>);
 
 const GIT_FRESH: Duration = Duration::from_secs(300);
 
@@ -74,7 +75,13 @@ impl Host for CoreHost<'_> {
     }
 
     fn send_text(&self, pane_key: &str, text: &str) -> bool {
-        self.0.act("pane.run", &json!({"pane_id": pane_key, "command": text})).is_ok()
+        let params = json!({"pane_id": pane_key, "command": text});
+        let sent = self.0.act("pane.run", &params).is_ok();
+        if sent {
+            // `//compact` from a chat arrives here as `/compact`.
+            self.0.follow_slash_command("pane.run", &params);
+        }
+        sent
     }
 
     fn create_worktree(&self, repo_path: &str, task: &str) -> Result<String, String> {

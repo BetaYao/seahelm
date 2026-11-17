@@ -43,6 +43,11 @@ pub fn parse(text: &str, index: &FleetIndex) -> Result<Command, Error> {
     if trimmed.is_empty() {
         return Err(Error::Empty);
     }
+    // `//name` is the agent's own command, not ours: it goes on with one
+    // slash (`//compact` → `/compact`), to whoever the conversation talks to.
+    if let Some(agent) = agent_command(trimmed) {
+        return Ok(Command::Say(agent.into()));
+    }
     // An absolute path starts with `/` too; only `/verb` is a command.
     if !is_slash_command(trimmed) {
         return Ok(Command::Say(trimmed.into()));
@@ -54,6 +59,13 @@ pub fn parse(text: &str, index: &FleetIndex) -> Result<Command, Error> {
         return Err(Error::UnknownCommand("/".into()));
     }
     parse_verb(&verb, &rest, index)
+}
+
+/// `//name …` as the agent should see it, `/name …`; None for anything else
+/// (a lone `//`, a `//host/share` path).
+pub fn agent_command(text: &str) -> Option<&str> {
+    let rest = text.trim().strip_prefix('/')?;
+    (rest.starts_with('/') && rest.len() > 1 && is_slash_command(rest)).then_some(rest)
 }
 
 /// `/name` (letters, digits, underscore), optionally `@bot`. A filesystem
@@ -221,6 +233,17 @@ pub(crate) mod tests {
         assert_eq!(ok("#3 is flaky"), Command::Say("#3 is flaky".into()));
         assert_eq!(ok("/Users/me/shot.jpg"), Command::Say("/Users/me/shot.jpg".into()));
         assert_eq!(parse("  ", &fleet()), Err(Error::Empty));
+    }
+
+    #[test]
+    fn a_double_slash_is_the_agents_command() {
+        assert_eq!(ok("//compact"), Command::Say("/compact".into()));
+        assert_eq!(ok(" //model opus "), Command::Say("/model opus".into()));
+        assert_eq!(ok("//mattpocock-skills:tdd"), Command::Say("//mattpocock-skills:tdd".into()), "not a command shape: said as typed");
+        assert_eq!(ok("//go #7"), Command::Say("/go #7".into()), "ours is one slash");
+        assert_eq!(ok("//"), Command::Say("//".into()));
+        assert_eq!(ok("//host/share"), Command::Say("//host/share".into()));
+        assert_eq!(ok("///x"), Command::Say("///x".into()));
     }
 
     #[test]

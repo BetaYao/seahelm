@@ -70,8 +70,14 @@ pub fn addressing_hint(bot_username: Option<&str>) -> String {
 pub const ADDRESSING_HINT_WINDOW: f64 = 600.0;
 
 /// Bot commands are `/name` (optionally `/name@bot`); a path is not one.
+/// `//name` is one too: the agent's own command, passed on with one slash by
+/// the command language, so in a group it is aimed at the bot as `/name` is.
 pub fn is_slash_command(body: &str) -> bool {
     let trimmed = body.trim();
+    let trimmed = match trimmed.strip_prefix("//") {
+        Some(rest) if !rest.is_empty() && !rest.starts_with('/') => &trimmed[1..],
+        _ => trimmed,
+    };
     if !trimmed.starts_with('/') {
         return false;
     }
@@ -263,6 +269,7 @@ pub(crate) mod tests {
         assert!(order(&g("just talking"), "just talking", &c, BOT).is_none());
         assert!(is_unaddressed_order(&g("just talking"), &c, BOT));
         assert!(!is_unaddressed_order(&g("/go #3"), &c, BOT));
+        assert_eq!(order(&g("//compact"), "//compact", &c, BOT).unwrap().body, "//compact", "the agent's command is aimed at the bot too");
         let mut reply = g("yes do that");
         reply.reply_to_message = Some(ReplyTarget { message_id: 3, from: Some(user(1, Some("helm_bot"))) });
         assert_eq!(order(&reply, "yes do that", &c, BOT).unwrap().body, "yes do that");
@@ -280,6 +287,11 @@ pub(crate) mod tests {
         assert!(is_slash_command("/"));
         assert!(!is_slash_command("/usr/bin/env"));
         assert!(!is_slash_command("hello"));
+        assert!(is_slash_command("//compact"));
+        assert!(is_slash_command("//model opus"));
+        assert!(!is_slash_command("//"));
+        assert!(!is_slash_command("///x"));
+        assert!(!is_slash_command("//host/share"));
         assert_eq!(strip_bot_mention("/start@HELM_bot ABC", BOT), "/start ABC");
         assert_eq!(strip_bot_mention("/start@other_bot", BOT), "/start@other_bot");
         assert_eq!(start_payload("/start"), Some(String::new()));
