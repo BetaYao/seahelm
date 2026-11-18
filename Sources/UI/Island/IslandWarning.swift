@@ -11,13 +11,30 @@ struct IslandWarning: Equatable {
     /// How long the core may stay silent before it is worth saying: covers
     /// the launch (`seahelm-core ensure` takes a moment) and a restart.
     static let coreGrace: TimeInterval = 6
+    /// The same for seahelm-gateway, whose first ping comes a few seconds in.
+    static let gatewayGrace: TimeInterval = 12
 
-    /// The first that applies: the core outranks the control channel, since
-    /// without it nothing the island shows is current.
-    static func current(coreUnreachableSince: Date?, controlChannel: ControlSocketState?, now: Date = Date(),
+    /// The first that applies: the core outranks the rest, since without it
+    /// nothing the island shows is current; the gateway (web and Telegram)
+    /// outranks the control channel (the CLI here).
+    static func current(coreUnreachableSince: Date?, gatewayUnreachableSince: Date? = nil,
+                        controlChannel: ControlSocketState?, now: Date = Date(),
                         isChinese: Bool = false) -> IslandWarning? {
         core(unreachableSince: coreUnreachableSince, now: now, isChinese: isChinese)
+            ?? gateway(unreachableSince: gatewayUnreachableSince, now: now, isChinese: isChinese)
             ?? controlChannelWarning(controlChannel, isChinese: isChinese)
+    }
+
+    /// seahelm-gateway is not answering: seahelm-web, share links and the
+    /// Telegram bot are down until `GatewayLink` has it running again.
+    static func gateway(unreachableSince: Date?, now: Date = Date(), isChinese: Bool = false) -> IslandWarning? {
+        guard let since = unreachableSince, now.timeIntervalSince(since) >= gatewayGrace else { return nil }
+        return IslandWarning(
+            badge: "GW",
+            message: isChinese
+                ? "seahelm-gateway 暂无响应。网页端、分享链接和 Telegram 暂时不可用；seahelm 正在持续重启它。"
+                : "seahelm-gateway is not answering. seahelm-web, share links and Telegram are down; "
+                    + "seahelm keeps restarting it.")
     }
 
     /// seahelm-core is not answering: statuses, cards, suggestions and First
