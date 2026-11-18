@@ -25,7 +25,7 @@ A narrow screen (≤760px) opens on the **Timeline** (MessageStream) and never c
 - assistant replies render as markdown (`markdown.js` — escape first, then format; only http/https links are allowed through)
 - the head bar toggles **Timeline / Terminal**; only Terminal takes the VT path
 - in timeline mode the terminal key bar folds away and only **Interrupt** is left: Esc for an agent, Ctrl+C for a shell task
-- the composer at the bottom sends `pane.send_text`
+- the composer at the bottom sends `pane.send_text`; what is typed (and attached) but not sent is that pane's draft, put away when another pane is selected and back when it returns (in memory, not across a reload)
 - the choice is per pane, kept in `localStorage seahelm_surface_modes` (pane key → `text` / `vt`, the latest 200); a pane never chosen for opens on the timeline on a narrow screen and on the terminal otherwise, and tapping into a mirrored pane's terminal chooses Terminal for it
 
 A wide window still defaults to VT and can be switched to the timeline by hand. Design: `docs/superpowers/specs/2026-09-17-message-stream-design.md`.
