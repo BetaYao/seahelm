@@ -422,7 +422,11 @@
   .key-bar{flex:none;border-top:0.5px solid var(--sep);background:rgba(22,22,24,.94);
     padding:8px 0 max(8px, var(--inset-bottom))}
   .key-bar[hidden]{display:none}
-  .term-keys{display:flex;gap:6px;overflow-x:auto;padding:0 12px;scrollbar-width:none}
+  /* Sideways only, and the end of the row stops there: a swipe on the bar
+     never drags or rubber-bands the page under it. */
+  .key-bar{touch-action:pan-x;overscroll-behavior:contain}
+  .term-keys{display:flex;gap:6px;overflow-x:auto;padding:0 12px;scrollbar-width:none;
+    touch-action:pan-x;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
   .term-keys::-webkit-scrollbar{display:none}
   .term-keys button{flex:none;min-width:44px;height:40px;padding:0 10px;border:0;border-radius:8px;
     background:var(--panel2);color:var(--text);font-family:var(--mono);font-size:14px;cursor:pointer;
@@ -4535,10 +4539,30 @@ function terminalHasFocus(){
   return !!(el && el.classList && el.classList.contains('xterm-helper-textarea'));
 }
 
-/** One handler for a touch and a click, and never both for the same tap. */
+/** One handler for a touch and a click, and never both for the same tap.
+ *  A tap is a touch that lifts where it landed: the bar scrolls sideways, and
+ *  a swipe that starts on a key moves the bar, not the key (it used to press
+ *  it on touchstart — a swipe across ^C interrupted the agent). Cancelling the
+ *  touchend keeps the browser's mouse events, and with them the focus move
+ *  that would drop the soft keyboard, out of it. */
 function onTap(el, fn){
-  let touchedAt = 0;
-  el.addEventListener('touchstart', (ev) => { ev.preventDefault(); touchedAt = performance.now(); fn(ev); }, { passive: false });
+  let touchedAt = 0, start = null;
+  el.addEventListener('touchstart', (ev) => {
+    const t = ev.touches[0];
+    start = ev.touches.length === 1 && t ? { x: t.clientX, y: t.clientY } : null;
+  }, { passive: true });
+  el.addEventListener('touchmove', (ev) => {
+    const t = ev.touches[0];
+    if (start && t && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) start = null;
+  }, { passive: true });
+  el.addEventListener('touchcancel', () => { start = null; });
+  el.addEventListener('touchend', (ev) => {
+    if (!start) return;
+    start = null;
+    ev.preventDefault();
+    touchedAt = performance.now();
+    fn(ev);
+  }, { passive: false });
   el.addEventListener('click', (ev) => { if (performance.now() - touchedAt > 600) fn(ev); });
 }
 
