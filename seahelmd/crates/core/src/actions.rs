@@ -715,7 +715,8 @@ pub fn pane_start_session(core: &Core, p: &Value) -> RpcResult {
 /// The user's login shell, or `<agent>; exec <shell> -l`, held for a client.
 fn start_plain_session(session: &str, dir: &Path, launch: Option<&str>) -> Result<(), String> {
     let mut cmd = std::process::Command::new(seahelmd_bin());
-    cmd.current_dir(dir).env("SEAHELM_PANE_ID", session).args(["new", "--hold", "15", session, "--"]);
+    // The pane context an app pane's session gets (`Station.seahelmdAttachCommand`).
+    cmd.current_dir(dir).env("SEAHELM_ENV", "1").env("SEAHELM_PANE_ID", session).args(["new", "--hold", "15", session, "--"]);
     #[cfg(unix)]
     {
         let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());

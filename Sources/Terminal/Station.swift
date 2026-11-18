@@ -222,8 +222,19 @@ class Station {
     /// space in it. Unquoted, the shell splits it and seahelmd reads the tail as the
     /// command to run — `seahelmd attach seahelm-me-My Project` means session
     /// `seahelm-me-My`, command `Project` — so the pane dies on launch.
+    ///
+    /// `attach` creates the session when there is none, so the session inherits
+    /// this environment: the same pane context an agent launched as the
+    /// session's program gets (`SessionManager.detachedLaunchCommands`). An
+    /// agent the user starts by hand at this shell otherwise lacks
+    /// `SEAHELM_ENV`, and the seahelm skill tells it not to use `seahelm`.
     static func seahelmdAttachCommand(paneSessionKey: String) -> String {
-        let env = SeahelmdLocator.sessionEnvironment().map { ShellEscape.singleQuote($0) + " " }.joined()
+        let context = [
+            "SEAHELM_ENV=1",
+            "SEAHELM_SOCKET_PATH=\(ControlSocketServer.defaultSocketPath())",
+            "SEAHELM_PANE_ID=\(paneSessionKey)",
+        ]
+        let env = (context + SeahelmdLocator.sessionEnvironment()).map { ShellEscape.singleQuote($0) + " " }.joined()
         return "/usr/bin/env \(env)\(ShellEscape.singleQuote(SeahelmdLocator.executable())) attach \(ShellEscape.singleQuote(paneSessionKey))"
     }
 
