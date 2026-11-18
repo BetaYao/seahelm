@@ -763,6 +763,7 @@ impl Core {
                 sent
             }
             "pane.read" | "pane.start_agent" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
+            "pane.start_session" => crate::actions::pane_start_session(&self, &p),
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" => first_mate::task_sources::rpc(method, &p),

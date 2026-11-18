@@ -369,7 +369,17 @@ impl Session {
             "pane.vt_open" => {
                 let key = pane_ref(&p).unwrap_or_default();
                 let vt = &mut self.vt;
-                Ok(tokio::task::block_in_place(|| vt.open(&key)))
+                let mut r = tokio::task::block_in_place(|| vt.open(&key));
+                // A listed pane no window has shown yet has no session: the
+                // core starts its shell, and the page attaches to that.
+                if r["ok"] != true && !key.is_empty() {
+                    let started = self.core("pane.start_session", json!({"pane_session_key": key})).await;
+                    if started.is_ok_and(|s| s["started"] == true) {
+                        let vt = &mut self.vt;
+                        r = tokio::task::block_in_place(|| vt.open(&key));
+                    }
+                }
+                Ok(r)
             }
             "pane.vt_size" => {
                 let key = pane_ref(&p).unwrap_or_default();

@@ -685,6 +685,33 @@ pub fn pane_new(core: &Core, p: &Value) -> RpcResult {
     Ok(json!({"pane_session_key": session, "worktree_path": worktree}))
 }
 
+/// `pane.start_session {pane_session_key | pane_id}`: start a known pane's
+/// seahelmd session if nothing runs it yet, as its login shell in its
+/// worktree, held for the client about to attach. A desktop pane gets its
+/// session only once a window shows it (`seahelmd attach` makes it), so a
+/// worktree an agent added stands listed with no session until then: a web
+/// page opening it first has nothing to attach to. A pane that ran an agent
+/// is left alone: bringing it back (its resume command) is the app's.
+/// `{started}`: false when the session was already running.
+pub fn pane_start_session(core: &Core, p: &Value) -> RpcResult {
+    let hint = ["pane_session_key", "pane_id", "pane"].iter().map(|k| s(p, k)).find(|h| !h.is_empty()).ok_or_else(|| RpcError::invalid_params("pane required"))?;
+    let pane = core.resolve_pane(&hint).ok_or_else(|| RpcError::invalid_params("unknown pane"))?;
+    if seahelmd::client::connect(&pane).is_ok() {
+        return Ok(json!({"started": false, "pane_session_key": pane}));
+    }
+    if runs_agent(core, &pane) {
+        return Err(RpcError::invalid_params("the pane ran an agent; its client restores it"));
+    }
+    let row = core.pane_row(&pane).unwrap_or_default();
+    let worktree = row["worktree_path"].as_str().unwrap_or_default();
+    let dir = PathBuf::from(worktree);
+    if worktree.is_empty() || !dir.is_dir() {
+        return Err(RpcError::invalid_params("no such worktree"));
+    }
+    start_plain_session(&pane, &dir, None).map_err(RpcError::internal)?;
+    Ok(json!({"started": true, "pane_session_key": pane}))
+}
+
 /// The user's login shell, or `<agent>; exec <shell> -l`, held for a client.
 fn start_plain_session(session: &str, dir: &Path, launch: Option<&str>) -> Result<(), String> {
     let mut cmd = std::process::Command::new(seahelmd_bin());
