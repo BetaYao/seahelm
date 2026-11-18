@@ -2041,6 +2041,11 @@ extension MainWindowController {
         tabCoordinator.cards.addObserver { [weak self] in
             self?.refreshIsland()
         }
+        // Told when the gateway goes silent or answers again; its grace
+        // running out is caught by the slow refresh below.
+        GatewayLink.shared.onReachabilityChange = { [weak self] in
+            self?.refreshIsland()
+        }
         // Push-driven: worktree status changes arrive via
         // tabCoordinatorRequestUpdateTitleBar. The timer is only a slow
         // fallback for async stragglers (e.g. title resolution finishing
@@ -2213,6 +2218,7 @@ extension MainWindowController {
         // say.
         let warning = IslandWarning.current(
             coreUnreachableSince: CoreLink.shared.unreachableSince,
+            gatewayUnreachableSince: GatewayLink.shared.unreachableSince,
             controlChannel: tabCoordinator.terminalCoordinator?.controlSocketServer?.state,
             isChinese: model.language.isChinese)
         if model.warning != warning { model.warning = warning }

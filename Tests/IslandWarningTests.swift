@@ -26,6 +26,24 @@ final class IslandWarningTests: XCTestCase {
         XCTAssertNil(IslandWarning.current(coreUnreachableSince: nil, controlChannel: nil, now: now))
     }
 
+    func testSilentGatewayIsSaidAfterItsGrace() {
+        XCTAssertNil(IslandWarning.gateway(unreachableSince: nil, now: now))
+        XCTAssertNil(IslandWarning.gateway(unreachableSince: now.addingTimeInterval(-(IslandWarning.gatewayGrace - 1)), now: now))
+        XCTAssertEqual(IslandWarning.gateway(unreachableSince: now.addingTimeInterval(-30), now: now)?.badge, "GW")
+    }
+
+    func testGatewaySitsBetweenCoreAndControlChannel() {
+        let long = now.addingTimeInterval(-30)
+        XCTAssertEqual(IslandWarning.current(coreUnreachableSince: long, gatewayUnreachableSince: long, controlChannel: .standby, now: now)?.badge, "CORE")
+        XCTAssertEqual(IslandWarning.current(coreUnreachableSince: nil, gatewayUnreachableSince: long, controlChannel: .standby, now: now)?.badge, "GW")
+    }
+
+    func testGatewayEnsureUsesItsOwnInterval() {
+        let since = now.addingTimeInterval(-10)
+        XCTAssertFalse(CoreLink.shouldEnsure(unreachableSince: since, lastEnsure: now.addingTimeInterval(-5), now: now, interval: 15))
+        XCTAssertTrue(CoreLink.shouldEnsure(unreachableSince: since, lastEnsure: now.addingTimeInterval(-15), now: now, interval: 15))
+    }
+
     func testEnsureIsRetriedButNotHammered() {
         let since = now.addingTimeInterval(-10)
         XCTAssertFalse(CoreLink.shouldEnsure(unreachableSince: nil, lastEnsure: nil, now: now))

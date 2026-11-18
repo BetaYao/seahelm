@@ -89,10 +89,12 @@ final class CoreLink {
 
     /// Whether a silent core is worth an `ensure` now: silent for a few syncs,
     /// and not tried within `ensureInterval`.
-    static func shouldEnsure(unreachableSince: Date?, lastEnsure: Date?, now: Date) -> Bool {
+    /// `GatewayLink` keeps the gateway up by the same rule.
+    static func shouldEnsure(unreachableSince: Date?, lastEnsure: Date?, now: Date,
+                             interval: TimeInterval = ensureInterval) -> Bool {
         guard let since = unreachableSince, now.timeIntervalSince(since) >= 4 else { return false }
         guard let last = lastEnsure else { return true }
-        return now.timeIntervalSince(last) >= ensureInterval
+        return now.timeIntervalSince(last) >= interval
     }
 
     /// The core's `#n` for the pane on this seahelmd session, if it has one.

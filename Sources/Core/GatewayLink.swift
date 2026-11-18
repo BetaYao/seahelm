@@ -6,12 +6,29 @@ import Foundation
 /// through it.
 ///
 /// - **Running**: `seahelm-gateway ensure` at launch, the binary shipped in
-///   Contents/Resources/bin beside seahelm-core.
+///   Contents/Resources/bin beside seahelm-core; then `gateway.ping` every
+///   `pingInterval`, and `ensure` again whenever the gateway has stopped
+///   answering for a while (at most every `ensureInterval`), as `CoreLink`
+///   keeps the core up: a gateway that crashed or was killed comes back
+///   without the app restarting. `ensure` starts one only if nothing
+///   answers, so it never replaces a live gateway. While it is silent the
+///   island says so (`IslandWarning.gateway`).
 /// - **Settings**: `GatewayClient`, over `gateway.sock`.
 final class GatewayLink {
     static let shared = GatewayLink()
 
     private var started = false
+    private var timer: Timer?
+    private var pinging = false
+    private var lastEnsure: Date?
+    /// Since when the gateway has not answered (from `start` until the first
+    /// ping it answers); nil while it does. Main thread.
+    private(set) var unreachableSince: Date?
+    /// Told on main when `unreachableSince` changes.
+    var onReachabilityChange: (() -> Void)?
+
+    static let pingInterval: TimeInterval = 5
+    static let ensureInterval: TimeInterval = 15
 
     /// Contents/Resources/bin/seahelm-gateway, else `$SEAHELM_GATEWAY_BIN`, else PATH.
     static var binary: String? {
@@ -21,17 +38,51 @@ final class GatewayLink {
         return ProcessRunner.commandPath("seahelm-gateway")
     }
 
-    /// Start the gateway detached unless it already answers. Off main; once.
+    /// Start the gateway detached unless it already answers, and keep it
+    /// running. Main thread; once. Without a binary there is nothing to keep
+    /// up, so nothing is watched (and nothing is warned about).
     func start() {
         guard !started else { return }
         started = true
+        guard Self.binary != nil else {
+            NSLog("[GatewayLink] no seahelm-gateway binary; web access and Telegram are off")
+            return
+        }
+        unreachableSince = Date()
+        ensure()
+        timer = Timer.scheduledTimer(withTimeInterval: Self.pingInterval, repeats: true) { [weak self] _ in self?.ping() }
+    }
+
+    /// `seahelm-gateway ensure`, off main.
+    private func ensure() {
+        lastEnsure = Date()
         DispatchQueue.global(qos: .utility).async {
-            guard let binary = Self.binary else {
-                NSLog("[GatewayLink] no seahelm-gateway binary; web access and Telegram are off")
-                return
-            }
+            guard let binary = Self.binary else { return }
             let result = ProcessRunner.capture(executable: URL(fileURLWithPath: binary), arguments: ["ensure"], timeout: 10)
             if !result.succeeded { NSLog("[GatewayLink] seahelm-gateway ensure failed") }
+        }
+    }
+
+    private func ping() {
+        guard !pinging else { return }
+        pinging = true
+        GatewayClient.request("gateway.ping", timeout: 2) { [weak self] result in
+            guard let self else { return }
+            self.pinging = false
+            let was = self.unreachableSince
+            switch result {
+            case .success, .failure(.rpc), .failure(.malformed):
+                // Any reply is a gateway answering; ensure would not change it.
+                self.unreachableSince = nil
+            case .failure:
+                if self.unreachableSince == nil { self.unreachableSince = Date() }
+                if CoreLink.shouldEnsure(unreachableSince: self.unreachableSince, lastEnsure: self.lastEnsure,
+                                         now: Date(), interval: Self.ensureInterval) {
+                    NSLog("[GatewayLink] seahelm-gateway is not answering; ensure")
+                    self.ensure()
+                }
+            }
+            if (was == nil) != (self.unreachableSince == nil) { self.onReachabilityChange?() }
         }
     }
 }
