@@ -45,8 +45,11 @@ impl Lazy {
         self.session.lock().ok()?.clone()
     }
 
-    /// The session, starting it at `size` if nobody has yet.
+    /// The session, starting it at `size` if nobody has yet. A client with
+    /// no size of its own (a passive viewer attaches at 0x0, "whatever the
+    /// session is") starts it at `START_SIZE`: the terminal cannot be 0x0.
     fn get_or_start(&self, size: (u16, u16)) -> Result<Arc<Session>> {
+        let size = if size.0 == 0 || size.1 == 0 { START_SIZE } else { size };
         let mut slot = self.session.lock().map_err(|_| anyhow::anyhow!("poisoned"))?;
         if let Some(s) = slot.as_ref() {
             return Ok(Arc::clone(s));
