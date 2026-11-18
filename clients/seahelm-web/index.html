@@ -4312,6 +4312,24 @@ const RENDERER = (() => {
   return localStorage.getItem('seahelm_renderer') || 'xterm';
 })();
 
+// Whether xterm draws with WebGL. On iOS and iPadOS it does not by default:
+// there the canvas came up empty but for the cursor, the look of a glyph atlas
+// that never reached the GPU (cells and cursor are quads, text is the atlas),
+// and every iOS browser is WebKit, so none of them escapes it. `?webgl=1` /
+// `?webgl=0` force it either way, kept; `?webgl=auto` goes back to this.
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
+  || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+const USE_WEBGL = (() => {
+  const q = new URLSearchParams(location.search).get('webgl');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('seahelm_webgl', q);
+    else if (q === 'auto') localStorage.removeItem('seahelm_webgl');
+  } catch (e) {}
+  let v = null;
+  try { v = localStorage.getItem('seahelm_webgl'); } catch (e) {}
+  return v === '1' ? true : v === '0' ? false : !IS_IOS;
+})();
+
 let TerminalCtor = null;
 let rendererReady = null;
 let xtermReady = null;
@@ -4363,7 +4381,7 @@ function ensureRenderer(){
 function renderRendererBadge(active){
   const el = $('rendererBadge');
   if (!el) return;
-  el.innerHTML = `Renderer <span class="val">${active === 'ghostty' ? 'ghostty-web' : 'xterm.js'}</span>`;
+  el.innerHTML = `Renderer <span class="val">${active === 'ghostty' ? 'ghostty-web' : (USE_WEBGL ? 'xterm.js' : 'xterm.js (DOM)')}</span>`;
   el.title = active === 'ghostty'
     ? 'Ghostty VT parser (wasm) + Canvas 2D — click to switch back to xterm.js'
     : 'xterm.js — click to try ghostty-web';
@@ -4711,7 +4729,7 @@ function requestLayout(path){
   // link that is a second, and the layout's round trip can hide it.
   const wantsTerminal = loadSurfaceMode() === 'vt';
   const renderer = wantsTerminal ? ensureRenderer() : Promise.resolve(null);
-  if (wantsTerminal && RENDERER !== 'ghostty') loadWebglAddon().catch(() => {});
+  if (wantsTerminal && RENDERER !== 'ghostty' && USE_WEBGL) loadWebglAddon().catch(() => {});
   renderer.catch(() => {});
   sendCommand('layout.get', { worktree_path: path }, (r) => {
     if (S.sel !== path) return;                    // selection moved while in flight
@@ -5046,6 +5064,7 @@ function loadWebglAddon(){
 
 function attachWebglRenderer(term){
   if (RENDERER === 'ghostty') return;              // ghostty-web draws its own canvas
+  if (!USE_WEBGL) return;                          // DOM rendering (see USE_WEBGL)
   loadWebglAddon().then((mod) => {
     const Ctor = mod.WebglAddon || mod;
     const addon = new Ctor();
@@ -5344,7 +5363,7 @@ SeahelmTermFocus.install(document, restoreTermFocus);
 /** Warm the terminal code without mounting anything. */
 function prefetchTerminal(){
   ensureRenderer().catch(() => {});
-  if (RENDERER !== 'ghostty') loadWebglAddon().catch(() => {});
+  if (RENDERER !== 'ghostty' && USE_WEBGL) loadWebglAddon().catch(() => {});
 }
 // A wide window has bandwidth to spare and switches to the terminal more often:
 // fetch it once the page is idle. A phone waits until it is asked for.

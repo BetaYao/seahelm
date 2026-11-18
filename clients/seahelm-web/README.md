@@ -66,7 +66,7 @@ push:     {"type":"notify","method","params"}
 |---|---|
 | `index.html` | the client itself: First Mate, the worktree detail (timeline / terminal), the developer message log |
 | `xterm.js` / `xterm.css` | vendored xterm.js 5.5.0 |
-| `xterm-addon-webgl.js` | vendored WebGL renderer — loaded on first terminal open, not at page load |
+| `xterm-addon-webgl.js` | vendored WebGL renderer — loaded on first terminal open, not at page load; not used on iOS / iPadOS, where its canvas came up empty but for the cursor (DOM rendering there). `?webgl=1` / `?webgl=0` force it on or off, kept in `localStorage seahelm_webgl`; `?webgl=auto` clears that |
 | `touch-scroll.js` | vertical touch drag → terminal wheel, so a phone can scroll back |
 | `vt-frame.js` | binary VT frame codec, shared by `index.html` and `bench.html`, format matching `HostGatewayVTFrame.swift` |
 | `vt-apply.js` | serializes VT frame writes; waits for `term.write` before applying the next frame |
