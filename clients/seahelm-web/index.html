@@ -1308,10 +1308,13 @@ function openGatewaySocket(){
         return;
       }
       gateErrorMsg = null;
-      // "delta": what we hold stands, and only newer frames follow. Anything
-      // else — "full", or a Mac from before deltas — replays every ring, so
-      // start empty as we always used to.
-      if (r.replay === 'delta') {
+      // "delta": what we hold stands, and only newer frames follow. "none":
+      // the core did not answer (it was restarting), so nothing replays and
+      // what we hold stands too. Anything else — "full", or a Mac from before
+      // deltas — replays every ring, so start empty as we always used to.
+      if (r.replay === 'none') {
+        // keep it all
+      } else if (r.replay === 'delta') {
         for (const key of r.reset_panes || []) { delete S.messages[key]; delete S.history[key]; }
       } else {
         S.messages = {};
@@ -2445,6 +2448,7 @@ function applySurfaceMode(){
   // The timeline has a composer; the terminal is typed into directly and only
   // gets the bar of keys a phone keyboard lacks.
   if (composer) composer.classList.toggle('on', text);
+  if (text) autoGrowComposer();
   if (vtBadge) vtBadge.hidden = text;
   if (rendererBadge) rendererBadge.hidden = text;
   const keys = $('keyBar');
@@ -2520,6 +2524,11 @@ function autoGrowComposer(){
   const wasAtEnd = host && host.scrollHeight - host.scrollTop - host.clientHeight <= TL_BOTTOM_SLOP;
   // Measure from nothing, or a field that just lost a line keeps the taller
   // scrollHeight it had and never shrinks back.
+  // A hidden field (the pane is on its terminal, or shows the agents to
+  // start) measures 0, and a 0px height leaves only its padding: the text
+  // sits on the pill's bottom edge until something types. Leave it to the
+  // CSS height and measure when the composer shows (`applySurfaceMode`).
+  if (!input.offsetParent) { input.style.height = ''; return; }
   input.style.height = 'auto';
   // `scrollHeight` is content + padding, but `box-sizing:border-box` counts the
   // border in `height` too. Without the difference the field lands two pixels

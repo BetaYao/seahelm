@@ -31,6 +31,9 @@ const PING_EVERY: Duration = Duration::from_secs(30);
 const SILENCE_LIMIT: Duration = Duration::from_secs(75);
 /// Refused on a share link: not about the shared pane.
 const SHARE_FORBIDDEN: i64 = -32003;
+/// How often a sign-in asks a silent core for the timeline, half a second
+/// apart: a core the app is replacing answers within a couple of seconds.
+const SNAPSHOT_TRIES: usize = 10;
 
 /// Who is on the other end, once signed in.
 enum Who {
@@ -668,13 +671,26 @@ impl Session {
                 }
             }
         }
+        // The app replaces the core and the gateway together, so a page
+        // reconnecting to a gateway that just started can find the core not
+        // up yet: wait for it a while. A core still silent after that gets
+        // "none", and the page keeps what it holds — answering "full" with no
+        // rows told it to empty every timeline.
+        let mut answered = delta;
         if !delta {
-            if let Ok(r) = self.gw.core.call("message.snapshot", json!({})).await {
-                rows = r["messages"].as_array().cloned().unwrap_or_default();
-                self.message_floor = r["seq"].as_u64().unwrap_or(0);
+            for attempt in 0..SNAPSHOT_TRIES {
+                if attempt > 0 {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                if let Ok(r) = self.gw.core.call("message.snapshot", json!({})).await {
+                    rows = r["messages"].as_array().cloned().unwrap_or_default();
+                    self.message_floor = r["seq"].as_u64().unwrap_or(0);
+                    answered = true;
+                    break;
+                }
             }
         }
-        result["replay"] = json!(if delta { "delta" } else { "full" });
+        result["replay"] = json!(if delta { "delta" } else if answered { "full" } else { "none" });
         result["panes"] = json!(self.panes().await.unwrap_or_default());
 
         let mut out = vec![response(id, Ok(result))];
