@@ -965,6 +965,10 @@ function scrollbackForLeafCount(count){
 // renderSendButton reads it during load.
 let attachments = [];
 let attachSeq = 0;
+// Each pane's unsent words and files, by pane key, while another pane is on
+// screen: the one field shows the selected pane's draft (setSelectedPane), so
+// what was written to one agent never goes to another.
+const drafts = new Map();
 // The slash-command menu (slash-complete.js), up here for the same reason:
 // selecting a pane during load closes it.
 const slash = { catalogs: new Map(), items: [], sel: 0, open: false };
@@ -1030,9 +1034,30 @@ const S = {
 const FM_KEY = 'seahelm-first-mate';
 function setSelectedPane(key){
   if (S.selPane === FM_KEY && key !== FM_KEY && S.todoFilter) S.todoFilter = false;
-  if (S.selPane !== key) closeSlash();
+  const prev = S.selPane;
+  if (prev !== key) { closeSlash(); stashDraft(prev); }
   S.selPane = key;
+  if (prev !== key) restoreDraft(key);
   renderMateTodoToggle();
+}
+/** Put the field's words and files away under `key`'s draft. */
+function stashDraft(key){
+  const input = $('msgInput');
+  if (!key || !input) return;
+  if (input.value.trim() || attachments.length) drafts.set(key, { text: input.value, attachments });
+  else drafts.delete(key);
+}
+/** Fill the field with `key`'s draft, or empty it. Same element, so a phone's
+ *  keyboard stays up across the switch. */
+function restoreDraft(key){
+  const input = $('msgInput');
+  if (!input) return;
+  const d = key ? drafts.get(key) : null;
+  if (key) drafts.delete(key);
+  input.value = d ? d.text : '';
+  attachments = d ? d.attachments : [];
+  renderAttachments();
+  autoGrowComposer();
 }
 // Opening size only. Every snapshot frame carries the session's real grid and
 // we resize to that before replaying; these numbers just give the terminal a
@@ -2424,6 +2449,7 @@ function applySurfaceMode(){
   if (!text) delete document.body.dataset.noagent;
   const seg = $('surfaceBadge');
   if (seg) seg.hidden = S.selPane === FM_KEY;
+  renderSurfaceBadge();     // the switch names this pane's choice, not the last one's
   renderMateTodoToggle();
   renderSendButton();
   // With a worktree open the head names it (renderDetail); only fall back to
@@ -2585,7 +2611,10 @@ function sendComposerText(byTap){
     if (!r || r.ok !== false) return;
     // Not sent, or not known to be: give the words back rather than lose
     // them, unless something new has been typed since.
-    if (!input.value.trim() && !attachments.length) {
+    if (S.selPane !== key) {
+      // Another pane is on screen now: the words go back to their own pane's draft.
+      if (!drafts.has(key)) drafts.set(key, { text: typed, attachments: sentAtts });
+    } else if (!input.value.trim() && !attachments.length) {
       input.value = typed; attachments = sentAtts; renderAttachments(); autoGrowComposer(); renderSendButton();
     }
     showActionToast(linkLost(r)
@@ -2593,7 +2622,7 @@ function sendComposerText(byTap){
       : ((r.error && r.error.message) || 'Not sent'), true);
   });
   input.value = '';
-  setTimeout(() => { if (!attachments.includes(sentAtts[0])) for (const a of sentAtts) if (a.preview) URL.revokeObjectURL(a.preview); }, 60000);
+  setTimeout(() => { const held = attachments.includes(sentAtts[0]) || [...drafts.values()].some((d) => d.attachments.includes(sentAtts[0])); if (!held) for (const a of sentAtts) if (a.preview) URL.revokeObjectURL(a.preview); }, 60000);
   if (byTap) input.blur();
   autoGrowComposer();
   // Sending re-arms following, wherever you had scrolled back to: the reply is
