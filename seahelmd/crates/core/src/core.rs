@@ -2669,10 +2669,10 @@ const SUBMIT_DELAY: Duration = Duration::from_millis(80);
 /// page is up, never blind: an early Return would pick a row.
 fn confirm_question_review(pane: String) {
     let _ = std::thread::Builder::new().name("seahelm-core-review".into()).spawn(move || {
-        for _ in 0..6 {
+        for _ in 0..15 {
             std::thread::sleep(Duration::from_millis(400));
             let up = matches!(seahelmd::client::request(&pane, &Msg::Snapshot), Ok(Msg::Text(json))
-                if Snapshot::parse(&json).is_ok_and(|s| s.viewport.contains("Ready to submit your answers?")));
+                if Snapshot::parse(&json).is_ok_and(|s| seahelm_core_scan::choices::is_question_review(&s.viewport)));
             if up {
                 let _ = seahelmd::client::request(&pane, &Msg::Send(b"\r".to_vec()));
                 return;
