@@ -475,6 +475,12 @@ extension SeahelmControlDataSource {
         // `git worktree add` in a large repo takes seconds, not minutes.
         guard done.wait(timeout: .now() + 90) == .success else { return .failure(.timedOut) }
         guard let path = created else { return .failure(.failed("couldn't create the worktree")) }
+        // Made for a caller on the control socket (`seahelm worktree create`,
+        // usually an agent), not by the user at the window: seahelm-core
+        // marks its panes so seahelm-web opens them on the timeline.
+        DispatchQueue.global(qos: .utility).async {
+            _ = CoreSocketClient.call("worktree.made", ["worktree_path": path])
+        }
         return .success([
             "worktree_path": path,
             "pane_session_key": SessionManager.persistentSessionName(for: path),
