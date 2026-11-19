@@ -335,10 +335,20 @@ fn is_dotted_rule(t: &str) -> bool {
 /// screen reads "[ ] Apple Apple", changes every tick, and used to retire the
 /// hook card's buttons.
 pub fn is_agent_question_dialog(screen: &str, bottom_lines: usize) -> bool {
-    bottom(screen, bottom_lines).any(|l| {
-        let line = trim_ws(l);
-        line.ends_with(". Chat about this") || line == "Ready to submit your answers?"
-    })
+    bottom(screen, bottom_lines).any(|l| trim_ws(l).ends_with(". Chat about this")) || is_question_review(screen)
+}
+
+/// Whether the screen shows AskUserQuestion's "Review your answers" page,
+/// which waits for Return on "Submit answers". Claude Code used to put
+/// "Ready to submit your answers?" over the list; 2.1.3xx draws only the
+/// heading and the list.
+pub fn is_question_review(screen: &str) -> bool {
+    let lines: Vec<&str> = screen.lines().map(trim_ws).collect();
+    if lines.iter().any(|l| *l == "Ready to submit your answers?") {
+        return true;
+    }
+    let heading = lines.iter().position(|l| *l == "Review your answers");
+    heading.is_some_and(|at| lines[at..].iter().any(|l| l.trim_start_matches(['❯', '>', ' ']) == "1. Submit answers"))
 }
 
 /// Chrome that may sit below a live choice list without making it stale.

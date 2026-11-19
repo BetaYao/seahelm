@@ -1020,7 +1020,7 @@ const S = {
   // Paging older timeline pages in, per pane: {loading, done}.
   history:{},
   // Pane key → 'text' | 'vt', loaded by surfaceModes(); a pane not in it
-  // takes defaultSurfaceMode() (phone/narrow: text, so VT is opt-in).
+  // takes defaultSurfaceMode() (seahelm's worktrees and phones: text).
   surfaceModes: null,
   // paneSessionKey → {cols, rows}, learned from vt.snapshot and remembered so
   // the next mount can decide its layout without attaching first. Persisted
@@ -1308,10 +1308,13 @@ function openGatewaySocket(){
         return;
       }
       gateErrorMsg = null;
-      // "delta": what we hold stands, and only newer frames follow. Anything
-      // else — "full", or a Mac from before deltas — replays every ring, so
-      // start empty as we always used to.
-      if (r.replay === 'delta') {
+      // "delta": what we hold stands, and only newer frames follow. "none":
+      // the core did not answer (it was restarting), so nothing replays and
+      // what we hold stands too. Anything else — "full", or a Mac from before
+      // deltas — replays every ring, so start empty as we always used to.
+      if (r.replay === 'none') {
+        // keep it all
+      } else if (r.replay === 'delta') {
         for (const key of r.reset_panes || []) { delete S.messages[key]; delete S.history[key]; }
       } else {
         S.messages = {};
@@ -2391,12 +2394,16 @@ function interruptPane(){
 // Timeline or Terminal is chosen per pane: a shell pane read as a terminal
 // and an agent pane read as a timeline sit side by side in one worktree, and
 // switching one leaves the others as they were. A pane never chosen for opens
-// as the screen suits (the timeline on a phone). Remembered by pane key, the
-// most recent choices kept.
+// on the timeline when seahelm opened its worktree (the core's
+// `seahelm_worktree`: a `/new`, First Mate, an agent's `git worktree add`),
+// else as the screen suits (the timeline on a phone). Remembered by pane key,
+// the most recent choices kept.
 const SURFACE_KEY = 'seahelm_surface_modes';
 const SURFACE_KEEP = 200;
 try { localStorage.removeItem('seahelm_surface_mode'); } catch (e) {}   // the old page-wide choice
-function defaultSurfaceMode(){
+function defaultSurfaceMode(key){
+  const pane = key && S.panes.get(key);
+  if (pane && pane.seahelm_worktree) return 'text';
   return (window.innerWidth || 900) <= 760 ? 'text' : 'vt';
 }
 function surfaceModes(){
@@ -2412,7 +2419,7 @@ function surfaceModes(){
 function surfaceModeOf(key){
   if (key === FM_KEY) return 'text';
   const v = key && surfaceModes().get(key);
-  return v === 'text' || v === 'vt' ? v : defaultSurfaceMode();
+  return v === 'text' || v === 'vt' ? v : defaultSurfaceMode(key);
 }
 function rememberSurfaceMode(key, mode){
   if (!key || key === FM_KEY) return;
@@ -2445,6 +2452,7 @@ function applySurfaceMode(){
   // The timeline has a composer; the terminal is typed into directly and only
   // gets the bar of keys a phone keyboard lacks.
   if (composer) composer.classList.toggle('on', text);
+  if (text) autoGrowComposer();
   if (vtBadge) vtBadge.hidden = text;
   if (rendererBadge) rendererBadge.hidden = text;
   const keys = $('keyBar');
@@ -2520,6 +2528,11 @@ function autoGrowComposer(){
   const wasAtEnd = host && host.scrollHeight - host.scrollTop - host.clientHeight <= TL_BOTTOM_SLOP;
   // Measure from nothing, or a field that just lost a line keeps the taller
   // scrollHeight it had and never shrinks back.
+  // A hidden field (the pane is on its terminal, or shows the agents to
+  // start) measures 0, and a 0px height leaves only its padding: the text
+  // sits on the pill's bottom edge until something types. Leave it to the
+  // CSS height and measure when the composer shows (`applySurfaceMode`).
+  if (!input.offsetParent) { input.style.height = ''; return; }
   input.style.height = 'auto';
   // `scrollHeight` is content + padding, but `box-sizing:border-box` counts the
   // border in `height` too. Without the difference the field lands two pixels

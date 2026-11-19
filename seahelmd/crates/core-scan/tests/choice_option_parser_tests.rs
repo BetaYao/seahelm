@@ -152,6 +152,22 @@ fn recognises_the_ask_user_question_dialog() {
         "  2. Cancel",
     ]);
     assert!(choices::is_agent_question_dialog(&review, DEFAULT_BOTTOM_LINES));
+    assert!(choices::is_question_review(&review));
+    // Claude Code 2.1.3xx: no "Ready to submit" line over the list.
+    let review = lines(&[
+        "←  ☒ 旧页面  ☒ PR 范围  ✔ Submit  →",
+        "Review your answers",
+        "  ● 线路列表的 AI识别、批量上传两个页面怎么处理？",
+        "    → 列表去掉入口，详情页保留改岩点 (Recommended)",
+        " ● 新的「新增线路」页放在哪个 PR?",
+        "   → 继续放在 #12580",
+        "",
+        "❯ 1. Submit answers",
+        "  2. Cancel",
+    ]);
+    assert!(choices::is_agent_question_dialog(&review, DEFAULT_BOTTOM_LINES));
+    assert!(choices::is_question_review(&review));
+    assert!(!choices::is_question_review(&question));
 }
 
 #[test]

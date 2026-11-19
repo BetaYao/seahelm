@@ -324,6 +324,27 @@ fn a_held_program_starts_when_the_pane_attaches_at_the_panes_size() {
     assert!(pane.text().contains("size=41 132"), "first frame not at the pane's size:\n{}", pane.text());
 }
 
+/// A passive viewer (seahelm-gateway's web mirror) attaches at 0x0, meaning
+/// "whatever size the session is". On a held session that used to start the
+/// program at 0x0, which libghostty-vt refuses: the attach failed, the
+/// program never ran, and the web showed an empty terminal.
+#[test]
+fn a_held_program_starts_at_the_default_size_for_a_passive_viewer() {
+    let dir = Dir::new();
+    dir.cli(&["new", "--hold", "10", "held", "--", "bash", "--norc", "-c", "echo \"size=$(stty size)\"; sleep 30"], &[]);
+    std::thread::sleep(Duration::from_millis(300));
+    let mut viewer = dir.connect("held");
+    proto::write(&mut viewer, &Msg::Attach { cols: 0, rows: 0 }).unwrap();
+    viewer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    match proto::read(&mut viewer) {
+        Ok(Some(Msg::Error(e))) => panic!("passive attach refused: {e}"),
+        Ok(Some(_)) => {}
+        other => panic!("no reply to a passive attach: {other:?}"),
+    }
+    let h = dir.wait_for("held", "size=");
+    assert!(h.contains("size=24 80"), "not started at the default size:\n{h}");
+}
+
 #[test]
 fn a_held_program_starts_anyway_when_nobody_comes() {
     let dir = Dir::new();

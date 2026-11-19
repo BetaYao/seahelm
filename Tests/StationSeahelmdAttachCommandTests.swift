@@ -26,4 +26,13 @@ final class StationSeahelmdAttachCommandTests: XCTestCase {
         let command = Station.seahelmdAttachCommand(paneSessionKey: "seahelm-me-Nick's Repo")
         XCTAssertTrue(command.hasSuffix("attach 'seahelm-me-Nick'\\''s Repo'"), command)
     }
+
+    /// A shell pane's session carries the pane context, so an agent the user
+    /// starts at that shell knows it is in seahelm.
+    func testSessionGetsPaneContext() {
+        let command = Station.seahelmdAttachCommand(paneSessionKey: "seahelm-me-repo")
+        XCTAssertTrue(command.contains("'SEAHELM_ENV=1' "), command)
+        XCTAssertTrue(command.contains("'SEAHELM_PANE_ID=seahelm-me-repo' "), command)
+        XCTAssertTrue(command.contains("'SEAHELM_SOCKET_PATH=\(ControlSocketServer.defaultSocketPath())' "), command)
+    }
 }
