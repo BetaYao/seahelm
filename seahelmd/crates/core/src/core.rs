@@ -126,6 +126,13 @@ struct State {
     /// before any title the terminal or agent gives, by every client.
     custom_titles: HashMap<String, String>,
     custom_titles_path: PathBuf,
+    /// Worktrees seahelm opened rather than the user: made by the core's
+    /// `worktree.create` (a chat's `/new`, First Mate, seahelm-web) or by an
+    /// agent in a pane (`git worktree add`, EnterWorktree). Oldest first,
+    /// the newest `MADE_WORKTREES_KEEP` kept. Their panes come with
+    /// `seahelm_worktree`, so seahelm-web opens them on the timeline.
+    made_worktrees: Vec<String>,
+    made_worktrees_path: PathBuf,
     cycle: u64,
     /// Notices: what was announced, what is held by the stability gate.
     policy: NotificationPolicy,
@@ -186,6 +193,9 @@ enum TranscriptSource {
 /// What `core.ping` says about the `seahelm` CLI's verbs: bumped when the
 /// CLI starts to rely on something new here.
 pub const CLI_DIALECT: u64 = 1;
+
+/// How many worktrees seahelm opened the core remembers (`made_worktrees`).
+const MADE_WORKTREES_KEEP: usize = 300;
 
 /// Calls that act on the pane `pane_id` names, and so announce their caller
 /// (`ControlRouter.presenceMethods`).
@@ -252,6 +262,23 @@ impl Core {
             .ok()
             .and_then(|t| serde_json::from_str::<HashMap<String, String>>(&t).ok())
             .unwrap_or_default();
+        let made_worktrees_path = dir.join("core-made-worktrees.json");
+        // Started from First Mate's observations the first time: the
+        // worktrees they say an agent or First Mate made.
+        let made_worktrees = std::fs::read_to_string(&made_worktrees_path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok())
+            .unwrap_or_else(|| {
+                let mut seen = Vec::new();
+                for r in first_mate::observations::read_records(&audit_path.with_file_name(first_mate::observations::FILE_NAME)) {
+                    if r.kind == "worktree.created" && r.by != "user" && !r.worktree.is_empty() && !seen.contains(&r.worktree) {
+                        seen.push(r.worktree);
+                    }
+                }
+                let over = seen.len().saturating_sub(MADE_WORKTREES_KEEP);
+                seen.drain(..over);
+                seen
+            });
         Arc::new(Self {
             state: Mutex::new(State {
                 cursor_workers: HashMap::new(),
@@ -271,6 +298,8 @@ impl Core {
                 session_refs_path,
                 custom_titles,
                 custom_titles_path,
+                made_worktrees,
+                made_worktrees_path,
                 cycle: 0,
                 policy: NotificationPolicy::new(),
                 signals: CompletionSignals::new(),
@@ -1333,6 +1362,11 @@ impl Core {
     }
 
     /// The pane's registration as `pane.list` shows it.
+    /// Remember a worktree the core made as seahelm's (`made_worktrees`).
+    pub fn note_made_worktree(&self, path: &str) {
+        self.lock().note_made_worktree(path);
+    }
+
     pub fn pane_row(&self, pane: &str) -> Option<Value> {
         self.lock().registry.pane_json(pane)
     }
@@ -2408,6 +2442,13 @@ impl State {
                 }
             }
             self.observe_worktree_commands(&ev);
+            // A worktree an agent in a pane made is seahelm's, not the user's.
+            if ev.pane_id.is_some() {
+                let home = std::env::var("HOME").unwrap_or_default();
+                if let Some(path) = hooks::location::created_worktree(ev.event, &ev.data, &ev.cwd, &home) {
+                    self.note_made_worktree(&path);
+                }
+            }
             let out = self.provider.handle(&ev, now, &mut hooks::provider::probe_worktree_root);
             if let Some(loc) = &out.pane_location {
                 if let Some(pane) = self.registry.resolve(Some(&loc.pane), "") {
@@ -2472,6 +2513,23 @@ impl State {
         }
     }
 
+    /// Remember a worktree as seahelm's (`made_worktrees`).
+    fn note_made_worktree(&mut self, path: &str) {
+        let path = path.trim_end_matches('/');
+        if path.is_empty() || self.made_worktrees.iter().any(|w| w == path) {
+            return;
+        }
+        self.made_worktrees.push(path.to_string());
+        let over = self.made_worktrees.len().saturating_sub(MADE_WORKTREES_KEEP);
+        self.made_worktrees.drain(..over);
+        if let Ok(text) = serde_json::to_string_pretty(&self.made_worktrees) {
+            let tmp = self.made_worktrees_path.with_extension("json.tmp");
+            if std::fs::write(&tmp, text).is_ok() {
+                let _ = std::fs::rename(&tmp, &self.made_worktrees_path);
+            }
+        }
+    }
+
     fn save_custom_titles(&self) {
         if let Ok(text) = serde_json::to_string_pretty(&self.custom_titles) {
             let tmp = self.custom_titles_path.with_extension("json.tmp");
@@ -2508,6 +2566,10 @@ impl State {
         }
         if let (Some(obj), Some(t)) = (v.as_object_mut(), custom) {
             obj.insert("custom_title".into(), json!(t));
+        }
+        let made = self.registry.pane(id).is_some_and(|p| self.made_worktrees.iter().any(|w| w == p.worktree_path.trim_end_matches('/')));
+        if let (Some(obj), true) = (v.as_object_mut(), made) {
+            obj.insert("seahelm_worktree".into(), json!(true));
         }
         Some(v)
     }
@@ -3264,6 +3326,34 @@ mod card_timeline_tests {
             agent_type: AgentType::ClaudeCode,
             started_at: None,
         }
+    }
+
+    #[test]
+    fn panes_in_a_worktree_an_agent_made_are_marked_seahelms() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        let mut st = core.lock();
+        st.register(registration());
+        assert!(st.pane_json("seahelm-pane-1").unwrap().get("seahelm_worktree").is_none(), "the user's own worktree");
+        let payload = json!({"source":"claude", "session_id":"s", "event":"tool_use_start", "cwd":"/workspace/saas-mono", "seahelm_pane_id":"seahelm-pane-1",
+            "data":{"tool_name":"Bash", "tool_input":{"command":"git worktree add ../saas-mono-fix -b fix"}}});
+        st.hook(payload, 1.0);
+        st.register(Registration { pane: "seahelm-pane-2".into(), alias: None, worktree_path: "/workspace/saas-mono-fix".into(), branch: "fix".into(), ..registration() });
+        assert_eq!(st.pane_json("seahelm-pane-2").unwrap()["seahelm_worktree"], true);
+        assert!(st.pane_json("seahelm-pane-1").unwrap().get("seahelm_worktree").is_none());
+        drop(st);
+        let saved: Vec<String> = serde_json::from_str(&std::fs::read_to_string(tmp.path().join("core-made-worktrees.json")).unwrap()).unwrap();
+        assert_eq!(saved, ["/workspace/saas-mono-fix"]);
+    }
+
+    #[test]
+    fn made_worktrees_start_from_first_mates_observations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let line = |w: &str, by: &str| format!("{{\"kind\":\"worktree.created\",\"worktree\":\"{w}\",\"by\":\"{by}\"}}\n");
+        let text = [line("/w/agent", "agent"), line("/w/user", "user"), line("/w/fm", "first_mate")].concat();
+        std::fs::write(tmp.path().join(crate::first_mate::observations::FILE_NAME), text).unwrap();
+        let core = Core::for_test(tmp.path());
+        assert_eq!(core.lock().made_worktrees, ["/w/agent", "/w/fm"]);
     }
 
     #[test]

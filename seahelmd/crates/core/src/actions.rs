@@ -416,6 +416,7 @@ fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcRes
         agent_type: agent,
         started_at: Some(seahelm_core_types::now()),
     });
+    core.note_made_worktree(&path_s);
     Ok(json!({"worktree_path": path_s, "branch": branch, "pane_session_key": session}))
 }
 
@@ -432,6 +433,7 @@ fn start_session(session: &str, dir: &Path, setup: Option<&Path>, repo: &Path, l
     cmd.current_dir(dir)
         .env("SEAHELM_WORKTREE", dir)
         .env("SEAHELM_REPO_ROOT", repo)
+        .env("SEAHELM_ENV", "1")
         .env("SEAHELM_PANE_ID", session)
         .args(["new", "--hold", "15", session, "--"]);
     #[cfg(unix)]
