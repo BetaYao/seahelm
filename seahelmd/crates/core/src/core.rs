@@ -793,6 +793,15 @@ impl Core {
             }
             "pane.read" | "pane.start_agent" | "worktree.create" | "worktree.delete" | "pane.new" | "pane.close" => self.act(method, &p),
             "pane.start_session" => crate::actions::pane_start_session(&self, &p),
+            // A worktree a client made for a caller, not for the user at its
+            // window: the app's control socket (`seahelm worktree create`).
+            "worktree.made" => match str_param(&p, "worktree_path") {
+                Some(path) => {
+                    self.note_made_worktree(&path);
+                    Ok(json!({"ok": true}))
+                }
+                None => Err(RpcError::invalid_params("worktree_path required")),
+            },
             "worktree.options" => Ok(crate::actions::worktree_options(&self)),
             // Read-only: no RPC raises a habit's level (docs/first-mate-autonomy.md, D1).
             "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" => first_mate::task_sources::rpc(method, &p),
@@ -3344,6 +3353,21 @@ mod card_timeline_tests {
         drop(st);
         let saved: Vec<String> = serde_json::from_str(&std::fs::read_to_string(tmp.path().join("core-made-worktrees.json")).unwrap()).unwrap();
         assert_eq!(saved, ["/workspace/saas-mono-fix"]);
+    }
+
+    #[test]
+    fn a_client_says_which_worktree_it_made() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::for_test(tmp.path());
+        core.lock().register(Registration { worktree_path: "/workspace/saas-mono-x".into(), ..registration() });
+        use crate::peer::{Client, Verdict};
+        let call = |p: Value| match core.clone().call_checked("worktree.made", p, Some(1), || Verdict::Client { client: Client::MacApp, in_pane: None }) {
+            Reply::Value(v) => v,
+            Reply::Stream(_) => panic!("a stream"),
+        };
+        assert!(call(json!({})).is_err());
+        call(json!({"worktree_path": "/workspace/saas-mono-x/"})).unwrap();
+        assert_eq!(core.lock().pane_json("seahelm-pane-1").unwrap()["seahelm_worktree"], true);
     }
 
     #[test]
