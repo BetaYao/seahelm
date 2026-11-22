@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Map, Value};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 
 use super::frames::{self, VtEvent};
 use super::vt::VtStreams;
@@ -17,6 +17,7 @@ use super::FIRST_MATE;
 use crate::auth;
 use crate::gateway::{Gateway, Kick};
 use crate::rpc::{RpcError, RpcResult};
+use crate::screen;
 
 /// What the upgrade request said about the page.
 #[derive(Debug, Clone, Default)]
@@ -24,6 +25,9 @@ pub struct Meta {
     pub host: Option<String>,
     pub client_ip: String,
     pub user_agent: String,
+    /// The TCP peer itself (loopback behind the tunnel), never a forwarded
+    /// header: what the remote screen's connection rule goes by.
+    pub peer_ip: Option<std::net::IpAddr>,
 }
 
 const PING_EVERY: Duration = Duration::from_secs(30);
@@ -72,6 +76,21 @@ struct Session {
     /// Timeline rows at or below this were in the auth replay.
     message_floor: u64,
     out: mpsc::Sender<Message>,
+    /// The remote screen this page has open, if any.
+    screen: Option<screen::Watching>,
+    /// Its receiver, handed to the select loop once opened.
+    screen_opened: Option<watch::Receiver<screen::Shared>>,
+    /// The last frame sent, and the last error told.
+    screen_seq: u64,
+    screen_error: Option<String>,
+    /// H.264 only decodes from a key frame: set on open and whenever a frame
+    /// was skipped, cleared by the next key frame.
+    screen_need_key: bool,
+    /// The displays and clipboard last told (`Shared`'s counters).
+    screen_displays_seq: u64,
+    screen_clipboard_seq: u64,
+    /// This page's bitrate, following its link.
+    screen_adapt: screen::Adapt,
 }
 
 /// What the page knows a pane runs: its agent, and the model and effort
@@ -101,13 +120,28 @@ pub async fn run(gw: Arc<Gateway>, socket: WebSocket, meta: Meta) {
         sent_agent: HashMap::new(),
         message_floor: 0,
         out: out_tx,
+        screen: None,
+        screen_opened: None,
+        screen_seq: 0,
+        screen_error: None,
+        screen_need_key: true,
+        screen_displays_seq: 0,
+        screen_clipboard_seq: 0,
+        screen_adapt: screen::Adapt::new(None, Instant::now()),
     };
+    let mut screen_rx: Option<watch::Receiver<screen::Shared>> = None;
     let mut ticker = tokio::time::interval(PING_EVERY);
     ticker.tick().await;
     let mut last_heard = Instant::now();
     adjust_clients(&gw, 1);
 
     loop {
+        if let Some(rx) = s.screen_opened.take() {
+            screen_rx = Some(rx);
+        }
+        if s.screen.is_none() {
+            screen_rx = None;
+        }
         let authed = !matches!(s.who, Who::Nobody);
         let outbound: Vec<Message> = tokio::select! {
             incoming = stream.next() => {
@@ -152,6 +186,10 @@ pub async fn run(gw: Arc<Gateway>, socket: WebSocket, meta: Meta) {
                     _ => Vec::new(),
                 }
             }
+            changed = screen_changed(&mut screen_rx) => match (changed, screen_rx.as_mut()) {
+                (true, Some(rx)) => s.screen_update(rx),
+                _ => s.screen_closed("gateway"),
+            },
             k = kick.recv() => match k {
                 Ok(k) if s.kicked(&k) => break,
                 _ => Vec::new(),
@@ -185,6 +223,14 @@ pub async fn run(gw: Arc<Gateway>, socket: WebSocket, meta: Meta) {
     let _ = sink.close().await;
 }
 
+/// The next change to the open screen; never, while none is open.
+async fn screen_changed(rx: &mut Option<watch::Receiver<screen::Shared>>) -> bool {
+    match rx {
+        Some(r) => r.changed().await.is_ok(),
+        None => std::future::pending().await,
+    }
+}
+
 fn adjust_clients(gw: &Gateway, by: isize) {
     let mut st = gw.web_status.lock().unwrap_or_else(|e| e.into_inner());
     st.clients = st.clients.saturating_add_signed(by);
@@ -212,6 +258,55 @@ fn str_of<'a>(p: &'a Value, k: &str) -> Option<&'a str> {
 /// What a request names a pane by.
 fn pane_ref(p: &Value) -> Option<String> {
     str_of(p, "pane_session_key").or_else(|| str_of(p, "pane_id")).map(str::to_string)
+}
+
+/// Input on a screen that is not open.
+const SCREEN_CLOSED: i64 = -32010;
+
+fn u32_of(p: &Value, k: &str) -> Option<u32> {
+    p.get(k).and_then(Value::as_u64).map(|n| n.min(u32::MAX as u64) as u32)
+}
+
+fn ask_of(p: &Value) -> screen::Ask {
+    screen::Ask {
+        fps: u32_of(p, "fps"),
+        max_short: u32_of(p, "max_short"),
+        kbps: u32_of(p, "kbps"),
+        codecs: p.get("codecs").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()),
+    }
+}
+
+/// A page's screen input, checked, as the app reads it.
+fn screen_input(method: &str, p: &Value) -> Result<Value, RpcError> {
+    let unit = |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| (0.0..=1.0).contains(v));
+    let bad = |m: &str| Err(RpcError::invalid_params(m));
+    match method {
+        "screen.pointer" => {
+            let action = str_of(p, "action").unwrap_or("");
+            if !["move", "down", "up", "click", "double", "right"].contains(&action) {
+                return bad("action: move, down, up, click, double or right");
+            }
+            let (Some(x), Some(y)) = (unit("x"), unit("y")) else { return bad("x and y between 0 and 1") };
+            Ok(json!({"type": "pointer", "action": action, "x": x, "y": y}))
+        }
+        "screen.scroll" => {
+            let d = |k: &str| p.get(k).and_then(Value::as_f64).unwrap_or(0.0).clamp(-5000.0, 5000.0);
+            let (Some(x), Some(y)) = (unit("x"), unit("y")) else { return bad("x and y between 0 and 1") };
+            Ok(json!({"type": "scroll", "x": x, "y": y, "dx": d("dx"), "dy": d("dy")}))
+        }
+        "screen.key" => match str_of(p, "key").filter(|k| k.len() <= 64) {
+            Some(k) => Ok(json!({"type": "key", "key": k})),
+            None => bad("key required"),
+        },
+        "screen.clipboard" => match str_of(p, "text").filter(|t| t.len() <= screen::MAX_CLIPBOARD) {
+            Some(t) => Ok(json!({"type": "clipboard", "text": t})),
+            None => bad("text required, at most 256 KB"),
+        },
+        _ => match str_of(p, "text").filter(|t| t.chars().count() <= 4000) {
+            Some(t) => Ok(json!({"type": "text", "text": t})),
+            None => bad("text required, at most 4000 characters"),
+        },
+    }
 }
 
 /// Methods a paired page may not call: the core's client-side plumbing.
@@ -464,6 +559,45 @@ impl Session {
                     Err(e) => Err(RpcError::internal(e.to_string())),
                 }
             }
+            "screen.open" => Ok(self.screen_open(&p)),
+            "screen.quality" => {
+                if let Some(w) = &self.screen {
+                    let mut ask = ask_of(&p);
+                    if let Some(k) = ask.kbps {
+                        self.screen_adapt.ask(k, Instant::now());
+                        ask.kbps = Some(self.screen_adapt.kbps());
+                    }
+                    self.gw.screen.set_quality(w.id, &ask);
+                }
+                Ok(json!({"ok": self.screen.is_some()}))
+            }
+            // The page's decoder broke: nothing more until a key frame.
+            "screen.key_frame" => {
+                if self.screen.is_some() {
+                    self.screen_need_key = true;
+                    self.gw.screen.request_key_frame();
+                }
+                Ok(json!({"ok": self.screen.is_some()}))
+            }
+            // Capture another display (one `screen.info` listed); null: the main one.
+            "screen.display" => {
+                if self.screen.is_none() {
+                    return Some(Err(RpcError::new(SCREEN_CLOSED, "the screen is not open")));
+                }
+                self.gw.screen.choose_display(p.get("id").and_then(Value::as_u64));
+                Ok(json!({"ok": true}))
+            }
+            "screen.close" => {
+                if self.screen.take().is_some() {
+                    eprintln!("seahelm-gateway: screen: {} closed it", self.via());
+                }
+                Ok(json!({"ok": true}))
+            }
+            "screen.pointer" | "screen.scroll" | "screen.key" | "screen.text" | "screen.clipboard" => match screen_input(method, &p) {
+                Err(e) => Err(e),
+                Ok(_) if self.screen.is_none() => Err(RpcError::new(SCREEN_CLOSED, "the screen is not open")),
+                Ok(msg) => Ok(json!({"sent": self.gw.screen.input(msg)})),
+            },
             m if NOT_FOR_PAGES.contains(&m) => Err(RpcError::not_found(m)),
             m => self.core(m, p).await,
         })
@@ -486,6 +620,107 @@ impl Session {
             .filter_map(|p| Some((p["pane_session_key"].as_str()?.to_string(), agent_of(p))))
             .collect();
         Ok(panes)
+    }
+
+    // MARK: remote screen
+
+    /// `screen.open`: `{ok: true}`, or `{ok: false, reason, message}`.
+    fn screen_open(&mut self, p: &Value) -> Value {
+        let refuse = |reason: &str, message: &str| json!({"ok": false, "reason": reason, "message": message});
+        let Who::Device { id, label } = &self.who else {
+            return refuse("forbidden", "Only a paired device can open the screen.");
+        };
+        let (enabled, via) = {
+            let st = self.gw.store();
+            (st.config.web.screen_control, st.state.devices.iter().find(|d| &d.id == id).map(|d| d.via.clone()))
+        };
+        if !enabled {
+            return refuse("disabled", "Screen control is off. Turn it on in seahelm's Settings ▸ Pairing on the Mac.");
+        }
+        if via.as_deref() == Some("telegram") {
+            return refuse("telegram", "Screen control is not available in Telegram. Open seahelm in the browser instead.");
+        }
+        if !self.meta.peer_ip.is_some_and(screen::peer_allowed) {
+            return refuse("insecure", "This connection is not encrypted. Open seahelm over HTTPS (your tunnel or tailscale serve) or a Tailscale address.");
+        }
+        let label = label.clone();
+        self.screen = None;
+        match self.gw.screen.open(&label, &ask_of(p)) {
+            Ok((w, rx)) => {
+                eprintln!("seahelm-gateway: screen: opened by {} from {}", self.via(), self.meta.client_ip);
+                self.screen = Some(w);
+                self.screen_opened = Some(rx);
+                self.screen_seq = 0;
+                self.screen_error = None;
+                self.screen_need_key = true;
+                self.screen_displays_seq = 0;
+                self.screen_clipboard_seq = 0;
+                self.screen_adapt = screen::Adapt::new(u32_of(p, "kbps"), Instant::now());
+                json!({"ok": true, "codecs": ["h264", "jpeg"]})
+            }
+            Err(m) => refuse("unavailable", m),
+        }
+    }
+
+    fn screen_closed(&mut self, reason: &str) -> Vec<Message> {
+        self.screen = None;
+        vec![notify("screen.state", json!({"open": false, "reason": reason}))]
+    }
+
+    /// What the page needs to hear about a change to the screen it watches.
+    fn screen_update(&mut self, rx: &mut watch::Receiver<screen::Shared>) -> Vec<Message> {
+        let st = rx.borrow_and_update().clone();
+        let Some(w) = &self.screen else { return Vec::new() };
+        if st.epoch != w.epoch {
+            return self.screen_closed("stopped");
+        }
+        if !st.provider {
+            return self.screen_closed("app_gone");
+        }
+        let mut out = Vec::new();
+        if st.error != self.screen_error {
+            self.screen_error = st.error.clone();
+            out.push(notify("screen.state", json!({"open": true, "error": st.error})));
+        }
+        if st.displays_seq != self.screen_displays_seq {
+            self.screen_displays_seq = st.displays_seq;
+            if let Some(d) = &st.displays {
+                out.push(notify("screen.info", json!({"displays": d["list"], "display": d["current"]})));
+            }
+        }
+        if st.clipboard_seq != self.screen_clipboard_seq {
+            self.screen_clipboard_seq = st.clipboard_seq;
+            if let Some(t) = &st.clipboard {
+                out.push(notify("screen.info", json!({"clipboard": t.as_str()})));
+            }
+        }
+        if let Some(f) = st.frame.filter(|_| st.seq != self.screen_seq) {
+            // The first frame after open follows seq 0 by more than one
+            // without anything having been lost.
+            let skipped = self.screen_seq != 0 && st.seq != self.screen_seq + 1;
+            self.screen_seq = st.seq;
+            let now = Instant::now();
+            // Only H.264 has a bitrate to follow the link with.
+            let retuned = match (f.codec == screen::CODEC_H264, skipped) {
+                (false, _) => None,
+                (true, true) => self.screen_adapt.skipped(now),
+                (true, false) => self.screen_adapt.delivered(now),
+            };
+            if let (Some(kbps), Some(w)) = (retuned, &self.screen) {
+                self.gw.screen.set_quality(w.id, &screen::Ask { kbps: Some(kbps), ..Default::default() });
+                out.push(notify("screen.info", json!({"kbps": kbps})));
+            }
+            if f.codec == screen::CODEC_H264 && !f.key && (self.screen_need_key || skipped) {
+                self.screen_need_key = true;
+                self.gw.screen.request_key_frame();
+                return out;
+            }
+            if f.key {
+                self.screen_need_key = false;
+            }
+            out.push(Message::Binary(screen::encode_for_page(&f).into()));
+        }
+        out
     }
 
     fn cards_notify(&self, list: &[Value]) -> Message {
@@ -777,6 +1012,18 @@ mod tests {
         assert_ne!(agent_of(&opus), agent_of(&json!({"agent_type": "claudeCode", "model": "claude-sonnet-5-5"})));
         assert_ne!(agent_of(&opus), agent_of(&json!({"agent_type": "claudeCode"})));
         assert_eq!(agent_of(&opus), agent_of(&json!({"agent_type": "claudeCode", "model": "claude-opus-5-5", "effort": null})));
+    }
+
+    #[test]
+    fn screen_input_is_checked() {
+        assert_eq!(screen_input("screen.pointer", &json!({"action": "click", "x": 0.5, "y": 1.0})).unwrap()["action"], "click");
+        assert!(screen_input("screen.pointer", &json!({"action": "click", "x": 1.5, "y": 0.0})).is_err());
+        assert!(screen_input("screen.pointer", &json!({"action": "rm", "x": 0.1, "y": 0.1})).is_err());
+        assert_eq!(screen_input("screen.scroll", &json!({"x": 0.1, "y": 0.1, "dy": 1e9})).unwrap()["dy"], 5000.0);
+        assert_eq!(screen_input("screen.key", &json!({"key": "cmd+shift+t"})).unwrap()["type"], "key");
+        assert!(screen_input("screen.text", &json!({"text": ""})).is_err());
+        assert_eq!(screen_input("screen.clipboard", &json!({"text": "a"})).unwrap()["type"], "clipboard");
+        assert!(screen_input("screen.clipboard", &json!({"text": "x".repeat(screen::MAX_CLIPBOARD + 1)})).is_err());
     }
 
     #[test]

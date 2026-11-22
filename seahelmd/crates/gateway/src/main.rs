@@ -18,6 +18,7 @@ mod core;
 mod gateway;
 mod paths;
 mod rpc;
+mod screen;
 mod store;
 mod telegram;
 mod web;
@@ -118,10 +119,27 @@ fn serve() -> Result<()> {
     core.start();
     eprintln!("seahelm-gateway {}: serving (pid {})", env!("CARGO_PKG_VERSION"), std::process::id());
     rt.block_on(async move {
+        if let Err(e) = screen::spawn(gw.screen.clone()) {
+            eprintln!("seahelm-gateway: screen: {e:#}");
+        }
+        tokio::spawn(screen_follows_config(gw.clone()));
         telegram::spawn(gw.clone());
         web::run(gw).await;
     });
     Ok(())
+}
+
+/// Turning remote control off ends every screen session at once.
+async fn screen_follows_config(gw: std::sync::Arc<gateway::Gateway>) {
+    let mut config = gw.config();
+    loop {
+        if !config.borrow_and_update().0.web.screen_control {
+            gw.screen.stop_all();
+        }
+        if config.changed().await.is_err() {
+            return;
+        }
+    }
 }
 
 fn ensure() -> Result<()> {

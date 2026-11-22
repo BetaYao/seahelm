@@ -2046,6 +2046,9 @@ extension MainWindowController {
         GatewayLink.shared.onReachabilityChange = { [weak self] in
             self?.refreshIsland()
         }
+        ScreenShareService.shared.onViewersChange = { [weak self] in
+            self?.refreshIsland()
+        }
         // Push-driven: worktree status changes arrive via
         // tabCoordinatorRequestUpdateTitleBar. The timer is only a slow
         // fallback for async stragglers (e.g. title resolution finishing
@@ -2216,7 +2219,8 @@ extension MainWindowController {
         // A core that does not answer is invisible everywhere else: every pane
         // just stops changing, indistinguishable from a fleet with nothing to
         // say.
-        let warning = IslandWarning.current(
+        let warning = IslandWarning.screen(viewers: ScreenShareService.shared.viewers,
+                                           isChinese: model.language.isChinese) ?? IslandWarning.current(
             coreUnreachableSince: CoreLink.shared.unreachableSince,
             gatewayUnreachableSince: GatewayLink.shared.unreachableSince,
             controlChannel: tabCoordinator.terminalCoordinator?.controlSocketServer?.state,

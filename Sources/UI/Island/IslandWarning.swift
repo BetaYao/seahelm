@@ -25,6 +25,19 @@ struct IslandWarning: Equatable {
             ?? controlChannelWarning(controlChannel, isChinese: isChinese)
     }
 
+    /// Someone is watching and controlling this Mac from seahelm-web
+    /// (`ScreenShareService`). It outranks every other warning: the user must
+    /// never miss it. The menu bar item it comes with has Stop.
+    static func screen(viewers: [String], isChinese: Bool = false) -> IslandWarning? {
+        guard !viewers.isEmpty else { return nil }
+        let who = viewers.joined(separator: ", ")
+        return IslandWarning(
+            badge: "SCREEN",
+            message: isChinese
+                ? "\(who) 正在查看并控制这台 Mac 的屏幕。在菜单栏的 SCREEN 菜单里可以停止。"
+                : "\(who) is watching and controlling this Mac's screen. Stop it from the SCREEN menu in the menu bar.")
+    }
+
     /// seahelm-gateway is not answering: seahelm-web, share links and the
     /// Telegram bot are down until `GatewayLink` has it running again.
     static func gateway(unreachableSince: Date?, now: Date = Date(), isChinese: Bool = false) -> IslandWarning? {

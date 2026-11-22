@@ -135,6 +135,7 @@
   body[data-share="pane"] #drawerBtn,
   body[data-share="pane"] .pane-tabs,
   body[data-share="pane"] #nwOpenBtn{display:none}
+  body[data-share="pane"] #screenBtn{display:none}
   body[data-share="pane"] #midcol{display:flex}
   /* A wide window keeps First Mate open on the right while a worktree fills
      the middle. The column is this same page again (`?dock=mate`, below) in
@@ -765,6 +766,9 @@
             <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.2"/><path d="M12 4v5.8M12 14.2V20M4 12h5.8M14.2 12H20"/></svg>
             <i class="mate-dot" aria-hidden="true"></i>
           </button>
+          <button class="icon-btn" id="screenBtn" type="button" aria-label="Mac screen" title="See and control the Mac's screen" data-offline>
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="1.6"/><path d="M9 20h6M12 16.5V20"/></svg>
+          </button>
           <button class="icon-btn" id="menuBtn" type="button" aria-haspopup="menu" aria-label="More" data-offline>
             <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>
           </button>
@@ -927,6 +931,7 @@
 <script src="./slash-complete.js"></script>
 <script src="./card-model.js"></script>
 <script src="./card-timeline.js"></script>
+<script src="./screen-view.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────
 const GEOM_KEY = 'seahelm_pane_geometry';
@@ -1338,6 +1343,7 @@ function openGatewaySocket(){
       hadLink = true;
       reconnector.succeeded();
       setStatus(true, 'Connected');
+      ScreenView.linkUp();
       // The gateway folds the snapshot into the auth reply, because a round
       // trip over the tunnel costs far more than the query does; the cards
       // follow as a `cards` notify.
@@ -1383,6 +1389,7 @@ function onSocketGone(ws){
   // left out: failing it reads as a rejected credential and stops reconnecting.
   const orphaned = S.gw ? [...S.gw.req.values()].filter(cb => cb.method !== 'auth') : [];
   S.gw = null; S.transport = null;
+  ScreenView.linkDown();
   // The panes' attach leases went with the socket; keep where we were so
   // the reconnect can put it back rather than landing on an empty page.
   if (S.vt.worktree) lastMount = { path: S.vt.worktree, focus: S.vt.focus };
@@ -1488,6 +1495,8 @@ function enqueueVTApply(key, type, work){ return vtApply.enqueue(key, type, work
 function releaseVTChain(key){ vtApply.release(key); }
 
 function onGatewayBinaryFrame(buf){
+  // Kind 3: a remote-screen picture, sent whatever VT encoding was negotiated.
+  if (buf.length >= 3 && buf[0] === 1 && buf[2] === 3) { ScreenView.onFrame(buf); return; }
   // The auth reply is what makes these frames expected at all. Checking it here
   // turns a server that ignored the negotiation into one visible log line
   // instead of a terminal that renders some frames and silently drops the rest.
@@ -1531,6 +1540,14 @@ function onGatewayFrame(msg){
 }
 
 function onGatewayNotify(method, params){
+  if (method === 'screen.state') {
+    ScreenView.onState(params);
+    return;
+  }
+  if (method === 'screen.info') {
+    ScreenView.onInfo(params);
+    return;
+  }
   if (method === 'autopilot.state') {
     applyFirstMate(params);
     return;
@@ -4236,6 +4253,8 @@ function openNewWorktree(path, paneKey, repoName, agentLabel){
 (function wireNewWork(){
   const form = $('newWork'), input = $('nwPrompt'), sheet = $('nwSheet');
   $('nwOpenBtn').onclick = nwShowSheet;
+  ScreenView.init({ send: gwSend, log });
+  $('screenBtn').onclick = () => ScreenView.open();
   $('nwCancel').onclick = nwHideSheet;
   // A tap on the dimmed page behind the sheet closes it, as it does on iOS.
   sheet.addEventListener('click', (ev) => { if (ev.target === sheet) nwHideSheet(); });
