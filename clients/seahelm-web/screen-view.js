@@ -67,6 +67,8 @@
 #screenView .sv-bar button,#screenView .sv-keys button{background:rgba(40,40,44,.82);color:#f2f2f2;border:1px solid rgba(255,255,255,.14);
   border-radius:9px;min-width:38px;height:34px;padding:0 10px;font:600 14px -apple-system,system-ui,sans-serif;
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+#screenView .sv-bar button{display:flex;align-items:center;justify-content:center;width:38px;padding:0}
+#screenView .sv-bar svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 #screenView .sv-keys button.on{background:#2f6fde;border-color:#2f6fde}
 #screenView .sv-status{position:absolute;left:max(8px,env(safe-area-inset-left));top:max(8px,env(safe-area-inset-top));
   font:12px ui-monospace,Menlo,monospace;color:rgba(255,255,255,.75);background:rgba(0,0,0,.45);padding:3px 7px;border-radius:6px;z-index:2;
@@ -106,11 +108,11 @@
 <div class="sv-stage"><canvas></canvas><div class="sv-hint"></div></div>
 <div class="sv-status"></div>
 <div class="sv-bar">
-  <button type="button" data-act="display" title="Display" hidden>🖥</button>
-  <button type="button" data-act="clip" title="Clipboard">📋</button>
-  <button type="button" data-act="fit" title="Fit">⤢</button>
-  <button type="button" data-act="kbd" title="Keyboard">⌨</button>
-  <button type="button" data-act="close" title="Close">✕</button>
+  <button type="button" data-act="display" title="Display" aria-label="Display" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="1.6"/><path d="M9 20h6M12 16.5V20"/></svg></button>
+  <button type="button" data-act="clip" title="Clipboard" aria-label="Clipboard"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="4.5" width="13" height="16" rx="2"/><path d="M9 4.5V3.8c0-.7.5-1.3 1.2-1.3h3.6c.7 0 1.2.6 1.2 1.3v.7M9 10h6M9 14h4"/></svg></button>
+  <button type="button" data-act="fit" title="Fit" aria-label="Fit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+  <button type="button" data-act="kbd" title="Keyboard" aria-label="Keyboard"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6.5 14h11"/></svg></button>
+  <button type="button" data-act="close" title="Close" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
 </div>
 <div class="sv-keys">
   <button type="button" data-mod="cmd">⌘</button><button type="button" data-mod="alt">⌥</button>
