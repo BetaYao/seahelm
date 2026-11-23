@@ -380,6 +380,10 @@ impl Workspace {
             let alive = this
                 .update(cx, |w, cx| {
                     w.fleet = snap;
+                    // With each sync, as the macOS app's `CoreLink` sends its
+                    // trees: a core that restarted has them again within a poll.
+                    let layouts = w.core_layouts();
+                    cx.background_executor().spawn(async move { core_client::set_layouts(layouts) }).detach();
                     w.labels = labels;
                     if w.selected.is_none() {
                         w.selected = w.fleet.groups.iter().flat_map(|g| g.items.first()).next().map(|i| i.id.clone());
@@ -1350,6 +1354,30 @@ impl Workspace {
             let _ = std::fs::create_dir_all(platform::config_dir());
             let _ = std::fs::write(layout_file(), text);
         }
+        // Every change goes to the core at once too; the fleet poll sends
+        // it again every two seconds.
+        let layouts = self.core_layouts();
+        std::thread::spawn(move || core_client::set_layouts(layouts));
+    }
+
+    /// Every worktree this window has terminals open in, its split tree as
+    /// seahelm-core keeps desktop layouts (`layouts.set`), by worktree path:
+    /// seahelm-web lays the worktree's panes out the same way. Asleep panes
+    /// stay in (their sessions run on); the document pane does not.
+    fn core_layouts(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut out = serde_json::Map::new();
+        for (id, p) in &self.panes {
+            if p.views.is_empty() {
+                continue;
+            }
+            let Some(item) = self.fleet.find(id) else { continue };
+            let mut tree = p.tree.clone();
+            if let Some(d) = &p.document {
+                tree.remove(d.leaf);
+            }
+            out.insert(item.worktree_path.clone(), tree.to_core(&|leaf| pane_session(id, leaf)));
+        }
+        out
     }
 
     fn split(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {

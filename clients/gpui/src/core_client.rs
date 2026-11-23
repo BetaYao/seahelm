@@ -329,6 +329,13 @@ pub fn set_worktrees(paths: &[String]) {
     let _ = call("worktrees.set", json!({"paths": paths}));
 }
 
+/// This window's split trees (`Workspace::core_layouts`), all of them each
+/// time, under its own client name: the core keeps each desktop client's
+/// layouts apart and serves the macOS app's first (`layout.get`).
+pub fn set_layouts(layouts: serde_json::Map<String, Value>) {
+    let _ = call("layouts.set", json!({"client": "gpui", "layouts": layouts}));
+}
+
 /// One window of a provider's usage (`usage.summary` readouts): "5h", "42%",
 /// and how much is used ("ok", "warn", "critical").
 #[derive(Clone, Debug, PartialEq)]
