@@ -36,6 +36,7 @@ use crate::side_panel::{self, SidePanel, Tab as SideTab};
 use crate::split::{Axis, Direction, LeafId, Rect, SplitTree};
 use crate::terminal_view::TerminalView;
 use crate::theme;
+use crate::watchdog;
 use crate::tokens::{self, MONO, SYSTEM};
 
 const SIDEBAR_DEFAULT: f32 = 300.0;
@@ -224,6 +225,11 @@ pub struct Workspace {
     /// gateway page polls only while this is set.
     gateway_open: bool,
     gateway_page: Entity<GatewayPage>,
+    /// seahelm-gateway has been silent past the watchdog's grace
+    /// (`watchdog::WARN_AFTER`): the dock says so beside First Mate's state,
+    /// as the island's `GW` badge does. (A silent core already reads as
+    /// "Core offline" there.)
+    gateway_silent: bool,
     /// The left column shows Files or Changes in place of the fleet
     /// (None: the fleet), as the macOS app's column does.
     side_tab: Option<SideTab>,
@@ -302,6 +308,7 @@ impl Workspace {
             first_mate_open: false,
             first_mate: None,
             first_mate_view: None,
+            gateway_silent: false,
             spin_phase: 0,
             window_active: true,
             gateway_open: false,
@@ -393,6 +400,9 @@ impl Workspace {
     fn poll_core(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().spawn(async { core_client::ensure() }).await;
+            if this.update(cx, |_, cx| Self::watch_services(cx)).is_err() {
+                return;
+            }
             let cards = cx.background_executor().spawn(async { core_client::cards() }).await;
             if this.update(cx, |w, cx| w.set_cards(cards, cx)).is_err() {
                 return;
@@ -421,6 +431,52 @@ impl Workspace {
                     break;
                 }
                 cx.background_executor().timer(Duration::from_secs(2)).await;
+            }
+        })
+        .detach();
+    }
+
+    /// Keep seahelm-core and seahelm-gateway running after the start's
+    /// `ensure` (`watchdog`): ping both every 5 s, off the UI thread, and
+    /// `ensure` a silent one again at most every 15 s.
+    fn watch_services(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let start = Instant::now();
+            let (mut core, mut gateway) = (watchdog::Watch::default(), watchdog::Watch::default());
+            core.ensured(start);
+            gateway.ensured(start);
+            loop {
+                cx.background_executor().timer(watchdog::PING_EVERY).await;
+                let (core_up, gateway_up) = cx
+                    .background_executor()
+                    .spawn(async {
+                        (
+                            core_client::answers(&core_client::socket(), "core.ping"),
+                            core_client::answers(&crate::platform::gateway_socket(), "gateway.ping"),
+                        )
+                    })
+                    .await;
+                let now = Instant::now();
+                // `ensure` waits for the service to come up: on a thread of
+                // its own, so the pings go on meanwhile.
+                if core.ping(core_up, now) {
+                    eprintln!("seahelm-gpui: seahelm-core is not answering; ensure");
+                    std::thread::spawn(core_client::ensure_core);
+                }
+                if gateway.ping(gateway_up, now) {
+                    eprintln!("seahelm-gpui: seahelm-gateway is not answering; ensure");
+                    std::thread::spawn(core_client::ensure_gateway);
+                }
+                let gateway_silent = gateway.warn(now);
+                let alive = this.update(cx, |w, cx| {
+                    if w.gateway_silent != gateway_silent {
+                        w.gateway_silent = gateway_silent;
+                        cx.notify();
+                    }
+                });
+                if alive.is_err() {
+                    break;
+                }
             }
         })
         .detach();
@@ -1074,6 +1130,10 @@ impl Workspace {
                     .child(div().text_size(px(14.)).text_color(tokens::accent()).child("⎈"))
                     .child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).text_color(tokens::ink()).child("First Mate"))
                     .child(div().flex_1())
+                    .when(self.gateway_silent, |d| {
+                        d.child(div().text_size(px(10.5)).text_color(tokens::attention()).child("Gateway offline"))
+                            .child(div().text_size(px(10.5)).text_color(tokens::ink_faint()).child("·"))
+                    })
                     .child(div().size(px(6.)).rounded_full().bg(colour))
                     .child(div().text_size(px(10.5)).text_color(colour).child(status)),
             )

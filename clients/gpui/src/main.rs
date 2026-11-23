@@ -34,6 +34,7 @@ mod theme;
 mod tokens;
 mod updater;
 mod user_config;
+mod watchdog;
 mod workspace;
 mod worktree_git;
 
