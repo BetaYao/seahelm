@@ -278,6 +278,7 @@
 		A03021337425A92FF6DFBE1B /* OpenCodePluginInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0A70D4315E684DAEAFF18A8 /* OpenCodePluginInstaller.swift */; };
 		A083ECDF8D2927774C2D494C /* GatewaySettingsPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8A2AA68FA4A2C6A0FB1967B /* GatewaySettingsPages.swift */; };
 		A0A5267095AB8E2FBAAB8C03 /* ghostty.conf in Resources */ = {isa = PBXBuildFile; fileRef = E4BEF7BAC8EF2918D2F601F7 /* ghostty.conf */; };
+		A22CD7BB71123E5E5E276C56 /* ScreenDisplays.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB8B5B7EBFC84F60481D10F /* ScreenDisplays.swift */; };
 		A2A33CDFDE9F70751E8F5DF0 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E7934A548F91E1E9FB161C /* SmokeTests.swift */; };
 		A3C6B5F047EBF420EA393C13 /* TodoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77ABED3BE7AAC378B4E6B068 /* TodoStore.swift */; };
 		A4AFD84FFBDFAD26FF53F119 /* CoreLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26B91DC57FC93DE36F017EA1 /* CoreLinkTests.swift */; };
@@ -552,6 +553,7 @@
 		3D90518E8BFCA59E2D344513 /* TerminalEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalEnvironment.swift; sourceTree = "<group>"; };
 		3F4CB69B94BFFAB30A5D430C /* ChromeHeaderDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeHeaderDelegate.swift; sourceTree = "<group>"; };
 		3F67CBC84404085C3483C910 /* TestViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestViewHelpers.swift; sourceTree = "<group>"; };
+		3FB8B5B7EBFC84F60481D10F /* ScreenDisplays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenDisplays.swift; sourceTree = "<group>"; };
 		40CAD3E9929AC9E5E32EBA9F /* Station.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Station.swift; sourceTree = "<group>"; };
 		40D968BCC97595B18597F6F9 /* CardDetailsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardDetailsTests.swift; sourceTree = "<group>"; };
 		4110371EE0D93ADF67AEE009 /* PasteRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteRegressionTests.swift; sourceTree = "<group>"; };
@@ -1025,6 +1027,7 @@
 		3341FCA1DB98DEC0CC4CB2CA /* Screen */ = {
 			isa = PBXGroup;
 			children = (
+				3FB8B5B7EBFC84F60481D10F /* ScreenDisplays.swift */,
 				7738564BA63D36A0B8EE4219 /* ScreenInputInjector.swift */,
 				7EABB7249102F42037FC3AA7 /* ScreenShareService.swift */,
 				77DAF19139A4CDAB719618EB /* ScreenVideoStream.swift */,
@@ -2167,6 +2170,7 @@
 				DD26E727E1605031773062C1 /* Region.swift in Sources */,
 				7CD31456EADFD7DFF1185D9D /* ReturnToPort.swift in Sources */,
 				D481604F51B38161124F37E6 /* SPSRewriter.swift in Sources */,
+				A22CD7BB71123E5E5E276C56 /* ScreenDisplays.swift in Sources */,
 				F9F72C5CD78219A9F222FEF4 /* ScreenInputInjector.swift in Sources */,
 				44DE88768591C2062F30385F /* ScreenShareService.swift in Sources */,
 				5A25387816D09F3CFB3B59F0 /* ScreenVideoStream.swift in Sources */,
