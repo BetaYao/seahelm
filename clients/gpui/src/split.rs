@@ -248,6 +248,33 @@ impl SplitTree {
     }
 }
 
+impl SplitTree {
+    /// The tree as seahelm-core keeps desktop layouts (`layouts.set`), in the
+    /// macOS app's shape: `{root, focused_pane_session_key}`, the root a
+    /// `{type: leaf, pane_session_key}` or `{type: split, axis, ratio, first,
+    /// second}` — `horizontal` side by side, as here and in the app. `key`
+    /// names each pane's session.
+    pub fn to_core(&self, key: &dyn Fn(LeafId) -> String) -> serde_json::Value {
+        fn node(n: &Node, key: &dyn Fn(LeafId) -> String) -> serde_json::Value {
+            match n {
+                Node::Leaf(l) => serde_json::json!({"type": "leaf", "pane_session_key": key(*l)}),
+                Node::Split { axis, ratio, a, b } => serde_json::json!({
+                    "type": "split",
+                    "axis": match axis { Axis::Horizontal => "horizontal", Axis::Vertical => "vertical" },
+                    "ratio": ratio,
+                    "first": node(a, key),
+                    "second": node(b, key),
+                }),
+            }
+        }
+        let mut out = serde_json::json!({"root": node(&self.root, key)});
+        if self.leaves().contains(&self.focused) {
+            out["focused_pane_session_key"] = key(self.focused).into();
+        }
+        out
+    }
+}
+
 fn overlaps(a: f32, alen: f32, b: f32, blen: f32) -> bool {
     a < b + blen - 1e-4 && b < a + alen - 1e-4
 }
@@ -328,6 +355,22 @@ fn dividers(n: &Node, area: Rect, path: &mut Vec<bool>, out: &mut Vec<Divider>) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_core_gets_the_macos_apps_shape() {
+        let mut t = super::SplitTree::default();
+        assert_eq!(t.to_core(&|l| format!("s{l}")), serde_json::json!({"root": {"type": "leaf", "pane_session_key": "s0"}, "focused_pane_session_key": "s0"}));
+        t.split(super::Axis::Horizontal);
+        t.split(super::Axis::Vertical);
+        let v = t.to_core(&|l| format!("s{l}"));
+        assert_eq!(v["focused_pane_session_key"], "s2");
+        assert_eq!(v["root"]["axis"], "horizontal");
+        assert_eq!(v["root"]["first"]["pane_session_key"], "s0");
+        assert_eq!(v["root"]["second"]["type"], "split");
+        assert_eq!(v["root"]["second"]["axis"], "vertical");
+        assert_eq!(v["root"]["second"]["second"]["pane_session_key"], "s2");
+        assert_eq!(v["root"]["ratio"], 0.5);
+    }
+
     use super::*;
 
     #[test]

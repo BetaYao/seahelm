@@ -4702,6 +4702,7 @@ dependencies = [
  "anyhow",
  "futures",
  "gpui",
+ "image",
  "keep-vt",
  "libc",
  "seahelm-core-types",

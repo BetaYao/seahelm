@@ -42,6 +42,31 @@ pub fn ensure() {
     ensure_gateway();
 }
 
+/// `seahelm-core ensure` alone, for the watchdog: the hooks were wired at
+/// the start.
+pub fn ensure_core() {
+    match crate::platform::command(binary()).arg("ensure").status() {
+        Ok(s) if s.success() => {}
+        Ok(s) => eprintln!("seahelm-gpui: seahelm-core ensure exited {s}"),
+        Err(e) => eprintln!("seahelm-gpui: cannot start seahelm-core ({e})"),
+    }
+}
+
+/// Whether anything answers `method` on `path` within two seconds. Any
+/// reply counts, an error too: a service answering is all the watchdog asks,
+/// and `ensure` would not change it.
+pub fn answers(path: &std::path::Path, method: &str) -> bool {
+    let Ok(mut stream) = crate::platform::connect(path) else { return false };
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
+    let mut line = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": {}}).to_string();
+    line.push('\n');
+    if stream.write_all(line.as_bytes()).is_err() {
+        return false;
+    }
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply).is_ok() && serde_json::from_str::<Value>(&reply).is_ok()
+}
+
 /// Start seahelm-gateway (web access and Telegram,
 /// docs/seahelm-gateway-plan.md) unless it runs already. It does nothing
 /// until web access or Telegram is turned on in its settings
@@ -304,6 +329,13 @@ pub fn set_worktrees(paths: &[String]) {
     let _ = call("worktrees.set", json!({"paths": paths}));
 }
 
+/// This window's split trees (`Workspace::core_layouts`), all of them each
+/// time, under its own client name: the core keeps each desktop client's
+/// layouts apart and serves the macOS app's first (`layout.get`).
+pub fn set_layouts(layouts: serde_json::Map<String, Value>) {
+    let _ = call("layouts.set", json!({"client": "gpui", "layouts": layouts}));
+}
+
 /// One window of a provider's usage (`usage.summary` readouts): "5h", "42%",
 /// and how much is used ("ok", "warn", "critical").
 #[derive(Clone, Debug, PartialEq)]
@@ -383,6 +415,10 @@ pub struct PaneFacts {
     /// The worktree the agent's latest tool call or cwd is in
     /// (`pane.locations`), when the core knows one.
     pub location_worktree: Option<String>,
+    /// That worktree is one the pane's agent created itself
+    /// (`created_by_agent`), and when the core heard of it (`at`).
+    pub location_created: bool,
+    pub location_at: f64,
     /// Claude's session id (`agent.sessions`, kind `id`).
     pub claude_session: Option<String>,
     /// The name the user gave the pane (`pane.rename`), on every client.
@@ -419,6 +455,8 @@ pub fn pane_facts() -> std::collections::HashMap<String, PaneFacts> {
         for (key, loc) in v.get("locations").and_then(Value::as_object).into_iter().flatten() {
             if let (Some(f), Some(wt)) = (out.get_mut(key), loc.get("worktree").and_then(Value::as_str)) {
                 f.location_worktree = Some(wt.to_string());
+                f.location_created = loc.get("created_by_agent").and_then(Value::as_bool).unwrap_or(false);
+                f.location_at = loc.get("at").and_then(Value::as_f64).unwrap_or(0.0);
             }
         }
     }

@@ -73,11 +73,29 @@ pub fn ensure_in(name: &str, cmd: &[String], cwd: Option<&str>) -> Result<()> {
     // The grid draws truecolour; say so to whatever runs inside.
     c.env("TERM", "xterm-256color").env("COLORTERM", "truecolor");
     c.env("SEAHELMD_FACTS", theme::facts_env());
+    for (k, v) in pane_env(name) {
+        c.env(k, v);
+    }
     let status = c.status().with_context(|| format!("run {}", daemon_binary().display()))?;
     if !status.success() {
         bail!("seahelmd could not start session {name}");
     }
     Ok(())
+}
+
+/// The pane context every session this client starts carries, as the macOS
+/// app's (`Station.seahelmdAttachCommand`, `SessionManager.detachedLaunchCommands`)
+/// and seahelm-core's own launches do: `SEAHELM_ENV` tells the seahelm skill
+/// the `seahelm` CLI is there to use, and `SEAHELM_PANE_ID` is the pane's
+/// session key, the id hooks and `_meta.caller` name it by.
+///
+/// No `SEAHELM_SOCKET_PATH`: it names the macOS app's control socket, which
+/// this client does not serve. The CLI sends pane, wait and event verbs to
+/// seahelm-core first (`$SEAHELM_CORE_SOCKET`, inherited when set), and the
+/// app-only verbs have nothing here to answer them either way.
+/// `seahelmd::inherited::scrub` already dropped a launching pane's copy.
+pub fn pane_env(name: &str) -> [(&'static str, String); 2] {
+    [("SEAHELM_ENV", "1".to_string()), ("SEAHELM_PANE_ID", name.to_string())]
 }
 
 /// Resident memory of the session's program and everything under it.
@@ -293,3 +311,39 @@ impl Session {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn sessions_carry_the_pane_context() {
+        let env = super::pane_env("seahelm-repo-task_x");
+        assert!(env.contains(&("SEAHELM_ENV", "1".into())));
+        assert!(env.contains(&("SEAHELM_PANE_ID", "seahelm-repo-task_x".into())));
+        assert!(env.iter().all(|(k, _)| *k != "SEAHELM_SOCKET_PATH"));
+    }
+
+    /// A real session sees them. Needs a built seahelmd (`SEAHELMD_BIN`) and
+    /// a scratch `SEAHELMD_DIR`, so it never touches live sessions.
+    #[test]
+    #[ignore]
+    #[cfg(unix)]
+    fn a_started_session_sees_the_pane_context() {
+        assert!(std::env::var_os("SEAHELMD_DIR").is_some(), "set a scratch SEAHELMD_DIR");
+        let out = std::env::temp_dir().join(format!("gpui-pane-env-{}", std::process::id()));
+        let name = format!("gpui-env-test-{}", std::process::id());
+        let script = format!("printf '%s %s' \"$SEAHELM_ENV\" \"$SEAHELM_PANE_ID\" > {}", out.display());
+        super::ensure(&name, &["sh".into(), "-c".into(), script]).unwrap();
+        // Held until a client attaches or 10 s pass.
+        let _ = seahelmd::client::connect(&name).map(|mut s| seahelmd::proto::write(&mut s, &seahelmd::proto::Msg::Attach { cols: 80, rows: 24 }));
+        for _ in 0..50 {
+            if let Ok(got) = std::fs::read_to_string(&out) {
+                if !got.is_empty() {
+                    let _ = std::fs::remove_file(&out);
+                    assert_eq!(got, format!("1 {name}"));
+                    return;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        panic!("the session never wrote {}", out.display());
+    }
+}

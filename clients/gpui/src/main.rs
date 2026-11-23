@@ -19,6 +19,7 @@ mod fleet;
 mod fonts;
 mod gateway_client;
 mod gateway_page;
+mod image_paste;
 mod keys;
 mod labels;
 mod notify;
@@ -34,6 +35,7 @@ mod theme;
 mod tokens;
 mod updater;
 mod user_config;
+mod watchdog;
 mod workspace;
 mod worktree_git;
 
