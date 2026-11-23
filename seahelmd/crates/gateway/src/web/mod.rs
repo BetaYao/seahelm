@@ -40,7 +40,7 @@ pub async fn run(gw: Arc<Gateway>) {
     let files = Arc::new(static_files::StaticFiles::default());
     let mut config = gw.config();
     loop {
-        let web = config.borrow_and_update().0.web.clone();
+        let web = listener_part(&config.borrow_and_update().0.web);
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         let server = if web.enabled { Some(tokio::spawn(serve(gw.clone(), files.clone(), web.clone(), stop_rx))) } else { None };
         if !web.enabled {
@@ -51,7 +51,7 @@ pub async fn run(gw: Arc<Gateway>) {
             if config.changed().await.is_err() {
                 return;
             }
-            if config.borrow().0.web != web {
+            if listener_part(&config.borrow().0.web) != web {
                 break;
             }
         }
@@ -61,6 +61,13 @@ pub async fn run(gw: Arc<Gateway>) {
             let _ = tokio::time::timeout(Duration::from_secs(5), s).await;
         }
     }
+}
+
+/// The settings the listener and its pages depend on. Screen control is not
+/// one: turning it on or off must not drop every page (turning it off ends
+/// the screen sessions by itself, `screen_follows_config`).
+fn listener_part(web: &WebConfig) -> WebConfig {
+    WebConfig { screen_control: false, ..web.clone() }
 }
 
 async fn serve(gw: Arc<Gateway>, files: Arc<static_files::StaticFiles>, web: WebConfig, stop: tokio::sync::oneshot::Receiver<()>) {
@@ -121,7 +128,12 @@ async fn ws(State(app): State<App>, ConnectInfo(peer): ConnectInfo<SocketAddr>, 
         let v = v.to_ascii_lowercase();
         if v.starts_with('[') { v } else { v.split(':').next().unwrap_or("").to_string() }
     });
-    let meta = session::Meta { host: host.filter(|h| !h.is_empty()), client_ip: relayed.unwrap_or_else(|| peer.ip().to_string()), user_agent: h("user-agent").unwrap_or_default() };
+    let meta = session::Meta {
+        host: host.filter(|h| !h.is_empty()),
+        client_ip: relayed.unwrap_or_else(|| peer.ip().to_string()),
+        user_agent: h("user-agent").unwrap_or_default(),
+        peer_ip: Some(peer.ip()),
+    };
     let gw = app.gw.clone();
     upgrade.max_message_size(16 << 20).on_upgrade(move |socket| session::run(gw, socket, meta))
 }

@@ -52,6 +52,8 @@ pub struct Gateway {
     /// Device id → open connections, for `devices.list`.
     pub connected_devices: Mutex<std::collections::HashMap<String, usize>>,
     pub runtime: tokio::runtime::Handle,
+    /// The remote screen: the app's frames, the pages watching them.
+    pub screen: Arc<crate::screen::ScreenHub>,
 }
 
 impl Gateway {
@@ -68,6 +70,7 @@ impl Gateway {
             telegram_status: Mutex::new(TelegramStatus::default()),
             connected_devices: Mutex::new(Default::default()),
             runtime,
+            screen: crate::screen::ScreenHub::new(),
         })
     }
 
@@ -116,6 +119,7 @@ impl Gateway {
             "telegram": {"enabled": cfg.telegram.enabled, "configured": token_set, "connected": tg.connected,
                          "bot_username": tg.bot_username, "error": tg.error},
             "core": {"reachable": self.core.reachable()},
+            "screen": {"control": cfg.web.screen_control, "provider": self.screen.provider_connected(), "viewers": self.screen.viewer_labels()},
         })
     }
 

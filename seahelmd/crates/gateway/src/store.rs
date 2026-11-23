@@ -22,11 +22,14 @@ pub struct WebConfig {
     /// The Mini App host, where the pairing code is refused. Empty: the host
     /// of `telegram.mini_app_url`.
     pub telegram_host: Option<String>,
+    /// Paired devices may see and control this Mac's screen
+    /// (docs/superpowers/specs/2026-11-22-remote-screen-design.md).
+    pub screen_control: bool,
 }
 
 impl Default for WebConfig {
     fn default() -> Self {
-        Self { enabled: false, port: 2783, public_url: None, web_root: None, telegram_host: None }
+        Self { enabled: false, port: 2783, public_url: None, web_root: None, telegram_host: None, screen_control: false }
     }
 }
 

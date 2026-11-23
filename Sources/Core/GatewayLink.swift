@@ -289,6 +289,7 @@ struct GatewaySettings: Equatable {
         var publicURL: String?
         var webRoot: String?
         var telegramHost: String?
+        var screenControl = false
 
         /// The page a browser opens: the public URL's origin, else localhost.
         var pageURL: String {
@@ -324,7 +325,8 @@ struct GatewaySettings: Equatable {
                   port: (w["port"] as? NSNumber)?.intValue ?? 2783,
                   publicURL: string(w["public_url"]),
                   webRoot: string(w["web_root"]),
-                  telegramHost: string(w["telegram_host"]))
+                  telegramHost: string(w["telegram_host"]),
+                  screenControl: w["screen_control"] as? Bool ?? false)
         let t = r["telegram"] as? [String: Any] ?? [:]
         var rules: [TelegramRule] = []
         if let raw = t["rules"], JSONSerialization.isValidJSONObject(raw),

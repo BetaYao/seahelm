@@ -51,6 +51,11 @@ final class GatewaySettingsPages: NSObject {
     private let webStatusLabel = NSTextField(labelWithString: "")
     private lazy var webOpenPageButton = SettingsControls.button(
         "Open web client", target: self, action: #selector(openWebPageClicked))
+    private lazy var screenControlToggle = SettingsControls.toggle(
+        on: false, target: self, action: #selector(screenControlChanged))
+    private let screenPermissionLabel = NSTextField(labelWithString: "")
+    private lazy var screenPermissionButton = SettingsControls.button(
+        "Grant permissions\u{2026}", target: self, action: #selector(grantScreenPermissionsClicked))
     private var pairingPane: PairingPaneView?
     private var devicesList: GatewayDevicesListView?
     private var shareLinksList: ShareLinksListView?
@@ -163,6 +168,8 @@ final class GatewaySettingsPages: NSObject {
         webPortField.placeholderString = "2783"
         webPublicURLField.stringValue = w.publicURL ?? ""
         webPublicURLField.placeholderString = "http://127.0.0.1:\(w.port)/"
+        screenControlToggle.state = w.screenControl ? .on : .off
+        refreshScreenPermissions()
         renderStatus()
     }
 
@@ -508,6 +515,11 @@ final class GatewaySettingsPages: NSObject {
         webStatusLabel.textColor = SettingsPalette.secondary
         webStatusLabel.lineBreakMode = .byTruncatingMiddle
         webStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        screenPermissionLabel.font = .systemFont(ofSize: 11)
+        screenPermissionLabel.textColor = SettingsPalette.secondary
+        screenPermissionLabel.lineBreakMode = .byTruncatingTail
+        screenPermissionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        refreshScreenPermissions()
 
         let pane = PairingPaneView()
         let devices = GatewayDevicesListView()
@@ -537,6 +549,13 @@ final class GatewaySettingsPages: NSObject {
                                     content: webPublicURLField,
                                     height: 28),
                 SettingsRow.actions([webOpenPageButton], leading: [webStatusLabel]),
+            ]),
+            SettingsGroupView(title: "Screen control", rows: [
+                SettingsRow.make("Allow controlling this Mac",
+                                 subtitle: "A paired browser can see this Mac's whole screen and use its mouse and keyboard. Only over HTTPS (your tunnel, or tailscale serve) or a Tailscale address \u{2014} never plain HTTP on the LAN \u{2014} and not from Telegram. While anyone watches, SCREEN shows in the menu bar with Stop.",
+                                 control: screenControlToggle,
+                                 accessibilityId: "settings.hostGateway.screenControl"),
+                SettingsRow.actions([screenPermissionButton], leading: [screenPermissionLabel]),
             ]),
             SettingsGroupView(title: "Browser access", rows: [
                 SettingsRow.stacked(nil,
@@ -573,6 +592,32 @@ final class GatewaySettingsPages: NSObject {
         }
         web["public_url"] = webPublicURLField.stringValue.trimmingCharacters(in: .whitespaces)
         write(["web": web])
+    }
+
+    @objc private func screenControlChanged() {
+        let on = screenControlToggle.state == .on
+        if on { ScreenShareService.requestPermissions() }
+        write(["web": ["screen_control": on]])
+        refreshScreenPermissions()
+    }
+
+    @objc private func grantScreenPermissionsClicked() {
+        ScreenShareService.requestPermissions()
+        if !ScreenShareService.canCapture,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        } else if !ScreenShareService.canInject,
+                  let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.refreshScreenPermissions() }
+    }
+
+    private func refreshScreenPermissions() {
+        let capture = ScreenShareService.canCapture, inject = ScreenShareService.canInject
+        let mark = { (ok: Bool) in ok ? "\u{2713}" : "\u{2715}" }
+        screenPermissionLabel.stringValue = "Screen Recording \(mark(capture))  \u{00B7}  Accessibility \(mark(inject))"
+        screenPermissionButton.isHidden = capture && inject
     }
 
     @objc private func openWebPageClicked() {

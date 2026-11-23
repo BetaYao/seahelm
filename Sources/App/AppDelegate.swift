@@ -71,7 +71,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Web access, share links and Telegram are seahelm-gateway's; the app
         // only makes sure it runs (`GatewayLink`).
-        if !DebugFlags.forceEmptyState { GatewayLink.shared.start() }
+        if !DebugFlags.forceEmptyState {
+            GatewayLink.shared.start()
+            ScreenShareService.shared.start()
+        }
 
         GhosttyBridge.shared.initialize()
 

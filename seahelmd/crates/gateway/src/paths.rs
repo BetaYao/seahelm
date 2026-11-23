@@ -35,6 +35,15 @@ pub fn gateway_socket() -> PathBuf {
     config_dir().join("gateway.sock")
 }
 
+/// `$SEAHELM_GATEWAY_SCREEN_SOCKET`, else `screen.sock` in the gateway's
+/// directory: where the macOS app provides the remote screen.
+pub fn screen_socket() -> PathBuf {
+    if let Some(p) = std::env::var_os("SEAHELM_GATEWAY_SCREEN_SOCKET") {
+        return PathBuf::from(p);
+    }
+    gateway_dir().join("screen.sock")
+}
+
 /// seahelm-core's socket, as the core itself resolves it.
 pub fn core_socket() -> PathBuf {
     if let Some(p) = std::env::var_os("SEAHELM_CORE_SOCKET") {
