@@ -40,6 +40,21 @@ Phase 2, second part, built 2026-11-22:
   asked for. The stream's rate is the lowest among the viewers, as before.
   The page shows the cap in its status line (`screen.info {kbps}`).
 
+- **Which display, and keeping it awake** (`Sources/Screen/ScreenDisplays.swift`):
+  with no pick from a page, the app captures the display picked last (kept
+  by display UUID in user defaults), else a virtual display, else the main
+  one. A virtual display is one no framebuffer drives: its CoreGraphics
+  vendor and model match no panel's EDID in the IORegistry
+  (`IOMobileFramebuffer` → `DisplayAttributes.ProductAttributes`;
+  BetterDisplay's virtual screens and anything else built on
+  `CGVirtualDisplay`). This suits a Mac kept unlocked for remote viewing,
+  with its picture on a virtual display and its physical monitor dark. While
+  anyone watches, the app holds a `PreventUserIdleDisplaySleep` assertion,
+  and wakes displays that already slept (`IOPMAssertionDeclareUserActivity`,
+  at most every 10 s). Waking lights every display, the physical monitor
+  too, unless it is off or disconnected in software. The page marks virtual
+  displays in its picker.
+
 Still to do: the cursor drawn by the page (`showsCursor` stays on, which is
 enough at H.264 frame rates), and the keyboard raised on focus. iOS raises the
 keyboard only from a user gesture, so the app's focus report could at most

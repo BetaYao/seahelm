@@ -84,6 +84,21 @@ final class ScreenShareTests: XCTestCase {
         XCTAssertNil(SPSRewriter.lowLatency(Data([0x67, 0x64])))
     }
 
+    func testThePickedDisplayThenTheRememberedThenAVirtualOne() {
+        let (main, panel, virt): (CGDirectDisplayID, CGDirectDisplayID, CGDirectDisplayID) = (1, 2, 5)
+        let online = [main, panel, virt]
+        func pick(_ chosen: CGDirectDisplayID?, _ remembered: CGDirectDisplayID?, _ virtual: Set<CGDirectDisplayID> = [virt]) -> CGDirectDisplayID? {
+            ScreenDisplays.pick(online: online, chosen: chosen, remembered: remembered, virtual: virtual, main: main)
+        }
+        XCTAssertEqual(pick(panel, virt), panel)
+        XCTAssertEqual(pick(nil, panel), panel)
+        XCTAssertEqual(pick(nil, nil), virt)
+        // Gone displays are passed over.
+        XCTAssertEqual(pick(9, 8), virt)
+        XCTAssertEqual(pick(nil, nil, []), main)
+        XCTAssertNil(ScreenDisplays.pick(online: [], chosen: 1, remembered: nil, virtual: [], main: 1))
+    }
+
     func testH264SizesAreEven() {
         let s = ScreenShareService.outputSize(points: CGSize(width: 1511, height: 983), scale: 1, maxShort: 2000, even: true)
         XCTAssertEqual(s, CGSize(width: 1510, height: 982))

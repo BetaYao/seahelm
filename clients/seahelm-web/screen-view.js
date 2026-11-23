@@ -419,7 +419,7 @@
       const b = document.createElement('button');
       b.type = 'button';
       b.dataset.display = String(d.id);
-      b.textContent = `${d.name || 'Display'} · ${d.width}×${d.height}${d.main ? ' · main' : ''}`;
+      b.textContent = `${d.name || 'Display'} · ${d.width}×${d.height}${d.virtual ? ' · virtual' : ''}${d.main ? ' · main' : ''}`;
       b.classList.toggle('on', d.id === displayNow);
       pop.appendChild(b);
     }

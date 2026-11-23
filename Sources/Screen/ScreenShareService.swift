@@ -49,6 +49,7 @@ final class ScreenShareService: @unchecked Sendable {
     private var reportedDisplay: CGDirectDisplayID = 0
     private var clipboardTimer: Timer?
     private var clipboardSeen = -1
+    private let keepAwake = ScreenKeepAwake()
 
     static let codecJPEG: UInt8 = 1
     static let codecH264: UInt8 = 2
@@ -149,6 +150,8 @@ final class ScreenShareService: @unchecked Sendable {
             codec = msg["codec"] as? String == "h264" ? "h264" : "jpeg"
             kbps = min(max((msg["kbps"] as? NSNumber)?.intValue ?? 3000, 300), 20000)
             chosenDisplay = (msg["display"] as? NSNumber).map { CGDirectDisplayID($0.uint32Value) }
+            // A page's pick is also the default next time.
+            if let picked = chosenDisplay { ScreenDisplays.remember(picked) }
             let begin = newFPS > 0 && !capturing
             if begin { capturing = true; lastError = nil }
             lock.unlock()
@@ -198,12 +201,16 @@ final class ScreenShareService: @unchecked Sendable {
     // MARK: - Capture
 
     private func captureLoop() async {
+        DispatchQueue.main.async { [keepAwake] in keepAwake.hold() }
         defer {
             stopVideo()
             lock.lock(); capturing = false; reportedDisplay = 0; lock.unlock()
+            DispatchQueue.main.async { [keepAwake] in keepAwake.release() }
         }
         var content: SCShareableContent?
         var contentAt = Date.distantPast
+        var virtual = Set<CGDirectDisplayID>()
+        var remembered: CGDirectDisplayID?
         while true {
             lock.lock()
             let (fps, maxShort, quality, connected, codec, kbps) = (self.fps, self.maxShort, self.quality, self.fd >= 0, self.codec, self.kbps)
@@ -213,7 +220,9 @@ final class ScreenShareService: @unchecked Sendable {
             let began = Date()
             // A locked Mac's login window takes no synthesized input, and a
             // sleeping display has nothing to capture: say so plainly.
-            if Self.screenLocked || Self.activeDisplayCount == 0 {
+            let asleep = Self.activeDisplayCount == 0
+            if asleep { DispatchQueue.main.async { [keepAwake] in keepAwake.wake() } }
+            if Self.screenLocked || asleep {
                 report("This Mac is locked or its display is asleep. Unlock it at the Mac to share the screen.")
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 continue
@@ -228,11 +237,16 @@ final class ScreenShareService: @unchecked Sendable {
                 if content == nil || began.timeIntervalSince(contentAt) > 5 {
                     content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                     contentAt = began
+                    let ids = content?.displays.map(\.displayID) ?? []
+                    virtual = ScreenDisplays.virtualDisplays(ids)
+                    remembered = ScreenDisplays.remembered(among: ids)
                 }
                 guard let displays = content?.displays, !displays.isEmpty else { throw CaptureError.noDisplay }
                 lock.lock(); let chosen = chosenDisplay; lock.unlock()
-                let display = displays.first { $0.displayID == chosen }
-                    ?? displays.first { $0.displayID == CGMainDisplayID() } ?? displays[0]
+                let ids = displays.map(\.displayID)
+                let pickedID = ScreenDisplays.pick(online: ids, chosen: chosen, remembered: remembered,
+                                                   virtual: virtual, main: CGMainDisplayID())
+                let display = displays.first { $0.displayID == pickedID } ?? displays[0]
                 let changed: Bool = {
                     lock.lock(); defer { lock.unlock() }
                     guard reportedDisplay != display.displayID else { return false }
@@ -357,11 +371,12 @@ final class ScreenShareService: @unchecked Sendable {
     /// Every display, for a page to pick from, and the one captured. Main.
     private func reportDisplays() {
         let main = CGMainDisplayID()
+        let virtual = ScreenDisplays.virtualDisplays(ScreenDisplays.online)
         let list: [[String: Any]] = NSScreen.screens.compactMap { screen in
             guard let n = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
             let id = CGDirectDisplayID(n.uint32Value)
             return ["id": Int(id), "name": screen.localizedName, "width": Int(screen.frame.width),
-                    "height": Int(screen.frame.height), "main": id == main]
+                    "height": Int(screen.frame.height), "main": id == main, "virtual": virtual.contains(id)]
         }
         lock.lock()
         let current = reportedDisplay != 0 ? reportedDisplay : (chosenDisplay ?? main)
