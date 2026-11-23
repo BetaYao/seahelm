@@ -19,6 +19,7 @@ mod fleet;
 mod fonts;
 mod gateway_client;
 mod gateway_page;
+mod image_paste;
 mod keys;
 mod labels;
 mod notify;

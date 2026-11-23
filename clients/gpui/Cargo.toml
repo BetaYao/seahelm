@@ -16,6 +16,9 @@ futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 gpui = "0.2.2"
+# Already in the tree through gpui (on every platform): re-encodes dropped
+# images as PNG (`image_paste`).
+image = { version = "0.25", default-features = false }
 keep-vt = { path = "../../seahelmd/crates/keep-vt" }
 seahelm-core-types = { path = "../../seahelmd/crates/core-types" }
 seahelmd = { path = "../../seahelmd/crates/seahelmd" }

@@ -71,6 +71,9 @@ pub struct TerminalView {
     /// Where each option was drawn last frame, for the pointer.
     suggestion_hits: Vec<(Bounds<Pixels>, usize)>,
     suggestion_hover: Option<usize>,
+    /// The agent seahelm-core sees in the pane (`claudeCode`, …; empty for
+    /// none), for what a drop does (`image_paste::supports`).
+    agent: String,
 }
 
 /// A right-click the program did not take: the workspace opens the pane's
@@ -154,6 +157,14 @@ impl TerminalView {
             suggestion: None,
             suggestion_hits: Vec::new(),
             suggestion_hover: None,
+            agent: String::new(),
+        }
+    }
+
+    /// The agent the core sees in the pane (`PaneFacts::agent`).
+    pub fn set_agent(&mut self, agent: &str) {
+        if self.agent != agent {
+            self.agent = agent.to_string();
         }
     }
 
@@ -352,13 +363,64 @@ impl TerminalView {
     /// Files dropped on the pane: their paths typed in, escaped, through
     /// the paste path (so a program in bracketed-paste mode reads them as
     /// pasted, and an agent takes an image path as an image).
+    ///
+    /// In a pane whose agent pastes images from the clipboard (Claude Code,
+    /// on macOS: `image_paste`), dropped images attach instead: each goes on
+    /// the clipboard as a PNG and the pane gets a real ctrl+v — a key, not
+    /// pasted text, since inside a bracketed paste ctrl+v is just a byte —
+    /// then the user's clipboard comes back unless they copied meanwhile.
+    /// Other files in the drop follow as paths.
     fn drop_paths(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
-        let text = crate::terminal_text::drop_text(paths.paths(), cfg!(windows));
+        window.focus(&self.focus);
+        let paths = paths.paths().to_vec();
+        if crate::image_paste::supports(&self.agent) && paths.iter().any(|p| crate::image_paste::is_image(p)) {
+            self.attach_images(paths, cx);
+            return;
+        }
+        let text = crate::terminal_text::drop_text(&paths, cfg!(windows));
         if !text.is_empty() {
-            window.focus(&self.focus);
             self.paste(&text);
             cx.notify();
         }
+    }
+
+    fn attach_images(&mut self, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
+        use crate::image_paste::{self, PASTE_INTERVAL, RESTORE_AFTER};
+        cx.spawn(async move |this, cx| {
+            let (images, rest) = cx.background_executor().spawn(async move { image_paste::split(&paths) }).await;
+            let Ok(saved) = cx.update(|cx| cx.read_from_clipboard()) else { return };
+            let mut ours = None;
+            for png in images {
+                let item = gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(gpui::ImageFormat::Png, png));
+                let pressed = this.update(cx, |v, cx| {
+                    cx.write_to_clipboard(item.clone());
+                    v.to_live_screen();
+                    let key = gpui::Keystroke::parse(image_paste::PASTE_KEY).expect("a keystroke");
+                    let bytes = v.encode_key(&key, KeyAction::Press);
+                    v.send_bytes(&bytes);
+                });
+                if pressed.is_err() {
+                    return;
+                }
+                ours = Some(item);
+                cx.background_executor().timer(PASTE_INTERVAL).await;
+            }
+            let text = crate::terminal_text::drop_text(&rest, cfg!(windows));
+            if !text.is_empty() && this.update(cx, |v, cx| { v.paste(&text); cx.notify(); }).is_err() {
+                return;
+            }
+            // GPUI carries text and images: richer contents (files copied in
+            // Finder) come back as their text, and an empty clipboard is left
+            // holding the last image.
+            let (Some(ours), Some(saved)) = (ours, saved) else { return };
+            cx.background_executor().timer(RESTORE_AFTER).await;
+            let _ = cx.update(|cx| {
+                if cx.read_from_clipboard().as_ref() == Some(&ours) {
+                    cx.write_to_clipboard(saved);
+                }
+            });
+        })
+        .detach();
     }
 
     /// ⌘-click (Ctrl-click off macOS) on a URL opens it.

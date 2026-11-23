@@ -85,6 +85,14 @@ impl Workspace {
                     w.pane_facts = facts;
                     cx.notify();
                 }
+                // What a drop on each terminal does depends on its agent;
+                // every poll, so a terminal opened since has it too.
+                for (id, panes) in &w.panes {
+                    for (leaf, view) in &panes.views {
+                        let agent = w.pane_facts.get(&pane_session(id, *leaf)).map(|f| f.agent.clone()).unwrap_or_default();
+                        view.update(cx, |v, _| v.set_agent(&agent));
+                    }
+                }
                 // A presence that ran out leaves the corner.
                 let before = w.presence.len();
                 w.presence.retain(|_, p| p.until > Instant::now());
