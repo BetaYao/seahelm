@@ -258,6 +258,14 @@ pub struct Workspace {
     share_lifetime: crate::gateway_client::Lifetime,
     /// Who is at work on a pane through the core, by session.
     presence: HashMap<String, pane_extras::Presence>,
+    /// Pane and destination pairs already forked automatically
+    /// (`pane_extras::auto_fork_key`), so the original pane, still filed
+    /// where it was, is not forked there again. In memory, as the macOS
+    /// app's record is.
+    auto_forked: std::collections::HashSet<String>,
+    /// When this window started (`fleet::now`): only a location the core
+    /// heard of since then forks a pane by itself.
+    started_at: f64,
     /// The worktree and leaf shown alone (zoomed), if any.
     zoomed: Option<(String, LeafId)>,
     /// AI agents for the empty right panel (PATH scan; refreshed on activate).
@@ -328,6 +336,8 @@ impl Workspace {
             labels: crate::labels::load(),
             share_lifetime: crate::gateway_client::Lifetime::Day,
             presence: HashMap::new(),
+            auto_forked: Default::default(),
+            started_at: fleet::now(),
             zoomed: None,
             agents: agents::scan(),
         };

@@ -10,6 +10,11 @@
 //!   after the destination's branch) and stops the original's turn with
 //!   Esc, as the macOS app's fork does.
 //!
+//! - and without being asked, when the agent went into a worktree it
+//!   created itself (`git worktree add`, EnterWorktree): that fork carries
+//!   on there with a first message, and the view stays where the user has
+//!   it (the macOS app's `autoForkIntoCreated`, `auto_fork_panes`).
+//!
 //! - its name: one the user gave it (`pane.rename`, kept by the core and
 //!   shown by every client) beside the `#n`; clicking the `#n` names it.
 //!
@@ -30,6 +35,9 @@ use crate::tokens::{self, SYSTEM};
 
 /// How long a call keeps its caller on the pane (the macOS app's 6 s).
 const PRESENCE_FOR: Duration = Duration::from_secs(6);
+
+/// Between a fork's Esc and its start (the macOS app's 1 s).
+const FORK_SETTLE: Duration = Duration::from_secs(1);
 
 /// The "Rename pane" sheet: one field, Enter or Rename to keep it.
 pub struct RenamePane {
@@ -65,7 +73,7 @@ pub fn actor_name(agent: &str, handle: Option<u64>) -> String {
 /// after where it is going, without permission prompts when the user set
 /// `agent_yolo`. Quoted for `sh`, or for `cmd.exe` on Windows.
 pub fn fork_command(id: &str, branch: &str, yolo: bool, windows: bool) -> String {
-    let q = |s: &str| if windows { format!("\"{}\"", s.replace('"', "")) } else { format!("'{}'", s.replace('\'', r"'\''")) };
+    let q = |s: &str| quote(s, windows);
     let mut line = format!("claude --resume {} --fork-session", q(id));
     if !branch.is_empty() {
         line += &format!(" --name {}", q(branch));
@@ -74,6 +82,50 @@ pub fn fork_command(id: &str, branch: &str, yolo: bool, windows: bool) -> String
         line += " --dangerously-skip-permissions";
     }
     line
+}
+
+/// What an automatic fork is told (the macOS app's `PaneFork.continuePrompt`).
+/// Its transcript ends on the call that forked it, so it is told not to
+/// fork or move again.
+pub fn continue_prompt(destination: &str) -> String {
+    format!(
+        "You have been forked into a new pane whose working directory is {destination}, the worktree you were working in. \
+         Continue the task from where you left off, here. The fork is done: do not run `seahelm pane fork` or `seahelm pane move` again."
+    )
+}
+
+/// A fork to make: pane `leaf` of worktree `id` (fleet row ids), into
+/// `dest`, resuming Claude session `session_id` named after `branch`.
+pub struct Fork {
+    id: String,
+    leaf: LeafId,
+    dest: String,
+    branch: String,
+    session_id: String,
+    carry_on: bool,
+}
+
+/// One pane and destination, as `Workspace::auto_forked` records them.
+pub fn auto_fork_key(pane: &str, destination: &str) -> String {
+    format!("{pane}\0{destination}")
+}
+
+/// Whether a pane is forked into the worktree its agent is in without being
+/// asked (`PaneFork.shouldAutoFork`): turned on, the agent created that
+/// worktree itself — a `cd` into one someone else made is a visit — and
+/// the core heard of it since this window started, and not forked there
+/// already. (`away_in` has checked it is not the pane's own worktree.)
+pub fn should_auto_fork(enabled: bool, created_by_agent: bool, reported_at: f64, started_at: f64, already: bool) -> bool {
+    enabled && created_by_agent && reported_at >= started_at && !already
+}
+
+/// Quoted for `sh`, or for `cmd.exe` on Windows.
+fn quote(s: &str, windows: bool) -> String {
+    if windows {
+        format!("\"{}\"", s.replace('"', ""))
+    } else {
+        format!("'{}'", s.replace('\'', r"'\''"))
+    }
 }
 
 impl Workspace {
@@ -85,6 +137,9 @@ impl Workspace {
                     w.pane_facts = facts;
                     cx.notify();
                 }
+                // Every poll, not only on news: the worktree the agent made
+                // reaches the fleet a poll or two after the core hears of it.
+                w.auto_fork(cx);
                 // What a drop on each terminal does depends on its agent;
                 // every poll, so a terminal opened since has it too.
                 for (id, panes) in &w.panes {
@@ -150,27 +205,55 @@ impl Workspace {
     }
 
     /// Fork the pane's Claude session into a new pane in `dest`, stop the
-    /// original's turn, and go there.
-    fn fork_into(&mut self, id: String, leaf: LeafId, dest: String, branch: String, session_id: String, cx: &mut Context<Self>) {
-        let yolo = crate::user_config::flag("agent_yolo");
-        let line = fork_command(&session_id, &branch, yolo, cfg!(windows));
-        let Some(dest_item) = self.fleet.find(&dest).cloned() else { return };
+    /// original's turn, and go there. `carry_on` (an automatic fork) gives
+    /// the fork a first message to go on with the task and leaves the view
+    /// where the user has it.
+    ///
+    /// The Esc goes first and the fork starts a second later, as the macOS
+    /// app's does (`PaneFork.interruptSettleDelay`): the interrupted turn is
+    /// on disk before the fork copies the transcript.
+    fn fork_into(&mut self, fork: Fork, cx: &mut Context<Self>) {
+        let Some(dest_item) = self.fleet.find(&fork.dest).cloned() else { return };
+        // The original's turn stops; its session and transcript stay.
+        if let Some(view) = self.panes.get(&fork.id).and_then(|p| p.views.get(&fork.leaf)) {
+            view.read(cx).send_bytes(b"\x1b");
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FORK_SETTLE).await;
+            let _ = this.update(cx, |w, cx| w.start_fork(&fork, &dest_item, cx));
+        })
+        .detach();
+    }
+
+    fn start_fork(&mut self, fork: &Fork, dest_item: &crate::fleet::Item, cx: &mut Context<Self>) {
+        let Fork { id, leaf, dest, branch, session_id, carry_on } = fork;
+        let (leaf, carry_on) = (*leaf, *carry_on);
+        let windows = cfg!(windows);
+        let mut line = fork_command(session_id, branch, crate::user_config::flag("agent_yolo"), windows);
+        if carry_on {
+            line = format!("{line} {}", quote(&continue_prompt(&dest_item.worktree_path), windows));
+        }
         // A leaf whose session name is free: the destination's first if it
         // has no panes and nothing holds that name, else a new split.
-        let panes = self.panes.entry(dest.clone()).or_default();
+        let panes = self.panes.entry(dest.to_string()).or_default();
+        let focused = panes.tree.focused;
         let mut new_leaf = 0;
-        let first_free = panes.views.is_empty() && panes.tree.len() == 1 && seahelmd::client::connect(&session_name(&dest)).is_err();
+        let first_free = panes.views.is_empty() && panes.tree.len() == 1 && seahelmd::client::connect(&session_name(dest)).is_err();
         if !first_free {
             for _ in 0..8 {
                 new_leaf = panes.tree.split(Axis::Horizontal);
-                if seahelmd::client::connect(&pane_session(&dest, new_leaf)).is_err() {
+                if seahelmd::client::connect(&pane_session(dest, new_leaf)).is_err() {
                     break;
                 }
             }
         }
-        let name = pane_session(&dest, new_leaf);
-        let cmd: Vec<String> = if cfg!(windows) {
-            vec!["cmd.exe".into(), "/k".into(), line.clone()]
+        // An automatic fork takes no focus, in its worktree either.
+        if carry_on && panes.tree.leaves().contains(&focused) {
+            panes.tree.focused = focused;
+        }
+        let name = pane_session(dest, new_leaf);
+        let cmd: Vec<String> = if windows {
+            vec!["cmd.exe".into(), "/k".into(), line]
         } else {
             let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
             vec![shell.clone(), "-lic".into(), format!("{line}; exec {shell} -l")]
@@ -179,16 +262,39 @@ impl Workspace {
             eprintln!("seahelm-gpui: fork: {e:#}");
             return;
         }
-        crate::notify::log("pane.fork", serde_json::json!({"from": pane_session(&id, leaf), "to": name}));
-        // The original's turn stops; its session and transcript stay.
-        if let Some(view) = self.panes.get(&id).and_then(|p| p.views.get(&leaf)) {
-            view.read(cx).send_bytes(b"\x1b");
-        }
+        crate::notify::log("pane.fork", serde_json::json!({"from": pane_session(id, leaf), "to": name, "auto": carry_on}));
         self.save_layouts();
-        self.selected = Some(dest);
-        self.needs_focus = true;
-        self.side_follow(cx);
+        if !carry_on {
+            self.selected = Some(dest.to_string());
+            self.needs_focus = true;
+            self.side_follow(cx);
+        }
         cx.notify();
+    }
+
+    /// Fork, without being asked, every pane of this window whose agent is
+    /// working in a tracked worktree it created itself (`should_auto_fork`).
+    /// Panes other clients show are theirs to fork.
+    pub(super) fn auto_fork(&mut self, cx: &mut Context<Self>) {
+        let enabled = crate::user_config::flag_or("auto_fork_panes", true);
+        let mut due = Vec::new();
+        for (id, panes) in &self.panes {
+            for leaf in panes.views.keys() {
+                let key = pane_session(id, *leaf);
+                let Some(facts) = self.pane_facts.get(&key) else { continue };
+                let Some(sid) = facts.claude_session.clone() else { continue };
+                let Some((dest, branch, _)) = self.away_in(id, facts) else { continue };
+                let record = auto_fork_key(&key, &dest);
+                if should_auto_fork(enabled, facts.location_created, facts.location_at, self.started_at, self.auto_forked.contains(&record)) {
+                    due.push((record, Fork { id: id.clone(), leaf: *leaf, dest, branch, session_id: sid, carry_on: true }));
+                }
+            }
+        }
+        for (record, fork) in due {
+            eprintln!("seahelm-gpui: auto-forking {} into the worktree its agent created: {}", pane_session(&fork.id, fork.leaf), fork.dest);
+            self.auto_forked.insert(record);
+            self.fork_into(fork, cx);
+        }
     }
 
     pub(super) fn open_rename(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -320,7 +426,8 @@ impl Workspace {
                     .id(SharedString::from(format!("fork-{key}")))
                     .cursor_pointer()
                     .on_click(cx.listener(move |w, _: &ClickEvent, _: &mut Window, cx| {
-                        w.fork_into(id.clone(), leaf, dest.clone(), branch.clone(), sid.clone(), cx)
+                        let fork = Fork { id: id.clone(), leaf, dest: dest.clone(), branch: branch.clone(), session_id: sid.clone(), carry_on: false };
+                        w.fork_into(fork, cx)
                     }))
                     .child(format!("Agent in {label}"))
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Fork there")),
@@ -377,6 +484,24 @@ mod tests {
         assert_eq!(actor_name("claudeCode", Some(7)), "Claude Code #7");
         assert_eq!(actor_name("unknown", Some(3)), "Pane #3");
         assert_eq!(actor_name("codex", None), "Codex");
+    }
+
+    #[test]
+    fn only_a_worktree_the_agent_made_since_we_started_forks_by_itself() {
+        assert!(should_auto_fork(true, true, 100.0, 50.0, false));
+        assert!(!should_auto_fork(false, true, 100.0, 50.0, false), "auto_fork_panes off");
+        assert!(!should_auto_fork(true, false, 100.0, 50.0, false), "a visit to someone else's worktree");
+        assert!(!should_auto_fork(true, true, 40.0, 50.0, false), "heard of before this window started");
+        assert!(!should_auto_fork(true, true, 100.0, 50.0, true), "forked there already");
+        assert_ne!(auto_fork_key("p", "/a"), auto_fork_key("p", "/b"));
+    }
+
+    #[test]
+    fn the_fork_is_told_to_carry_on_and_not_fork_again() {
+        let p = continue_prompt("/w/repo-x");
+        assert!(p.contains("/w/repo-x") && p.contains("Continue the task") && p.contains("do not run `seahelm pane fork`"));
+        assert_eq!(quote("it's", false), r"'it'\''s'");
+        assert_eq!(quote(r#"say "hi""#, true), r#""say hi""#);
     }
 
     #[test]

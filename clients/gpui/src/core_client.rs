@@ -415,6 +415,10 @@ pub struct PaneFacts {
     /// The worktree the agent's latest tool call or cwd is in
     /// (`pane.locations`), when the core knows one.
     pub location_worktree: Option<String>,
+    /// That worktree is one the pane's agent created itself
+    /// (`created_by_agent`), and when the core heard of it (`at`).
+    pub location_created: bool,
+    pub location_at: f64,
     /// Claude's session id (`agent.sessions`, kind `id`).
     pub claude_session: Option<String>,
     /// The name the user gave the pane (`pane.rename`), on every client.
@@ -451,6 +455,8 @@ pub fn pane_facts() -> std::collections::HashMap<String, PaneFacts> {
         for (key, loc) in v.get("locations").and_then(Value::as_object).into_iter().flatten() {
             if let (Some(f), Some(wt)) = (out.get_mut(key), loc.get("worktree").and_then(Value::as_str)) {
                 f.location_worktree = Some(wt.to_string());
+                f.location_created = loc.get("created_by_agent").and_then(Value::as_bool).unwrap_or(false);
+                f.location_at = loc.get("at").and_then(Value::as_f64).unwrap_or(0.0);
             }
         }
     }

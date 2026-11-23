@@ -20,7 +20,12 @@ pub fn read() -> Map<String, Value> {
 }
 
 pub fn flag(key: &str) -> bool {
-    read().get(key).and_then(Value::as_bool).unwrap_or(false)
+    flag_or(key, false)
+}
+
+/// `flag`, for a key that is on unless set off (`auto_fork_panes`).
+pub fn flag_or(key: &str, default: bool) -> bool {
+    read().get(key).and_then(Value::as_bool).unwrap_or(default)
 }
 
 /// Set one key, keeping the rest. Refuses to touch a file that is there
