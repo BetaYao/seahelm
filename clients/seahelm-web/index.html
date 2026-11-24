@@ -2829,7 +2829,7 @@ function slashKey(ev){
 /** Files can go: a pane is selected over a gateway link, and this is not a
  *  share page (the gateway refuses those). */
 function canAttach(){
-  return !!S.selPane && S.transport === 'gateway' && isLinked() && !SHARE_PANE;
+  return !!S.selPane && S.transport === 'gateway' && isLinked();
 }
 function renderAttachButton(){
   const b = $('msgAttach');
