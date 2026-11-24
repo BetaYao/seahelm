@@ -2411,14 +2411,16 @@ function interruptPane(){
 // Timeline or Terminal is chosen per pane: a shell pane read as a terminal
 // and an agent pane read as a timeline sit side by side in one worktree, and
 // switching one leaves the others as they were. A pane never chosen for opens
-// on the timeline when seahelm opened its worktree (the core's
-// `seahelm_worktree`: a `/new`, First Mate, an agent's `git worktree add`),
-// else as the screen suits (the timeline on a phone). Remembered by pane key,
+// on the timeline on a share link, or when seahelm opened its worktree (the
+// core's `seahelm_worktree`: a `/new`, First Mate, an agent's `git worktree
+// add`), else as the screen suits (the timeline on a phone). Remembered by pane key,
 // the most recent choices kept.
 const SURFACE_KEY = 'seahelm_surface_modes';
 const SURFACE_KEEP = 200;
 try { localStorage.removeItem('seahelm_surface_mode'); } catch (e) {}   // the old page-wide choice
 function defaultSurfaceMode(key){
+  // A shared pane is read by someone following along: the timeline first.
+  if (SHARE_PANE) return 'text';
   const pane = key && S.panes.get(key);
   if (pane && pane.seahelm_worktree) return 'text';
   return (window.innerWidth || 900) <= 760 ? 'text' : 'vt';
