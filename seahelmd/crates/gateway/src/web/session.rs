@@ -418,6 +418,9 @@ impl Session {
         let refuse = || Some(RpcError::new(SHARE_FORBIDDEN, "not allowed on a shared pane"));
         match method {
             "ping" | "session.snapshot" | "pane.list" | "fleet.groups" => None,
+            // A guest may already type into the pane; a file it attaches only
+            // lands on this machine for the message that names it.
+            "file.upload" => None,
             "cards.answer" | "cards.dismiss" => {
                 let id = str_of(p, "id")?;
                 let cards = self.gw.core.cards().borrow().clone();
@@ -543,7 +546,7 @@ impl Session {
             }
             // A pasted screenshot or a picked file, kept on this machine so the
             // pane's agent can open it; the page puts the path in the message.
-            // Share pages never get here (`share_gate`).
+            // Share pages may too: their guest types into the pane anyway.
             "file.upload" => {
                 let name = str_of(&p, "name").unwrap_or("file").to_string();
                 let Some(bytes) = str_of(&p, "b64").and_then(|b| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b).ok()) else {
