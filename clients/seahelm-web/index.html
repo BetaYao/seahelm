@@ -1047,6 +1047,10 @@ function setSelectedPane(key){
   if (prev !== key) { closeSlash(); stashDraft(prev); }
   S.selPane = key;
   if (prev !== key) restoreDraft(key);
+  // Every way a pane gets chosen in a worktree — its tab, its terminal, a new
+  // pane, the layout's focus — is the one to come back to.
+  const pane = key && key !== FM_KEY && S.panes.get(key);
+  if (pane && S.sel && pane.worktree_path === S.sel) rememberLastPane(S.sel, key);
   renderMateTodoToggle();
 }
 /** Put the field's words and files away under `key`'s draft. */
@@ -3841,9 +3845,24 @@ function rowDecision(row){
   return null;
 }
 
-// The pane last shown for each worktree, so coming back to one that has nothing
-// live lands where you were rather than on its first pane.
-const lastPaneByPath = new Map();
+// The pane last selected in each worktree: opening the worktree again lands on
+// it unless another pane holds an open decision (pane-pick.js). Kept in localStorage, so a reload or
+// another visit lands there too; the newest LAST_PANE_KEEP are kept.
+const LAST_PANE_KEY = 'seahelm_last_pane';
+const LAST_PANE_KEEP = 300;
+const lastPaneByPath = (() => {
+  try {
+    const o = JSON.parse(localStorage.getItem(LAST_PANE_KEY) || '{}');
+    return new Map(Object.entries(o && typeof o === 'object' ? o : {}).filter(([, v]) => typeof v === 'string'));
+  } catch (e) { return new Map(); }
+})();
+function rememberLastPane(path, key){
+  if (!path || !key || lastPaneByPath.get(path) === key) return;
+  lastPaneByPath.delete(path);           // re-inserted last: the newest is kept longest
+  lastPaneByPath.set(path, key);
+  while (lastPaneByPath.size > LAST_PANE_KEEP) lastPaneByPath.delete(lastPaneByPath.keys().next().value);
+  try { localStorage.setItem(LAST_PANE_KEY, JSON.stringify(Object.fromEntries(lastPaneByPath))); } catch (e) {}
+}
 
 /** The pane a worktree speaks through in the list, and opens on. */
 function leadPane(row){
@@ -4105,7 +4124,6 @@ function selectWorktree(row, paneKey, { navigate = true } = {}){
   S.sel = row.path;
   const known = paneKey && row.panes.some(([k]) => k === paneKey);
   setSelectedPane((known ? paneKey : leadPane(row)[0]) || null);
-  if (S.selPane) lastPaneByPath.set(row.path, S.selPane);
   if (navigate) showScreen('detail');
   renderTree();
   renderDetail();
@@ -5155,7 +5173,6 @@ function focusPane(key){
     // Its terminal is what was picked, whatever that pane showed before.
     if (S.vt.panes.has(key)) rememberSurfaceMode(key, 'vt');
     setSelectedPane(key);
-    if (S.sel) lastPaneByPath.set(S.sel, key);
     renderDetailChrome();
     renderSendButton();
   }

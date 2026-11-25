@@ -21,8 +21,8 @@ check(pickPane(panes('failed', 'waiting'), null) === 'p1', 'waiting outranks fai
 check(pickPane(panes('idle', 'running'), null) === 'p1', 'running wins over idle');
 check(pickPane(panes('waiting', 'waiting'), null) === 'p0', 'ties go to the first in display order');
 
-check(pickPane(panes('idle', 'idle', 'done'), 'p2') === 'p2', 'with nothing live, the last pane looked at');
-check(pickPane(panes('idle', 'running'), 'p0') === 'p1', 'but a live pane outranks that memory');
+check(pickPane(panes('idle', 'idle', 'done'), 'p2') === 'p2', 'with nothing live, the last pane selected');
+check(pickPane(panes('idle', 'running', 'waiting', 'failed'), 'p0') === 'p0', 'the last pane selected outranks every status');
 check(pickPane(panes('idle', 'idle'), 'gone') === 'p0', 'a remembered pane that closed is ignored');
 check(pickPane(panes('idle', 'unknown'), null) === 'p0', 'otherwise the first pane');
 
@@ -34,7 +34,7 @@ check(statusLabel('unread') === 'Finished', 'an unread finish is spelled out');
 const withDecision = panes('running', 'idle', 'waiting');
 withDecision[1][1].decision = true;
 check(pickPane(withDecision, null) === 'p1', 'an open decision outranks running and waiting alike');
-check(pickPane(withDecision, 'p0') === 'p1', 'and the memory of the last pane');
+check(pickPane(withDecision, 'p0') === 'p1', 'and the last pane selected');
 
 check(pickPane([], 'p0') === null, 'no panes, no pick');
 check(pickPane(null, null) === null, 'and no list is the same');
