@@ -116,7 +116,7 @@ pub fn project(o: &Outcome, pane_id: &str, config: &MessageConfig, coalesce: &Co
         }
         EventKind::Notification { text, .. } => {
             let t = text.trim();
-            if !t.is_empty() {
+            if !t.is_empty() && !is_idle_notice(t) {
                 out.push(base(Kind::Notice).with_text(t));
             }
         }
@@ -141,6 +141,13 @@ pub fn project(o: &Outcome, pane_id: &str, config: &MessageConfig, coalesce: &Co
 /// Which status changes earn a row: a turn starting or ending, and an
 /// error. Idle ↔ Waiting is detection settling, and leaving Unknown is a
 /// pane being registered.
+/// Claude Code's idle reminder ("Claude is waiting for your input"), sent
+/// a minute after every turn that ended: it reads as if the turn asked for
+/// something, when it only finished. The timeline leaves it out.
+pub fn is_idle_notice(text: &str) -> bool {
+    text.eq_ignore_ascii_case("Claude is waiting for your input")
+}
+
 pub fn is_turn_edge(old: AgentStatus, new: AgentStatus) -> bool {
     old != AgentStatus::Unknown && (old == AgentStatus::Running || new == AgentStatus::Running || new == AgentStatus::Error)
 }
@@ -299,6 +306,14 @@ mod tests {
         .0;
         let decision = messages.iter().find(|row| row.kind == Kind::Decision).unwrap();
         assert_eq!(decision.options.as_ref(), Some(&options));
+    }
+
+    #[test]
+    fn the_idle_reminder_leaves_no_notice() {
+        let idle = EventKind::Notification { level: "info".into(), text: "Claude is waiting for your input".into() };
+        assert!(run(&outcome(idle, false, Idle, Idle, false, ""), &Coalesce::default()).0.is_empty());
+        let other = EventKind::Notification { level: "info".into(), text: "Claude needs your permission".into() };
+        assert_eq!(run(&outcome(other, false, Waiting, Waiting, false, ""), &Coalesce::default()).0.len(), 1);
     }
 
     #[test]
