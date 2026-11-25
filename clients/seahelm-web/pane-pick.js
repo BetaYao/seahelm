@@ -8,13 +8,13 @@
 // would make you hunt for it.
 //
 // Order: an open decision (a question to answer, or suggested next steps to
-// pick from), then waiting on you, then failed, then finished but unread, then
-// running, then the pane you
-// last looked at here, then whatever comes first. A decision outranks every
-// status because a suggestion arrives as the agent finishes — its pane reads
-// idle, and ranking by status alone opened the worktree on a busy neighbour
-// with the card nowhere in sight. "Last looked at" ranks below the live states
-// on purpose — it is a memory of the past, they are the present.
+// pick from), then the pane last selected in this worktree, then waiting on
+// you, then failed, then finished but unread, then running, then whatever
+// comes first. A decision outranks everything because a suggestion arrives as
+// the agent finishes — its pane reads idle, and ranking by status alone opened
+// the worktree on a busy neighbour with the card nowhere in sight. The pane
+// last selected comes next: coming back to a worktree lands where you left it
+// rather than on whichever neighbour is busiest.
 //
 // Nothing here knows about the DOM; statuses are whatever normStatus produced.
 (function (root, factory) {
@@ -35,14 +35,15 @@
    */
   function pickPane(panes, lastKey) {
     if (!Array.isArray(panes) || !panes.length) return null;
+    const decided = panes.find(([, pane]) => pane && pane.decision);
+    if (decided) return decided[0];
+    if (lastKey && panes.some(([key]) => key === lastKey)) return lastKey;
     let best = null, bestRank = 99;
     for (const [key, pane] of panes) {
-      const rank = pane && pane.decision ? 0 : RANK[pane && pane.status];
+      const rank = RANK[pane && pane.status];
       if (rank !== undefined && rank < bestRank) { best = key; bestRank = rank; }
     }
-    if (best !== null) return best;
-    if (lastKey && panes.some(([key]) => key === lastKey)) return lastKey;
-    return panes[0][0];
+    return best !== null ? best : panes[0][0];
   }
 
   // What the row spells out beside its dot, so the state is never colour alone.
