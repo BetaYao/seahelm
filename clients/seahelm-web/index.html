@@ -1947,6 +1947,9 @@ function messageRowHTML(m){
     case 'decision':
       return `<div class="tl-decision">${esc(m.text || '')}</div>`;
     case 'notice':
+      // Claude Code's idle reminder reads as if a finished turn asked for
+      // something; seahelm-core no longer records it, older rows hide here.
+      if (/^claude is waiting for your input$/i.test((m.text || '').trim())) return '';
       return `<div class="tl-notice">${esc(m.text || '')}</div>`;
     case 'note':
       // A line seahelm-core wrote itself (First Mate's sweep reports).
