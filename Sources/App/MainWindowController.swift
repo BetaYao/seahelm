@@ -1995,9 +1995,6 @@ extension MainWindowController {
         model.onRevealCardSource = { [weak self] order in
             self?.revealCardPane(order)
         }
-        model.onDismissOrder = { [weak self] order in
-            self?.dismissOrder(order)
-        }
         model.onSubmitCommand = { [weak self] text in
             _ = self?.submitBridgeCommand(text)
         }
@@ -2199,8 +2196,8 @@ extension MainWindowController {
         // Equality-gate every assignment: this runs on a 2s timer, and an
         // ungated @Observable set re-evaluates the SwiftUI island every tick
         // even when nothing changed.
-        let orders = IslandModel.newestSuggestions(from: tabCoordinator.cards.cards)
-        if model.orders != orders { model.orders = orders }
+        model.showCards(IslandModel.newestSuggestions(from: tabCoordinator.cards.cards))
+        let orders = model.orders
         let index = fleetIndex()
         var sourceLabels: [String: String] = [:]
         for card in orders where card.paneSessionKey != FirstMatePane.sessionName && !card.isFirstMates {
@@ -2573,12 +2570,6 @@ extension MainWindowController {
         config.autopilotAgent = agent
         tabCoordinator.config.autopilotEnabled = enabled
         tabCoordinator.config.autopilotAgent = agent
-    }
-
-    /// Waving a card away. For a First Mate approval that is a "no", and First
-    /// Mate has to hear it — it is waiting on the answer.
-    func dismissOrder(_ card: Card) {
-        tabCoordinator.cards.dismiss(card)
     }
 
     /// ⌘J, ⌃⌃ and Fleet ▸ First Mate: First Mate's conversation in the island,

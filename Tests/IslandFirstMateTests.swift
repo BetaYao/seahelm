@@ -7,6 +7,23 @@ final class IslandFirstMateTests: XCTestCase {
         Card(id: id, kind: kind, terminalID: "t", worktreePath: "/w", message: "Next?", options: ["go"])
     }
 
+    func testTheIslandsXHidesACardInTheIslandOnly() {
+        let model = IslandModel()
+        var answeredOrDismissed = false
+        model.onOptionTapped = { _, _ in answeredOrDismissed = true }
+        model.showCards([order("a"), order("b")])
+        model.dismissCard(order("a"))
+        XCTAssertEqual(model.orders.map(\.id), ["b"])
+        XCTAssertEqual(model.pendingCardCount, 1)
+        XCTAssertFalse(answeredOrDismissed)
+        // The core still holds it: the next refresh keeps it out of the island.
+        model.showCards([order("a"), order("b")])
+        XCTAssertEqual(model.orders.map(\.id), ["b"])
+        // Once the core drops it, the island forgets it was hidden.
+        model.showCards([order("b")])
+        XCTAssertTrue(model.hiddenCardIDs.isEmpty)
+    }
+
     func testUserOpenStartsUnfilteredAtTheBottom() {
         let model = IslandModel()
         model.orders = [order("a")]
