@@ -361,8 +361,9 @@ fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcRes
         return Err(RpcError::invalid_params("repo_path and prompt are required"));
     }
     let agent = launchable(&s(p, "agent_type"))?;
-    let top = git(&repo, &["rev-parse", "--show-toplevel"]).ok_or_else(|| RpcError::invalid_params("not a git repository"))?;
-    let repo = PathBuf::from(top.trim());
+    let Some(repo) = task_repo(&repo) else {
+        return folder_task(core, &PathBuf::from(s(p, "repo_path")), agent, &task, &s(p, "pane_session_key"));
+    };
     let branches: Vec<String> = git(&repo, &["branch", "-a", "--format=%(refname:short)"])
         .unwrap_or_default()
         .lines()
@@ -420,6 +421,64 @@ fn worktree_create_with_hint(core: &Core, p: &Value, allow_hint: bool) -> RpcRes
     Ok(json!({"worktree_path": path_s, "branch": branch, "pane_session_key": session}))
 }
 
+/// The repository a task for `dir` gets a worktree of, or None when the task
+/// runs in `dir` itself: a folder project (`discovery::is_folder`: no git, or
+/// a project a client added inside another repository), or a repository with
+/// no commit yet, which has nothing to branch a worktree from. Any other
+/// directory in a repository (a caller naming a subdirectory) stands for its
+/// repository, as it always has.
+fn task_repo(dir: &Path) -> Option<PathBuf> {
+    let top = PathBuf::from(git(dir, &["rev-parse", "--show-toplevel"])?.trim());
+    if !same_dir(&top, dir) {
+        let projects = crate::discovery::client_projects(&crate::rpc::config_dir());
+        if projects.iter().any(|p| same_dir(Path::new(p), dir)) {
+            return None;
+        }
+    }
+    git(&top, &["rev-parse", "--verify", "-q", "HEAD"])?;
+    Some(top)
+}
+
+/// A task in a folder: a new pane in the folder itself running the agent
+/// with the task, beside whatever panes are there already. No branch, no
+/// worktree; the folder is the "worktree" every client files the pane under.
+/// `wanted` is the session name a client asks for (the GPUI client names the
+/// pane it is about to add there); it must be free.
+fn folder_task(core: &Core, dir: &Path, agent: AgentType, task: &str, wanted: &str) -> RpcResult {
+    if !dir.is_dir() {
+        return Err(RpcError::invalid_params(format!("{} is not a directory", dir.display())));
+    }
+    let folder = dir.to_string_lossy().to_string();
+    let session = if wanted.is_empty() {
+        free_session_name(core, &folder)?
+    } else if core.pane_row(wanted).is_none() && seahelmd::client::socket_path(wanted).is_ok_and(|p| !p.exists()) {
+        wanted.to_string()
+    } else {
+        return Err(RpcError::invalid_params(format!("session {wanted} is taken")));
+    };
+    let launch = agent_command(agent, task, crate::first_mate::UserConfig::load().agent_yolo).unwrap_or_default();
+    start_session(&session, dir, None, dir, &launch).map_err(RpcError::internal)?;
+    core.register_pane(Registration {
+        pane: session.clone(),
+        alias: None,
+        worktree_path: folder.clone(),
+        project: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        branch: String::new(),
+        agent_type: agent,
+        started_at: Some(seahelm_core_types::now()),
+    });
+    Ok(json!({"worktree_path": folder, "branch": "", "pane_session_key": session, "folder": true}))
+}
+
+/// A session name for another pane in `worktree` that nothing uses yet.
+fn free_session_name(core: &Core, worktree: &str) -> Result<String, RpcError> {
+    let base = gpui_session_name(worktree);
+    (2..1000)
+        .map(|n| format!("{base}-{n}"))
+        .find(|name| core.pane_row(name).is_none() && seahelmd::client::socket_path(name).map(|p| !p.exists()).unwrap_or(false))
+        .ok_or_else(|| RpcError::internal("no free session name"))
+}
+
 /// `seahelmd new --hold 15 <session> -- <shell> -lic '<setup> && <agent>; exec <shell> -l'`
 /// in the worktree: held for a client to attach, so the agent starts at the
 /// pane's size when someone opens it, and on its own after that.
@@ -472,6 +531,11 @@ pub fn worktree_delete(core: &Core, p: &Value) -> RpcResult {
         return Err(RpcError::invalid_params("worktree_path required"));
     }
     let dir = Path::new(&path);
+    // A folder project, or a folder inside some other repository (a dotfiles
+    // `$HOME`): no worktree, and nothing here may end its panes.
+    if git(dir, &["rev-parse", "--show-toplevel"]).is_none_or(|top| !same_dir(Path::new(top.trim()), dir)) {
+        return Err(RpcError::invalid_params("not a worktree"));
+    }
     let main = Some(crate::discovery::main_checkout(&path)).filter(|m| !m.is_empty()).map(std::path::PathBuf::from).ok_or_else(|| RpcError::invalid_params("not a worktree"))?;
     if same_dir(&main, dir) {
         return Err(RpcError::invalid_params("the main checkout is not deleted"));
@@ -663,11 +727,7 @@ pub fn pane_new(core: &Core, p: &Value) -> RpcResult {
         "" | "shell" => None,
         other => Some(launchable(other)?),
     };
-    let base = gpui_session_name(&worktree);
-    let session = (2..1000)
-        .map(|n| format!("{base}-{n}"))
-        .find(|name| core.pane_row(name).is_none() && seahelmd::client::socket_path(name).map(|p| !p.exists()).unwrap_or(false))
-        .ok_or_else(|| RpcError::internal("no free session name"))?;
+    let session = free_session_name(core, &worktree)?;
     let launch = agent.and_then(|a| bare_command(a, crate::first_mate::UserConfig::load().agent_yolo));
     start_plain_session(&session, &dir, launch.as_deref()).map_err(RpcError::internal)?;
     let field = |k: &str| like.as_ref().and_then(|r| r[k].as_str()).unwrap_or_default().to_string();
@@ -810,5 +870,47 @@ mod issue_branch_tests {
     #[test] fn issue_branch_uses_the_learned_template_or_default() {
         assert_eq!(issue_branch(42, "login crashes", None), "fix/42-login-crashes");
         assert_eq!(issue_branch(42, "login crashes", Some("bug/{n}/{slug}")), "bug/42/login-crashes");
+    }
+}
+
+#[cfg(test)]
+mod folder_project_tests {
+    use super::*;
+
+    fn run(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git").arg("-C").arg(dir)
+            .args(["-c", "user.name=Test", "-c", "user.email=test@example.invalid"])
+            .args(args).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    #[test]
+    fn a_task_gets_a_worktree_only_where_there_is_a_commit_to_branch_from() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("notes");
+        std::fs::create_dir(&folder).unwrap();
+        assert_eq!(task_repo(&folder), None, "a folder runs its tasks in place");
+
+        run(&folder, &["init", "-q", "-b", "main"]);
+        assert_eq!(task_repo(&folder), None, "git init alone leaves nothing to branch from");
+
+        run(&folder, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let top = task_repo(&folder).expect("a repository with a commit");
+        assert!(same_dir(&top, &folder));
+
+        let sub = folder.join("drafts");
+        std::fs::create_dir(&sub).unwrap();
+        assert!(task_repo(&sub).is_some_and(|t| same_dir(&t, &folder)), "a subdirectory stands for its repository");
+    }
+
+    #[test]
+    fn a_folder_is_never_deleted_as_a_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("notes");
+        std::fs::create_dir(&folder).unwrap();
+        let core = Core::for_test(tmp.path());
+        let err = worktree_delete(&core, &json!({"worktree_path": folder})).unwrap_err();
+        assert_eq!(err.message, "not a worktree");
+        assert!(folder.exists());
     }
 }

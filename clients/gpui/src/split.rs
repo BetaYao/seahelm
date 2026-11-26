@@ -83,6 +83,11 @@ impl SplitTree {
         out
     }
 
+    /// The id the next `split` gives its new pane.
+    pub fn next_leaf(&self) -> LeafId {
+        self.next
+    }
+
     pub fn len(&self) -> usize {
         self.leaves().len()
     }
