@@ -177,13 +177,23 @@ pub fn resume_argv(agent: &str, kind: Kind, value: &str) -> Option<Vec<String>> 
 }
 
 /// The argv that opens a *copy* of the session under a new id, leaving the
-/// original untouched. Claude finds a session by id from any directory, so
-/// the fork can start in its new worktree.
+/// original untouched. Claude finds a session by id from any directory and
+/// copies it itself (`--fork-session`), so the fork can start in its new
+/// worktree. Cursor Agent can do neither: the chat is copied first
+/// (`fork_copies_chat`; seahelm-core's `agent.fork_chat`), and the fork
+/// resumes the copy, so for Cursor `value` must be the copy's id.
 pub fn fork_argv(agent: &str, kind: Kind, value: &str) -> Option<Vec<String>> {
     match (agent, kind) {
         ("claude", Kind::Id) => Some(vec!["claude".into(), "--resume".into(), value.into(), "--fork-session".into()]),
+        ("cursor", Kind::Id) => Some(vec!["agent".into(), "--resume".into(), value.into()]),
         _ => None,
     }
+}
+
+/// Whether a fork of this agent's session needs its chat copied first
+/// (`agent.fork_chat`), its command then naming the copy.
+pub fn fork_copies_chat(agent: &str) -> bool {
+    agent == "cursor"
 }
 
 /// POSIX single quoting: `'` becomes `'\''`.
@@ -372,6 +382,13 @@ mod tests {
         let out = std::process::Command::new("/bin/sh").arg("-c").arg(&probe).output().unwrap();
         assert_eq!(String::from_utf8(out.stdout).unwrap(), prompt + "\n");
         assert!(!std::path::Path::new(file).exists());
+    }
+
+    #[test]
+    fn test_a_cursor_fork_resumes_the_copied_chat() {
+        let r = id("cursor", UUID).unwrap();
+        assert!(r.supports_fork() && fork_copies_chat(&r.agent) && !fork_copies_chat("claude"));
+        assert_eq!(r.fork_command_line(&["--yolo"], None).unwrap(), format!("'agent' '--resume' '{UUID}' '--yolo'"));
     }
 
     #[test]

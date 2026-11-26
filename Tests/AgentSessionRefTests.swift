@@ -167,6 +167,18 @@ final class AgentSessionRefTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: file))
     }
 
+    func testACursorForkResumesTheCopiedChat() {
+        let ref = AgentSessionRef(agent: "cursor", sessionId: "57555bdc-8725-466c-ac52-d65cf69375b0")!
+        XCTAssertTrue(ref.supportsFork)
+        XCTAssertTrue(ref.forkCopiesChat)
+        XCTAssertEqual(ref.forkAgentType, .cursor)
+        XCTAssertEqual(ref.forkCommandLine(extraArgs: ["--yolo"]),
+                       "'agent' '--resume' '57555bdc-8725-466c-ac52-d65cf69375b0' '--yolo'")
+        let claude = AgentSessionRef(agent: "claude", sessionId: "57555bdc-8725-466c-ac52-d65cf69375b0")!
+        XCTAssertFalse(claude.forkCopiesChat)
+        XCTAssertEqual(claude.forkAgentType, .claudeCode)
+    }
+
     func testAgentsWithoutForkReturnNil() {
         let codex = AgentSessionRef(agent: "codex", sessionId: "abc-123")!
         XCTAssertFalse(codex.supportsFork)
