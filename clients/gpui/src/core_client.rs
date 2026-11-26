@@ -114,8 +114,16 @@ fn call_at_for(path: &std::path::Path, method: &str, params: Value, timeout: Dur
 
 /// A new worktree off `repo`'s trunk, with `agent` (`claudeCode`, `codex`)
 /// started on `task` in a held session (`worktree.create`). Its path.
-pub fn create_worktree(repo: &str, task: &str, agent: &str) -> Result<String, String> {
-    let v = call_slow("worktree.create", json!({"repo_path": repo, "prompt": task, "agent_type": agent}), Duration::from_secs(120))?;
+///
+/// In a folder project the core makes no worktree: it starts the agent in
+/// the folder itself, in a session named `session` when given (the pane
+/// this client is about to add there), and the path is the folder's.
+pub fn create_worktree(repo: &str, task: &str, agent: &str, session: Option<&str>) -> Result<String, String> {
+    let mut params = json!({"repo_path": repo, "prompt": task, "agent_type": agent});
+    if let Some(name) = session {
+        params["pane_session_key"] = json!(name);
+    }
+    let v = call_slow("worktree.create", params, Duration::from_secs(120))?;
     v.get("worktree_path").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "the core gave no path".into())
 }
 

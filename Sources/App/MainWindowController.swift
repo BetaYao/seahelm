@@ -912,6 +912,35 @@ dashboard.stationManager = terminalCoordinator.stationManager
         popover.show(relativeTo: rect, of: anchor, preferredEdge: .maxY)
     }
 
+    /// A task in a folder project: seahelm-core starts the agent with the task
+    /// in a new pane in the folder (`worktree.create` answers `folder: true`)
+    /// and announces the pane, which `adoptCoreSession` files as a new split
+    /// in the folder's tree. Called off the main thread.
+    private func performFolderTask(task: String, folder: String, agentType: AgentType,
+                                   onError: ((String) -> Void)?, onComplete: ((String?) -> Void)?) {
+        let reply = CoreSocketClient.call("worktree.create",
+                                          ["repo_path": folder, "prompt": task, "agent_type": agentType.rawValue],
+                                          timeout: 30)
+        DispatchQueue.main.async {
+            switch reply {
+            case .success(let result):
+                let path = (result["worktree_path"] as? String) ?? folder
+                WorktreeAgentTypeStore.shared.recordChoice(agentType)
+                onComplete?(path)
+            case .failure(let failure):
+                let message: String
+                switch failure {
+                case .rpc(_, let m): message = m
+                case .unreachable: message = "seahelm-core is not running"
+                case .malformed: message = "seahelm-core gave an unreadable answer"
+                }
+                NSLog("[MainWindowController] Folder task in \(folder) failed: \(message)")
+                onError?(message)
+                onComplete?(nil)
+            }
+        }
+    }
+
     /// Creates a worktree off the main thread. `onComplete` fires on the main
     /// thread with the new worktree's path on success, or nil on failure —
     /// lets the caller (e.g. the Helm cockpit) drop its loading state and
@@ -922,6 +951,11 @@ dashboard.stationManager = terminalCoordinator.stationManager
         let currentPath = tabCoordinator.selectedPane?.worktreePath
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
+            if WorktreeCreator.runsTasksInPlace(repoPath: repoPath) {
+                self.performFolderTask(task: task, folder: repoPath, agentType: agentType,
+                                       onError: onError, onComplete: onComplete)
+                return
+            }
             let branches = WorktreeCreator.listBranches(repoPath: repoPath)
             let base = branches.contains("main") ? "main" : (branches.contains("master") ? "master" : (branches.first ?? "main"))
             do {

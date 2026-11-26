@@ -36,6 +36,9 @@ pub struct Group {
     /// (grouped by repository); empty otherwise.
     pub path: String,
     pub items: Vec<Item>,
+    /// A folder project: no git repository of its own, its one row the
+    /// folder itself. A task there opens a pane in the folder.
+    pub folder: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -168,9 +171,12 @@ fn projects_file() -> std::path::PathBuf {
     crate::platform::config_dir().join("gpui-projects.json")
 }
 
-/// Add a project (a directory in a git repository) to the list.
+/// Add a project to the list: a git repository, or any folder (a folder
+/// project, worked in as it is).
 pub fn add_project(path: &str) -> Result<(), String> {
-    git(path, &["rev-parse", "--show-toplevel"]).ok_or_else(|| format!("{path} is not in a git repository"))?;
+    if !std::path::Path::new(path).is_dir() {
+        return Err(format!("{path} is not a folder"));
+    }
     let mut list = projects();
     if !list.iter().any(|p| p == path) {
         list.push(path.to_string());
@@ -249,10 +255,17 @@ pub fn read() -> Snapshot {
     let mut groups = Vec::new();
     for project in projects {
         let name = base_name(&project);
-        let Some(list) = git(&project, &["worktree", "list", "--porcelain"]) else { continue };
-        let items: Vec<Item> = parse_worktrees(&list)
+        let listed: Vec<(String, String)> = git(&project, &["worktree", "list", "--porcelain"])
+            .map(|list| parse_worktrees(&list).into_iter().map(|(path, branch)| (listed_checkout(&path), branch)).collect())
+            .unwrap_or_default();
+        // A folder project — no repository, or inside another one (a
+        // dotfiles repo in the home folder lists that one's worktrees) — is
+        // its one row. `git init` makes it list itself at the same path.
+        let own = dunce_canonical(std::path::Path::new(&project));
+        let folder = !listed.iter().any(|(p, _)| own.is_some() && dunce_canonical(std::path::Path::new(p)) == own);
+        let listed = if folder { vec![(project.clone(), String::new())] } else { listed };
+        let items: Vec<Item> = listed
             .into_iter()
-            .map(|(path, branch)| (listed_checkout(&path), branch))
             .enumerate()
             .map(|(i, (path, branch))| Item {
                 id: path.clone(),
@@ -269,7 +282,7 @@ pub fn read() -> Snapshot {
             })
             .collect();
         let items = by_creation(items);
-        groups.push(Group { title: name, path: project.clone(), items });
+        groups.push(Group { title: name, path: project.clone(), items, folder });
     }
     Snapshot { groups, error: None }
 }
@@ -308,7 +321,7 @@ pub fn regroup(groups: &[Group], mode: Grouping, now: f64) -> Vec<Group> {
             },
         }
     };
-    let mut out: Vec<Group> = titles.iter().map(|t| Group { title: t.to_string(), path: String::new(), items: Vec::new() }).collect();
+    let mut out: Vec<Group> = titles.iter().map(|t| Group { title: t.to_string(), path: String::new(), items: Vec::new(), folder: false }).collect();
     for item in items {
         let b = bucket(&item);
         out[b].items.push(item);
@@ -437,6 +450,7 @@ mod tests {
     #[test]
     fn grouping_by_status_follows_the_apps_order() {
         let groups = vec![Group {
+            folder: false,
             path: String::new(),
             title: "p".into(),
             items: vec![
@@ -467,6 +481,7 @@ mod tests {
     fn grouping_by_activity_buckets_by_age() {
         let now = 10.0 * 86400.0;
         let groups = vec![Group {
+            folder: false,
             path: String::new(),
             title: "p".into(),
             items: vec![

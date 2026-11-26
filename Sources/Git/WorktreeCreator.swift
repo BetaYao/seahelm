@@ -162,6 +162,19 @@ enum WorktreeCreator {
         return String(joined[..<end]).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
+    /// Whether a task for the project at `repoPath` runs in the directory
+    /// itself (a new pane there, through seahelm-core's `worktree.create`)
+    /// rather than in a new worktree: a folder project — in no repository, or
+    /// inside another one (a dotfiles `$HOME`) — or a repository with no
+    /// commit yet, which has nothing to branch from. Mirrors the core's
+    /// `task_repo`.
+    static func runsTasksInPlace(repoPath: String) -> Bool {
+        guard let top = runGit(args: ["rev-parse", "--show-toplevel"], in: repoPath)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !top.isEmpty,
+            WorktreeDiscovery.canonicalPath(top) == WorktreeDiscovery.canonicalPath(repoPath) else { return true }
+        return runGit(args: ["rev-parse", "--verify", "-q", "HEAD"], in: repoPath) == nil
+    }
+
     private static func runGit(args: [String], in directory: String) -> String? {
         GitProcess.run(args, in: directory, timeout: gitTimeout)
     }

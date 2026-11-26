@@ -1268,6 +1268,11 @@ impl Core {
         if !matches!(method, "worktree.create" | "worktree.delete") {
             return;
         }
+        // A task in a folder project made no worktree: nothing for the
+        // observation log, whose worktrees the sweep may later delete.
+        if result.get("folder").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
         self.observe(first_mate::observations::Msg::Performed {
             method: method.into(),
             params: params.clone(),
@@ -1622,8 +1627,13 @@ impl Core {
 
     /// The repos of the worktrees clients list (each worktree's main checkout).
     pub fn repos(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
+        // Folder projects are their own "repo": a task there opens a pane in
+        // the folder (`actions::folder_task`).
+        let mut out: Vec<String> = crate::discovery::folder_projects(&crate::rpc::config_dir());
         for w in self.prs.listed() {
+            if out.contains(&crate::discovery::canon(&w)) {
+                continue;
+            }
             let repo = crate::discovery::main_checkout(&w);
             if !repo.is_empty() {
                 if !out.contains(&repo) {

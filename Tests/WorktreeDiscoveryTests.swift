@@ -227,4 +227,30 @@ final class WorktreeDiscoveryTests: XCTestCase {
         let info = WorktreeInfo(path: "/Users/dev/project-feature", branch: "", commitHash: "abc", isMainWorktree: false)
         XCTAssertEqual(info.displayName, "project-feature")
     }
+
+    // A folder project inside another repository (a dotfiles $HOME) has git
+    // list that repository's worktrees: they are not the folder's.
+    func testAFolderInsideAnotherRepositoryHasNoWorktreesOfItsOwn() {
+        let home = WorktreeInfo(path: "/Users/dev", branch: "main", commitHash: "abc", isMainWorktree: true)
+        WorktreeDiscovery.canonicalPathResolverForTesting = { $0 }
+        defer { WorktreeDiscovery.resetCanonicalPathResolverForTesting() }
+        XCTAssertEqual(WorktreeDiscovery.ownWorktrees([home], of: "/Users/dev/notes").map(\.path), [])
+        XCTAssertEqual(WorktreeDiscovery.ownWorktrees([home], of: "/Users/dev").map(\.path), ["/Users/dev"])
+    }
+
+    // `git init` makes a folder list itself, at the same path; so does a
+    // repository with no commit yet, and it is no folder any more.
+    func testAFolderThatWasGitInitedListsItself() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("folder-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertTrue(WorktreeDiscovery.discover(repoPath: dir.path).isEmpty)
+        XCTAssertTrue(WorktreeCreator.runsTasksInPlace(repoPath: dir.path))
+        XCTAssertNotNil(GitProcess.run(["init", "-q", "-b", "main"], in: dir.path))
+        let listed = WorktreeDiscovery.discover(repoPath: dir.path)
+        XCTAssertEqual(listed.map { WorktreeDiscovery.canonicalPath($0.path) }, [WorktreeDiscovery.canonicalPath(dir.path)])
+        XCTAssertTrue(WorktreeCreator.runsTasksInPlace(repoPath: dir.path), "nothing to branch from yet")
+        XCTAssertNotNil(GitProcess.run(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], in: dir.path))
+        XCTAssertFalse(WorktreeCreator.runsTasksInPlace(repoPath: dir.path))
+    }
 }

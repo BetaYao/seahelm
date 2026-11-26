@@ -183,12 +183,24 @@ enum WorktreeDiscovery {
             NSLog("git worktree list timed out or failed at \(repoPath)")
             return []
         }
-        return parsePorcelain(output).map { info in
+        let listed = parsePorcelain(output).map { info in
             let path = listedCheckout(info.path)
             guard path != info.path else { return info }
             return WorktreeInfo(path: path, branch: info.branch, commitHash: info.commitHash,
                                 isMainWorktree: info.isMainWorktree, isDetached: info.isDetached)
         }
+        return ownWorktrees(listed, of: repoPath)
+    }
+
+    /// `listed`, when `repoPath` is one of them; nothing otherwise. A folder
+    /// project inside some other repository (a dotfiles repo in `$HOME`) has
+    /// git list that repository's worktrees, which are not the folder's: it
+    /// is a folder, worked in as it is (`WorktreeCreator.runsTasksInPlace`).
+    /// Once the folder is `git init`ed it lists itself, at the same path, and
+    /// its panes and layout carry over.
+    static func ownWorktrees(_ listed: [WorktreeInfo], of repoPath: String) -> [WorktreeInfo] {
+        let own = canonicalPath(repoPath)
+        return listed.contains { canonicalPath($0.path) == own } ? listed : []
     }
 
     /// Parse `git worktree list --porcelain` output

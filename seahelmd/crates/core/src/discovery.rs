@@ -285,6 +285,31 @@ pub fn client_projects(config_dir: &Path) -> Vec<String> {
     out
 }
 
+/// Whether a directory is a folder rather than a repository of its own: in
+/// no git repository at all, or inside one whose top is somewhere above it —
+/// a dotfiles repository in `$HOME` puts every folder under it "in a repo",
+/// and the folder the user added is still a folder. A folder project is
+/// worked in as it is: a task opens a pane in it, nothing makes worktrees or
+/// branches there. Once the folder is `git init`ed it is a repository whose
+/// main checkout is the folder itself, at the same path, so its panes and
+/// layout carry over and later tasks get worktrees (after the first commit:
+/// before it there is nothing to branch from).
+pub fn is_folder(dir: &str) -> bool {
+    match facts::git(Path::new(dir), &["rev-parse", "--show-toplevel"]) {
+        None => true,
+        Some(top) => canon(top.trim()) != canon(dir),
+    }
+}
+
+/// The projects clients keep (`client_projects`) that are folders
+/// (`is_folder`), canonical.
+pub fn folder_projects(config_dir: &Path) -> Vec<String> {
+    let mut out: Vec<String> = client_projects(config_dir).iter().filter(|p| Path::new(p).is_dir() && is_folder(p)).map(|p| canon(p)).collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// One scan: add the repos of `seeds` (worktrees or repo roots) to `set`,
 /// drop repos that stopped being repositories, and list every repo's
 /// worktrees. `repo_of` / `list` are git in production. Returns the
@@ -342,9 +367,19 @@ pub fn spawn(core: Arc<Core>) {
         std::thread::sleep(FIRST_SCAN_AFTER);
         loop {
             let filter = Filter::live(&config_dir);
+            // A folder project is listed as itself and never seeds the repo
+            // set: asked for its repo, a folder under a dotfiles `$HOME`
+            // would add `$HOME`.
+            let folders = folder_projects(&config_dir);
             let mut seeds = client_projects(&config_dir);
             seeds.extend(core.client_worktrees());
-            let (found, changed) = scan(&mut set, &seeds, &filter, repo_of, git_worktree_list);
+            seeds.retain(|s| !folders.contains(&canon(s)));
+            let (mut found, changed) = scan(&mut set, &seeds, &filter, repo_of, git_worktree_list);
+            for f in folders {
+                if !found.contains(&f) {
+                    found.push(f);
+                }
+            }
             if changed {
                 if let Err(e) = set.save() {
                     eprintln!("seahelm-core: cannot write {}: {e}", config_dir.join(FILE_NAME).display());
@@ -388,6 +423,19 @@ mod tests {
 
     fn s(p: &Path) -> String {
         canon(&p.to_string_lossy())
+    }
+
+    #[test]
+    fn a_folder_is_one_until_it_is_the_top_of_its_own_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("notes");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(is_folder(&s(&folder)));
+        // A repository above it (a dotfiles $HOME) leaves it a folder.
+        git(tmp.path(), &["init", "-q", "-b", "main"]);
+        assert!(is_folder(&s(&folder)));
+        git(&folder, &["init", "-q", "-b", "main"]);
+        assert!(!is_folder(&s(&folder)), "git init makes it a repository, before any commit");
     }
 
     /// A submodule's git dir is the superproject's `.git/modules/<name>`, and

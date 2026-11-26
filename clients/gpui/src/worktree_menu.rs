@@ -118,9 +118,23 @@ impl Workspace {
         sheet.busy = true;
         sheet.error = None;
         let (project, agent) = (sheet.project.clone(), sheet.agent);
-        notify::log("worktree.new.create", serde_json::json!({"project": project, "agent": agent}));
+        // A folder project gets no worktree: the task runs in a new pane in
+        // the folder, the session named for the leaf about to hold it — its
+        // first, when nothing is open there yet, else the next split.
+        let folder = self.fleet.groups.iter().any(|g| g.folder && g.path == project);
+        let leaf = folder.then(|| {
+            let panes = self.panes.get(&project);
+            let first_free = panes.is_none_or(|p| p.views.is_empty() && p.tree.len() == 1)
+                && seahelmd::client::connect(&crate::workspace::session_name(&project)).is_err();
+            if first_free { 0 } else { panes.map(|p| p.tree.next_leaf()).unwrap_or(1) }
+        });
+        let session = leaf.map(|l| crate::workspace::pane_session(&project, l));
+        notify::log("worktree.new.create", serde_json::json!({"project": project, "agent": agent, "folder": folder}));
         cx.spawn(async move |this, cx| {
-            let made = cx.background_executor().spawn(async move { core_client::create_worktree(&project, &task, agent) }).await;
+            let made = cx.background_executor().spawn({
+                let project = project.clone();
+                async move { core_client::create_worktree(&project, &task, agent, session.as_deref()) }
+            }).await;
             let snap = match &made {
                 Ok(_) => Some(cx.background_executor().spawn(async { fleet::read() }).await),
                 Err(_) => None,
@@ -132,6 +146,14 @@ impl Workspace {
                             w.fleet = snap;
                         }
                         w.new_worktree = None;
+                        // The pane the core started the agent in.
+                        if let Some(l) = leaf.filter(|l| *l != 0) {
+                            let panes = w.panes.entry(project.clone()).or_default();
+                            if panes.tree.next_leaf() == l {
+                                panes.tree.split(crate::split::Axis::Horizontal);
+                                w.save_layouts();
+                            }
+                        }
                         // Opened at once: its first pane attaches the session
                         // the core is holding, and the agent starts at its size.
                         w.selected = Some(path);

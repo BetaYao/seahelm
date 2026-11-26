@@ -15,8 +15,9 @@ pub trait Host {
     fn fleet(&self) -> FleetIndex;
     /// Type into the pane and press Enter.
     fn send_text(&self, pane_key: &str, text: &str) -> bool;
-    /// A worktree with an agent on the task; its path.
-    fn create_worktree(&self, repo_path: &str, task: &str) -> Result<String, String>;
+    /// A worktree with an agent on the task (in a folder project, a new pane
+    /// in the folder): its path, and the new pane's key when it is known.
+    fn create_worktree(&self, repo_path: &str, task: &str) -> Result<(String, Option<String>), String>;
     fn transcript(&self, pane_key: &str) -> Option<String>;
     fn messages(&self, pane_key: &str) -> Vec<Message>;
     fn activity(&self, pane_key: &str) -> Vec<String>;
@@ -197,9 +198,15 @@ pub fn run(text: &str, ctx: &Context, host: &dyn Host) -> Outcome {
             let name = std::path::Path::new(&repo_path).file_name().and_then(|n| n.to_str()).unwrap_or("repo").to_string();
             match host.create_worktree(&repo_path, &task) {
                 Err(e) => Outcome::just(Reply::err(format!("Couldn't start a worktree in **{name}**: {e}"))),
-                Ok(path) => {
+                Ok((path, pane)) => {
                     let fresh = host.fleet();
-                    match fresh.panes_in(&path).first() {
+                    // A folder holds the panes it had before: the new one, not its first.
+                    let panes = fresh.panes_in(&path);
+                    let new = match pane {
+                        Some(k) => panes.iter().copied().find(|p| p.key == k),
+                        None => panes.first().copied(),
+                    };
+                    match new {
                         Some(p) => Outcome::bind(
                             Reply::ok(format!("Started {}. Talking to it from now on.", format::target(p))),
                             Binding::Pane { key: p.key.clone(), worktree_path: path.clone() },
@@ -313,8 +320,8 @@ mod tests {
             self.sent.borrow_mut().push((pane.into(), text.into()));
             true
         }
-        fn create_worktree(&self, _: &str, _: &str) -> Result<String, String> {
-            Ok("/r/wt/new".into())
+        fn create_worktree(&self, _: &str, _: &str) -> Result<(String, Option<String>), String> {
+            Ok(("/r/wt/new".into(), None))
         }
         fn transcript(&self, _: &str) -> Option<String> {
             None
