@@ -207,8 +207,10 @@ final class IslandModel {
     var onOptionTapped: ((_ card: Card, _ optionText: String) -> Void)?
     /// Jump to the pane that raised a card without resolving it.
     var onRevealCardSource: ((_ card: Card) -> Void)?
-    /// Dismiss a suggestion card without acting on it.
-    var onDismissOrder: ((_ card: Card) -> Void)?
+    /// Cards the user waved away with the island's ×. They leave the island
+    /// only: the core still holds them, so the terminal's inline buttons,
+    /// seahelm-web and Telegram keep offering them. In memory, per run.
+    private(set) var hiddenCardIDs: Set<String> = []
     /// Bridge command submit (same handler as the First Mate composer).
     var onSubmitCommand: ((String) -> Void)?
     /// `/ @ #` autocomplete source — same provider as the cockpit composer.
@@ -302,8 +304,23 @@ final class IslandModel {
         onOptionTapped?(card, optionText)
     }
 
+    /// The island's ×: out of the island, not out of the core.
     func dismissCard(_ card: Card) {
-        onDismissOrder?(card)
+        hiddenCardIDs.insert(card.id)
+        orders = Self.shown(orders, hiding: hiddenCardIDs)
+    }
+
+    /// The live cards the island shows: all but the ones it hid. Hidden ids
+    /// whose card is gone from the core are forgotten.
+    func showCards(_ cards: [Card]) {
+        let live = Set(cards.map(\.id))
+        if !hiddenCardIDs.isSubset(of: live) { hiddenCardIDs.formIntersection(live) }
+        let next = Self.shown(cards, hiding: hiddenCardIDs)
+        if orders != next { orders = next }
+    }
+
+    static func shown(_ cards: [Card], hiding hidden: Set<String>) -> [Card] {
+        hidden.isEmpty ? cards : cards.filter { !hidden.contains($0.id) }
     }
 
     func turnOnFirstMate() {
