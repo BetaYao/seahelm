@@ -729,6 +729,24 @@ impl Core {
                 st.messages.clear(&key);
                 Ok(json!({"forgot": forgot}))
             }
+            // A fork's conversation for an agent that cannot copy its own
+            // (Cursor: `session_ref::fork_copies_chat`): the chat copied into
+            // the destination, the copy's id back for `agent --resume`.
+            "agent.fork_chat" => {
+                let (agent, id, dir) = (str_param(&p, "agent"), str_param(&p, "session_id"), str_param(&p, "worktree_path"));
+                let (Some(agent), Some(id), Some(dir)) = (agent, id, dir) else {
+                    return Reply::Value(Err(RpcError::invalid_params("agent, session_id and worktree_path required")));
+                };
+                if agent != "cursor" {
+                    return Reply::Value(Err(RpcError::invalid_params(format!("{agent} copies its own sessions"))));
+                }
+                // As Cursor will see it: getcwd, symlinks resolved.
+                let cwd = std::fs::canonicalize(&dir).map(|d| d.to_string_lossy().into_owned()).unwrap_or(dir);
+                let root = hooks::titles::cursor_chats_root(&hooks::home_dir());
+                hooks::cursor_store::fork_chat(&root, &id, &cwd)
+                    .map(|session_id| json!({"session_id": session_id}))
+                    .map_err(RpcError::internal)
+            }
             // The slash commands the pane's agent takes, for a composer to
             // complete (agent_commands.rs). Read-only: sending one is
             // `pane.send_text` like any message.

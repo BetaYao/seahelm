@@ -111,13 +111,13 @@ enum PaneFork {
     static let noticeMaxWait: TimeInterval = 20
     static let forkReadyMaxWait: TimeInterval = 300
 
-    /// Whether the fork has read its transcript: seahelm-core sees Claude in
-    /// its pane at a settled status, and has numbered it. Until then the notice
+    /// Whether the fork has read its transcript: seahelm-core sees its agent
+    /// (Claude, or Cursor Agent) in its pane at a settled status, and has numbered it. Until then the notice
     /// must not go in — the fork copies the original session when it starts,
     /// so a notice written before that lands in the fork's own history too,
     /// telling the pane that carries on the task not to.
     static func forkIsReady(agentType: AgentType?, status: AgentStatus?, handle: Int?) -> Bool {
-        guard agentType == .claudeCode, handle != nil, let status else { return false }
+        guard agentType == .claudeCode || agentType == .cursor, handle != nil, let status else { return false }
         return status != .unknown
     }
 
@@ -141,8 +141,10 @@ enum PaneForkError: Error, Equatable {
     case unknownPane
     /// No resumable session recorded for the pane — its agent never reported one.
     case noSession
-    /// The pane's agent has no fork command (only Claude does today).
+    /// The pane's agent has no fork command (Claude and Cursor Agent do).
     case unsupportedAgent
+    /// Cursor's chat could not be copied into the destination (`agent.fork_chat`).
+    case chatCopyFailed(String)
     /// No worktree named, and the agent is not away from the pane's own.
     case noTarget
     case unknownWorktree(String)
@@ -161,6 +163,7 @@ enum PaneForkError: Error, Equatable {
         case .sameWorktree: return "the pane is already in that worktree"
         case .noPersistentBackend: return "forking needs the seahelmd backend"
         case .launchFailed: return "the forked session didn't start"
+        case .chatCopyFailed(let why): return "couldn't copy the Cursor chat: \(why)"
         }
     }
 

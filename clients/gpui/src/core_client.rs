@@ -427,8 +427,10 @@ pub struct PaneFacts {
     /// (`created_by_agent`), and when the core heard of it (`at`).
     pub location_created: bool,
     pub location_at: f64,
-    /// Claude's session id (`agent.sessions`, kind `id`).
-    pub claude_session: Option<String>,
+    /// The session a fork resumes (`agent.sessions`, kind `id`), for the
+    /// agents that can fork: `fork_agent` is "claude" or "cursor".
+    pub fork_session: Option<String>,
+    pub fork_agent: String,
     /// The name the user gave the pane (`pane.rename`), on every client.
     pub custom_title: Option<String>,
     /// What clients call the pane: that name, else the agent's title.
@@ -439,6 +441,13 @@ pub struct PaneFacts {
 pub fn rename_pane(session: &str, title: &str) -> Result<Option<String>, String> {
     let r = call("pane.rename", json!({"pane_id": session, "title": title}))?;
     Ok(r.get("custom_title").and_then(Value::as_str).map(str::to_string))
+}
+
+/// A Cursor chat copied into `worktree` for a fork to resume
+/// (`agent.fork_chat`): the copy's id.
+pub fn fork_chat(agent: &str, session_id: &str, worktree: &str) -> Result<String, String> {
+    let r = call("agent.fork_chat", json!({"agent": agent, "session_id": session_id, "worktree_path": worktree}))?;
+    r.get("session_id").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "agent.fork_chat answered no session_id".into())
 }
 
 /// Every pane's facts, by session: `pane.list`, `pane.locations` and
@@ -470,9 +479,11 @@ pub fn pane_facts() -> std::collections::HashMap<String, PaneFacts> {
     }
     if let Ok(v) = call("agent.sessions", json!({})) {
         for (key, r) in v.get("agent_sessions").and_then(Value::as_object).into_iter().flatten() {
-            let is_claude = r.get("agent").and_then(Value::as_str) == Some("claude") && r.get("kind").and_then(Value::as_str) == Some("id");
-            if let (true, Some(f), Some(id)) = (is_claude, out.get_mut(key), r.get("session_id").and_then(Value::as_str)) {
-                f.claude_session = Some(id.to_string());
+            let agent = r.get("agent").and_then(Value::as_str).unwrap_or_default();
+            let forks = matches!(agent, "claude" | "cursor") && r.get("kind").and_then(Value::as_str) == Some("id");
+            if let (true, Some(f), Some(id)) = (forks, out.get_mut(key), r.get("session_id").and_then(Value::as_str)) {
+                f.fork_session = Some(id.to_string());
+                f.fork_agent = agent.to_string();
             }
         }
     }

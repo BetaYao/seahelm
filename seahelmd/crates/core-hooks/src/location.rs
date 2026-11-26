@@ -40,7 +40,9 @@ fn tool_call(event: WebhookEventType, data: &Map) -> Option<(&str, &Map)> {
     }
     let tool = data.get("tool_name")?.as_str()?;
     let input = data.get("tool_input")?.as_object()?;
-    Some((tool, input))
+    // Cursor Agent's shell tool is `Shell` (its `preToolUse`), with the
+    // command where Claude Code's Bash keeps it.
+    Some((if tool == "Shell" { "Bash" } else { tool }, input))
 }
 
 /// None when the event says nothing about place: not a tool start, or a
@@ -240,6 +242,13 @@ mod tests {
         assert_eq!(created("git worktree add --detach -B b \"/w/with space\" HEAD").as_deref(), Some("/w/with space"));
         assert_eq!(created("cd /r/other && git worktree add wt").as_deref(), Some("/r/other/wt"));
         assert_eq!(created("git -C /r/other worktree add ../wt").as_deref(), Some("/r/wt"));
+    }
+
+    #[test]
+    fn test_cursor_shell_tool_counts_as_a_shell_command() {
+        let shell = |c: &str| data(json!({"tool_name": "Shell", "tool_input": {"command": c, "cwd": "", "timeout": 30000}}));
+        assert_eq!(created_worktree(WebhookEventType::ToolUseStart, &shell("git worktree add ../repo-x -b x"), "/r/repo", HOME).as_deref(), Some("/r/repo-x"));
+        assert_eq!(signal(WebhookEventType::ToolUseStart, &shell("cd /r/wt && ls"), "/r/repo", HOME), Some(Signal::Directory("/r/wt".into())));
     }
 
     #[test]

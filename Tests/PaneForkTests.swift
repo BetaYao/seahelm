@@ -112,6 +112,8 @@ final class PaneForkTests: XCTestCase {
         XCTAssertTrue(PaneFork.forkIsReady(agentType: .claudeCode, status: .running, handle: 4))
         XCTAssertFalse(PaneFork.forkIsReady(agentType: .claudeCode, status: .idle, handle: nil))
         XCTAssertFalse(PaneFork.forkIsReady(agentType: .claudeCode, status: .unknown, handle: 4))
+        XCTAssertTrue(PaneFork.forkIsReady(agentType: .cursor, status: .idle, handle: 4))
+        XCTAssertFalse(PaneFork.forkIsReady(agentType: .codex, status: .idle, handle: 4))
         XCTAssertFalse(PaneFork.forkIsReady(agentType: .unknown, status: .idle, handle: 4))
         XCTAssertFalse(PaneFork.forkIsReady(agentType: nil, status: nil, handle: nil))
     }

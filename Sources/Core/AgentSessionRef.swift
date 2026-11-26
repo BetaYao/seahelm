@@ -182,13 +182,26 @@ struct AgentSessionRef: Codable, Equatable {
     /// The argv that opens a *copy* of the session under a new id, leaving the
     /// original transcript untouched. Nil for agents with no fork. Claude finds
     /// the session by id from any directory — verified from a sibling worktree
-    /// and from an unrelated directory — so the fork can start in its new home.
+    /// and from an unrelated directory — and copies it itself, so the fork can
+    /// start in its new home. Cursor Agent does neither (`agent --resume <id>`
+    /// elsewhere opens an empty chat under that id): its chat is copied into
+    /// the destination first (`forkCopiesChat`, seahelm-core's
+    /// `agent.fork_chat`), and the fork resumes the copy — for Cursor `value`
+    /// must be the copy's id. Mirrors `session_ref::fork_argv`.
     static func forkArgv(agent: String, kind: Kind, value: String) -> [String]? {
         switch (agent, kind) {
         case ("claude", .id): return ["claude", "--resume", value, "--fork-session"]
+        case ("cursor", .id): return ["agent", "--resume", value]
         default: return nil
         }
     }
+
+    /// Whether a fork needs the chat copied first (`agent.fork_chat`), its
+    /// command then naming the copy.
+    var forkCopiesChat: Bool { agent == "cursor" }
+
+    /// The agent type whose flags (yolo) a fork's command takes.
+    var forkAgentType: AgentType { agent == "cursor" ? .cursor : .claudeCode }
 
     /// `forkArgv` as a shell command line, every token single-quoted, with
     /// `extraArgs` (a yolo flag, say) appended. `promptFile`, when given, holds

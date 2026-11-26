@@ -4,11 +4,13 @@
 //! - its `#n`, the handle every surface and chat names it by;
 //! - who is at work on it: `pane.presence` from a `seahelm` CLI call on
 //!   it, as "Claude Code #7 · note", for a few seconds after the last one;
-//! - where its agent went: when the core puts a pane's Claude in another
-//!   worktree the fleet tracks, "Fork there" copies its session into a new
-//!   pane in that worktree (`claude --resume <id> --fork-session`, named
-//!   after the destination's branch) and stops the original's turn with
-//!   Esc, as the macOS app's fork does.
+//! - where its agent went: when the core puts a pane's Claude or Cursor
+//!   Agent in another worktree the fleet tracks, "Fork there" copies its
+//!   session into a new pane in that worktree (`claude --resume <id>
+//!   --fork-session`, named after the destination's branch; for Cursor the
+//!   core copies the chat there, `agent.fork_chat`, and `agent --resume`
+//!   opens the copy) and stops the original's turn with Esc, as the macOS
+//!   app's fork does.
 //!
 //! - and without being asked, when the agent went into a worktree it
 //!   created itself (`git worktree add`, EnterWorktree): that fork carries
@@ -69,11 +71,17 @@ pub fn actor_name(agent: &str, handle: Option<u64>) -> String {
     }
 }
 
-/// The command a fork runs: Claude resuming `id` as a new session, named
-/// after where it is going, without permission prompts when the user set
-/// `agent_yolo`. Quoted for `sh`, or for `cmd.exe` on Windows.
-pub fn fork_command(id: &str, branch: &str, yolo: bool, windows: bool) -> String {
+/// The command a fork runs, without permission prompts when the user set
+/// `agent_yolo`: Claude resuming `id` as a new session, named after where
+/// it is going; Cursor Agent resuming `id`, which must already be the copy
+/// of the chat (`core_client::fork_chat`) — it can neither copy a chat nor
+/// find one filed under another directory. Quoted for `sh`, or for
+/// `cmd.exe` on Windows.
+pub fn fork_command(agent: &str, id: &str, branch: &str, yolo: bool, windows: bool) -> String {
     let q = |s: &str| quote(s, windows);
+    if agent == "cursor" {
+        return format!("agent --resume {}{}", q(id), if yolo { " --yolo" } else { "" });
+    }
     let mut line = format!("claude --resume {} --fork-session", q(id));
     if !branch.is_empty() {
         line += &format!(" --name {}", q(branch));
@@ -95,12 +103,13 @@ pub fn continue_prompt(destination: &str) -> String {
 }
 
 /// A fork to make: pane `leaf` of worktree `id` (fleet row ids), into
-/// `dest`, resuming Claude session `session_id` named after `branch`.
+/// `dest`, resuming `agent`'s session `session_id` named after `branch`.
 pub struct Fork {
     id: String,
     leaf: LeafId,
     dest: String,
     branch: String,
+    agent: String,
     session_id: String,
     carry_on: bool,
 }
@@ -220,16 +229,29 @@ impl Workspace {
         }
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(FORK_SETTLE).await;
+            let mut fork = fork;
+            // Cursor's chat is copied into the destination first, after the
+            // Esc has settled, and the fork resumes the copy.
+            if fork.agent == "cursor" {
+                let (agent, sid, dir) = (fork.agent.clone(), fork.session_id.clone(), dest_item.worktree_path.clone());
+                match cx.background_executor().spawn(async move { core_client::fork_chat(&agent, &sid, &dir) }).await {
+                    Ok(copy) => fork.session_id = copy,
+                    Err(e) => {
+                        eprintln!("seahelm-gpui: fork: copying the Cursor chat failed: {e}");
+                        return;
+                    }
+                }
+            }
             let _ = this.update(cx, |w, cx| w.start_fork(&fork, &dest_item, cx));
         })
         .detach();
     }
 
     fn start_fork(&mut self, fork: &Fork, dest_item: &crate::fleet::Item, cx: &mut Context<Self>) {
-        let Fork { id, leaf, dest, branch, session_id, carry_on } = fork;
+        let Fork { id, leaf, dest, branch, agent, session_id, carry_on } = fork;
         let (leaf, carry_on) = (*leaf, *carry_on);
         let windows = cfg!(windows);
-        let mut line = fork_command(session_id, branch, crate::user_config::flag("agent_yolo"), windows);
+        let mut line = fork_command(agent, session_id, branch, crate::user_config::flag("agent_yolo"), windows);
         if carry_on {
             line = format!("{line} {}", quote(&continue_prompt(&dest_item.worktree_path), windows));
         }
@@ -282,11 +304,12 @@ impl Workspace {
             for leaf in panes.views.keys() {
                 let key = pane_session(id, *leaf);
                 let Some(facts) = self.pane_facts.get(&key) else { continue };
-                let Some(sid) = facts.claude_session.clone() else { continue };
+                let Some(sid) = facts.fork_session.clone() else { continue };
                 let Some((dest, branch, _)) = self.away_in(id, facts) else { continue };
                 let record = auto_fork_key(&key, &dest);
                 if should_auto_fork(enabled, facts.location_created, facts.location_at, self.started_at, self.auto_forked.contains(&record)) {
-                    due.push((record, Fork { id: id.clone(), leaf: *leaf, dest, branch, session_id: sid, carry_on: true }));
+                    let agent = facts.fork_agent.clone();
+                    due.push((record, Fork { id: id.clone(), leaf: *leaf, dest, branch, agent, session_id: sid, carry_on: true }));
                 }
             }
         }
@@ -408,7 +431,7 @@ impl Workspace {
         let key = pane_session(id, leaf);
         let facts = self.pane_facts.get(&key);
         let presence = self.presence.get(&key).filter(|p| p.until > Instant::now());
-        let away = facts.filter(|f| f.claude_session.is_some()).and_then(|f| self.away_in(id, f));
+        let away = facts.filter(|f| f.fork_session.is_some()).and_then(|f| self.away_in(id, f));
         let handle = facts.and_then(|f| f.handle);
         let name = facts.and_then(|f| f.custom_title.clone());
         if presence.is_none() && away.is_none() && handle.is_none() && name.is_none() {
@@ -419,14 +442,15 @@ impl Workspace {
             let text = if p.note.is_empty() { p.actor.clone() } else { format!("{} · {}", p.actor, p.note) };
             row = row.child(pill(tokens::accent()).child(text));
         }
-        if let (Some((dest, branch, label)), Some(sid)) = (away, facts.and_then(|f| f.claude_session.clone())) {
+        if let (Some((dest, branch, label)), Some(sid)) = (away, facts.and_then(|f| f.fork_session.clone())) {
             let id = id.to_string();
+            let agent = facts.map(|f| f.fork_agent.clone()).unwrap_or_default();
             row = row.child(
                 pill(tokens::attention())
                     .id(SharedString::from(format!("fork-{key}")))
                     .cursor_pointer()
                     .on_click(cx.listener(move |w, _: &ClickEvent, _: &mut Window, cx| {
-                        let fork = Fork { id: id.clone(), leaf, dest: dest.clone(), branch: branch.clone(), session_id: sid.clone(), carry_on: false };
+                        let fork = Fork { id: id.clone(), leaf, dest: dest.clone(), branch: branch.clone(), agent: agent.clone(), session_id: sid.clone(), carry_on: false };
                         w.fork_into(fork, cx)
                     }))
                     .child(format!("Agent in {label}"))
@@ -506,9 +530,12 @@ mod tests {
 
     #[test]
     fn fork_commands_quote_and_name() {
-        assert_eq!(fork_command("abc-1", "task/x", false, false), "claude --resume 'abc-1' --fork-session --name 'task/x'");
-        assert_eq!(fork_command("id", "", true, false), "claude --resume 'id' --fork-session --dangerously-skip-permissions");
-        assert_eq!(fork_command("a'b", "b", false, false), r"claude --resume 'a'\''b' --fork-session --name 'b'");
-        assert_eq!(fork_command("id", "task/x", false, true), r#"claude --resume "id" --fork-session --name "task/x""#);
+        assert_eq!(fork_command("claude", "abc-1", "task/x", false, false), "claude --resume 'abc-1' --fork-session --name 'task/x'");
+        assert_eq!(fork_command("claude", "id", "", true, false), "claude --resume 'id' --fork-session --dangerously-skip-permissions");
+        assert_eq!(fork_command("claude", "a'b", "b", false, false), r"claude --resume 'a'\''b' --fork-session --name 'b'");
+        assert_eq!(fork_command("claude", "id", "task/x", false, true), r#"claude --resume "id" --fork-session --name "task/x""#);
+        // Cursor resumes the copied chat; it takes no name.
+        assert_eq!(fork_command("cursor", "copy-1", "task/x", false, false), "agent --resume 'copy-1'");
+        assert_eq!(fork_command("cursor", "copy-1", "task/x", true, false), "agent --resume 'copy-1' --yolo");
     }
 }

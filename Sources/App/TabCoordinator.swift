@@ -1099,12 +1099,16 @@ class TabCoordinator {
         case .success(let p): plan = p
         }
         let destination = plan.destination
-        let yolo = config.agentYolo ? AgentType.claudeCode.yoloFlag.map { [$0] } ?? [] : []
-        let name = ["--name", PaneFork.sessionName(branch: destination.branch, worktreePath: destination.path)]
+        let yolo = config.agentYolo ? plan.ref.forkAgentType.yoloFlag.map { [$0] } ?? [] : []
+        // Claude names the fork (`--name`); Cursor Agent takes no name.
+        let name = plan.ref.forkCopiesChat
+            ? []
+            : ["--name", PaneFork.sessionName(branch: destination.branch, worktreePath: destination.path)]
         let promptFile = continueTask
             ? PaneFork.writePromptFile(PaneFork.continuePrompt(destination: destination.path))
             : nil
-        guard let commandLine = plan.ref.forkCommandLine(extraArgs: name + yolo, promptFile: promptFile) else {
+        let forkLine = { (ref: AgentSessionRef) in ref.forkCommandLine(extraArgs: name + yolo, promptFile: promptFile) }
+        guard forkLine(plan.ref) != nil else {
             completion(.failure(.unsupportedAgent)); return
         }
 
@@ -1114,6 +1118,22 @@ class TabCoordinator {
         let backend = runtimeBackend
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             Thread.sleep(forTimeInterval: PaneFork.interruptSettleDelay)
+            // Cursor's chat is copied into the destination once the Esc has
+            // settled, and the fork resumes the copy.
+            var ref = plan.ref
+            if ref.forkCopiesChat {
+                switch Self.copyChat(ref, into: destination.path) {
+                case .success(let copy): ref = copy
+                case .failure(let error):
+                    if let promptFile { try? FileManager.default.removeItem(atPath: promptFile) }
+                    DispatchQueue.main.async { completion(.failure(error)) }
+                    return
+                }
+            }
+            guard let commandLine = forkLine(ref) else {
+                DispatchQueue.main.async { completion(.failure(.unsupportedAgent)) }
+                return
+            }
             // A name no live tree claims *and* no seahelmd session holds: a session left
             // behind by a closed pane would otherwise be attached to as-is.
             var name = ""
@@ -1134,6 +1154,23 @@ class TabCoordinator {
                 self.recordFork(origin: stationId, forkStationId: forkId, sessionName: name, destination: destination)
                 completion(.success(forkId))
             }
+        }
+    }
+
+    /// A Cursor chat copied into `directory` by seahelm-core
+    /// (`agent.fork_chat`), as the reference a fork resumes. Off the main thread.
+    private static func copyChat(_ ref: AgentSessionRef, into directory: String) -> Result<AgentSessionRef, PaneForkError> {
+        let params: [String: Any] = ["agent": ref.agent, "session_id": ref.sessionId, "worktree_path": directory]
+        switch CoreSocketClient.call("agent.fork_chat", params, timeout: 15) {
+        case .success(let result):
+            guard let id = result["session_id"] as? String,
+                  let copy = AgentSessionRef(agent: ref.agent, kind: ref.kind, sessionId: id) else {
+                return .failure(.chatCopyFailed("seahelm-core gave no usable chat id"))
+            }
+            return .success(copy)
+        case .failure(.rpc(_, let message)): return .failure(.chatCopyFailed(message))
+        case .failure(.unreachable): return .failure(.chatCopyFailed("seahelm-core is not answering"))
+        case .failure(.malformed): return .failure(.chatCopyFailed("seahelm-core's answer was unreadable"))
         }
     }
 
