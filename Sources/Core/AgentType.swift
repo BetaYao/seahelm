@@ -108,12 +108,28 @@ enum AgentType: String, Codable, CaseIterable {
     /// quote. The initial task is injected afterward via
     /// `InitialAgentTaskDelivery`.
     func bareLaunchCommand(agentYolo: Bool = Config.load().agentYolo) -> String? {
-        guard let base = launchCommand else { return nil }
-        var cmd = base
+        guard var cmd = launchLine else { return nil }
         if agentYolo, let yolo = yoloFlag {
             cmd += " \(yolo)"
         }
         return cmd
+    }
+
+    /// Flags every launch carries, whatever the user's settings.
+    ///
+    /// Codex (0.171+) otherwise hands its turns to one app-server daemon
+    /// shared by every Codex on the machine, which runs each turn's hooks
+    /// and shell commands with the environment of whichever pane started
+    /// it. Hooks then name that pane, never this one, so this pane gets no
+    /// timeline, and a `seahelm` call from its agent speaks as another pane.
+    /// `--no-daemon` keeps Codex in the pane's own process.
+    var launchFlags: [String] {
+        self == .codex ? ["--no-daemon"] : []
+    }
+
+    /// The binary and its `launchFlags`, without the yolo flag or a task.
+    var launchLine: String? {
+        launchCommand.map { ([$0] + launchFlags).joined(separator: " ") }
     }
 
     /// Skip-permission / YOLO CLI flag for this agent, if known.

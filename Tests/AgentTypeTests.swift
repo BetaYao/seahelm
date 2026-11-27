@@ -18,7 +18,7 @@ final class AgentTypeTests: XCTestCase {
     func testNonClaudeAgentNoInjection() {
         let cmd = AgentType.codex.launchCommand(withTask: "do x", agentYolo: false)!
         XCTAssertFalse(cmd.contains("--append-system-prompt"))
-        XCTAssertEqual(cmd, "codex 'do x'")
+        XCTAssertEqual(cmd, "codex --no-daemon 'do x'")
     }
 
     func testEmptyTaskLaunchesBareClaude() {
@@ -30,12 +30,21 @@ final class AgentTypeTests: XCTestCase {
         // down deliberately instead.
         XCTAssertEqual(
             AgentType.codex.launchCommand(withTask: "do x", agentYolo: true),
-            "codex --dangerously-bypass-approvals-and-sandbox 'do x'"
+            "codex --no-daemon --dangerously-bypass-approvals-and-sandbox 'do x'"
         )
         XCTAssertTrue(
             AgentType.claudeCode.launchCommand(withTask: "do x", agentYolo: true)!
                 .hasPrefix("claude --dangerously-skip-permissions ")
         )
+    }
+
+    /// Codex's shared app-server daemon runs every pane's hooks with the
+    /// environment of the pane that started it, so each launch keeps Codex in
+    /// its own process; the binary PATH detection looks for stays bare.
+    func testCodexAlwaysLaunchesWithoutTheSharedDaemon() {
+        XCTAssertEqual(AgentType.codex.launchCommand, "codex")
+        XCTAssertEqual(AgentType.codex.launchLine, "codex --no-daemon")
+        XCTAssertEqual(AgentType.claudeCode.launchLine, "claude")
     }
 
     // MARK: - Cursor Agent
@@ -217,19 +226,19 @@ final class AgentTypeTests: XCTestCase {
     func testLaunchCommandWithTaskComposesPositionalPrompt() {
         XCTAssertEqual(
             AgentType.codex.launchCommand(withTask: "add tests", agentYolo: false),
-            "codex 'add tests'"
+            "codex --no-daemon 'add tests'"
         )
     }
 
     func testLaunchCommandWithEmptyTaskReturnsBareCommand() {
-        XCTAssertEqual(AgentType.codex.launchCommand(withTask: "", agentYolo: false), "codex")
-        XCTAssertEqual(AgentType.codex.launchCommand(withTask: "   ", agentYolo: false), "codex")
+        XCTAssertEqual(AgentType.codex.launchCommand(withTask: "", agentYolo: false), "codex --no-daemon")
+        XCTAssertEqual(AgentType.codex.launchCommand(withTask: "   ", agentYolo: false), "codex --no-daemon")
     }
 
     func testLaunchCommandWithTaskEscapesQuotes() {
         XCTAssertEqual(
             AgentType.codex.launchCommand(withTask: "can't stop", agentYolo: false),
-            "codex 'can'\\''t stop'"
+            "codex --no-daemon 'can'\\''t stop'"
         )
     }
 

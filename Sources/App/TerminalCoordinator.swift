@@ -300,7 +300,7 @@ class TerminalCoordinator {
         case let .leaf(_, stationId, paneSessionKey):
             let agent = Fleet.shared.pane(for: stationId)?.agentType
             let named = (agent != nil && agent != .unknown) ? agent!.rawValue : nil
-            return .pane(label: paneSessionKey, command: agent?.launchCommand, agent: named, cwd: nil)
+            return .pane(label: paneSessionKey, command: agent?.launchLine, agent: named, cwd: nil)
         case let .split(_, axis, ratio, first, second):
             return .split(direction: axis == .vertical ? "down" : "right",
                           ratio: Double(ratio),

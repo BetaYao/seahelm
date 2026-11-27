@@ -156,7 +156,9 @@ pub fn resume_argv(agent: &str, kind: Kind, value: &str) -> Option<Vec<String>> 
     let v = value.to_string();
     let argv: Vec<String> = match (agent, kind) {
         ("claude", Kind::Id) => vec!["claude".into(), "--resume".into(), v],
-        ("codex", Kind::Id) => vec!["codex".into(), "resume".into(), v],
+        // Off Codex's shared daemon, which runs every pane's hooks with the
+        // environment of the pane that started it (`actions::always_flags`).
+        ("codex", Kind::Id) => vec!["codex".into(), "resume".into(), "--no-daemon".into(), v],
         ("copilot", Kind::Id) => vec!["copilot".into(), format!("--resume={v}")],
         ("devin", Kind::Id) => vec!["devin".into(), "--resume".into(), v],
         ("droid", Kind::Id) => vec!["droid".into(), "--resume".into(), v],
@@ -232,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_codex_resume_command() {
-        assert_eq!(id("codex", UUID).unwrap().resume_command_line().unwrap(), format!("'codex' 'resume' '{UUID}'"));
+        assert_eq!(id("codex", UUID).unwrap().resume_command_line().unwrap(), format!("'codex' 'resume' '--no-daemon' '{UUID}'"));
     }
 
     #[test]

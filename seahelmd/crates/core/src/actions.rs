@@ -304,12 +304,29 @@ fn launchable(name: &str) -> Result<AgentType, RpcError> {
         .ok_or_else(|| RpcError::invalid_params(format!("agent_type {name} cannot be launched")))
 }
 
+/// Flags an agent is always launched with, whatever the settings.
+///
+/// Codex (0.171+) otherwise hands its turns to one app-server daemon shared
+/// by every Codex on the machine, which runs each turn's hooks and shell
+/// commands with the environment of whichever pane started it: the hooks
+/// then name that pane, so this one gets no timeline, and a `seahelm` call
+/// from its agent speaks as another pane. `--no-daemon` keeps Codex in the
+/// pane's own process. The macOS app's `AgentType.launchFlags` is the same.
+pub fn always_flags(agent: AgentType) -> &'static [&'static str] {
+    match agent {
+        AgentType::Codex => &["--no-daemon"],
+        _ => &[],
+    }
+}
+
 fn bare_command(agent: AgentType, yolo: bool) -> Option<String> {
     let (bin, flag) = launch_parts(agent)?;
-    Some(match flag {
-        Some(flag) if yolo => format!("{bin} {flag}"),
-        _ => bin.to_string(),
-    })
+    let mut parts = vec![bin];
+    parts.extend(always_flags(agent));
+    if yolo {
+        parts.extend(flag);
+    }
+    Some(parts.join(" "))
 }
 
 /// The agent with its task as the initial prompt, a positional argument,
@@ -629,7 +646,7 @@ mod tests {
         for (wire, cmd) in [
             ("", "claude"),
             ("claudeCode", "claude"),
-            ("codex", "codex"),
+            ("codex", "codex --no-daemon"),
             ("openCode", "opencode"),
             ("gemini", "gemini"),
             ("cursor", "agent"),
@@ -640,6 +657,8 @@ mod tests {
         }
         assert_eq!(bare_command(AgentType::OpenCode, true).as_deref(), Some("opencode --yolo"));
         assert_eq!(bare_command(AgentType::Gemini, true).as_deref(), Some("gemini"), "no flag known");
+        // Off the shared daemon whatever the settings, the yolo flag after it.
+        assert_eq!(bare_command(AgentType::Codex, true).as_deref(), Some("codex --no-daemon --dangerously-bypass-approvals-and-sandbox"));
         assert!(launchable("npm").is_err());
         assert!(launchable("nonsense").is_err());
         if !cfg!(windows) {

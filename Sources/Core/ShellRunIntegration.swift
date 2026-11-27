@@ -166,6 +166,17 @@ enum ShellRunIntegration {
         'builtin' 'typeset' -ga precmd_functions preexec_functions
         precmd_functions=(_seahelm_run_precmd $precmd_functions)
         preexec_functions+=(_seahelm_run_preexec)
+        # Codex typed here stays in this pane's process: its shared app-server
+        # daemon runs every pane's hooks and commands with the environment of
+        # whichever pane started it (`AgentType.launchFlags`). A function the
+        # user's .zshrc defines replaces this one; an alias still reaches it.
+        function codex() {
+            if [[ "${1-}" == (app-server|remote-control) || ${@[(Ie)--no-daemon]} -gt 0 ]]; then
+                command codex "$@"
+            else
+                command codex --no-daemon "$@"
+            fi
+        }
     fi
     """#
 }

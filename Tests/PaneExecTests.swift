@@ -96,6 +96,37 @@ final class PaneExecTests: XCTestCase {
         XCTAssertEqual(ShellRunIntegration.triggerSequence, "\u{1b}[9013~")
     }
 
+    /// Codex typed in a pane runs off its shared daemon, once: a second
+    /// `--no-daemon` is a usage error, and the daemon's own commands pass as typed.
+    func testCodexTypedInAPaneSkipsTheSharedDaemon() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("sh-codex-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let zsh = try XCTUnwrap(ShellRunIntegration.ensureInstalled(base: base))
+        let bin = base.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let fake = bin.appendingPathComponent("codex")
+        try "#!/bin/sh\nprintf '%s|' \"$@\"; echo\n".write(to: fake, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        let script = zsh.appendingPathComponent("seahelm-run.zsh").path
+        shell.arguments = ["-fic", "source \(script); codex; codex 'fix it'; codex resume --no-daemon x; codex app-server daemon stop"]
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = bin.path + ":/usr/bin:/bin"
+        env["SEAHELM_PANE_ID"] = "test-pane"
+        env["SEAHELM_RUN_DIR"] = base.appendingPathComponent("run").path
+        shell.environment = env
+        let out = Pipe()
+        shell.standardOutput = out
+        shell.standardError = FileHandle.nullDevice
+        try shell.run()
+        shell.waitUntilExit()
+        let lines = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines, ["--no-daemon|", "--no-daemon|fix it|", "resume|--no-daemon|x|", "app-server|daemon|stop|"])
+    }
+
     // MARK: Router
 
     func testRouterValidatesExecParams() {

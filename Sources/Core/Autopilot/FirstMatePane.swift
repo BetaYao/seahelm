@@ -86,8 +86,9 @@ enum FirstMatePane {
     /// Codex in its workspace-write sandbox (writes only here), asking before it
     /// steps out, with network on — without it neither `gh` nor the seahelm
     /// socket is reachable from inside the sandbox. Never the bypass flag.
+    /// `--no-daemon` so its hooks name its own session (`AgentType.launchFlags`).
     static let codexLaunchCommand =
-        "codex --sandbox workspace-write --ask-for-approval on-request -c sandbox_workspace_write.network_access=true"
+        "codex --no-daemon --sandbox workspace-write --ask-for-approval on-request -c sandbox_workspace_write.network_access=true"
 
     static func launchCommand(for agent: AgentType) -> String {
         agent == .codex ? codexLaunchCommand : launchCommand

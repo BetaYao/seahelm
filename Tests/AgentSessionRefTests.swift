@@ -21,7 +21,7 @@ final class AgentSessionRefTests: XCTestCase {
 
     func testCodexResumeCommand() {
         let ref = AgentSessionRef(agent: "codex", sessionId: uuid)
-        XCTAssertEqual(ref?.resumeCommandLine(), "'codex' 'resume' '\(uuid)'")
+        XCTAssertEqual(ref?.resumeCommandLine(), "'codex' 'resume' '--no-daemon' '\(uuid)'")
     }
 
     func testRejectsUnsupportedAgent() {
