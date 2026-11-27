@@ -124,6 +124,7 @@ final class FirstMateAgentTests: XCTestCase {
         XCTAssertTrue(codex.contains("--sandbox workspace-write"), codex)
         XCTAssertTrue(codex.contains("--ask-for-approval on-request"), codex)
         XCTAssertTrue(codex.contains("network_access=true"), "gh and the seahelm socket need it")
+        XCTAssertTrue(codex.hasPrefix("codex --no-daemon "), "its hooks must name its own session")
         for agent in FirstMatePane.agents {
             XCTAssertFalse(FirstMatePane.launchCommand(for: agent).contains("dangerously"), "\(agent)")
         }

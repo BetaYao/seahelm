@@ -153,7 +153,8 @@ struct AgentSessionRef: Codable, Equatable {
     static func resumeArgv(agent: String, kind: Kind, value: String) -> [String]? {
         switch (agent, kind) {
         case ("claude", .id): return ["claude", "--resume", value]
-        case ("codex", .id): return ["codex", "resume", value]
+        // `--no-daemon`: see `AgentType.launchFlags`.
+        case ("codex", .id): return ["codex", "resume", "--no-daemon", value]
         case ("copilot", .id): return ["copilot", "--resume=\(value)"]
         case ("devin", .id): return ["devin", "--resume", value]
         case ("droid", .id): return ["droid", "--resume", value]

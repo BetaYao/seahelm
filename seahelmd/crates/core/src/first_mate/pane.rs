@@ -97,11 +97,13 @@ impl Agent {
 
     /// Never the bypass flag. `--permission-mode default` because a
     /// user-level `bypassPermissions` would otherwise switch the gate off;
-    /// Codex's sandbox with network on, or neither gh nor the socket works.
+    /// Codex's sandbox with network on, or neither gh nor the socket works,
+    /// and off the shared daemon so its hooks name its own session
+    /// (`actions::always_flags`).
     pub fn launch(self) -> &'static str {
         match self {
             Agent::Claude => "claude --permission-mode default",
-            Agent::Codex => "codex --sandbox workspace-write --ask-for-approval on-request -c sandbox_workspace_write.network_access=true",
+            Agent::Codex => "codex --no-daemon --sandbox workspace-write --ask-for-approval on-request -c sandbox_workspace_write.network_access=true",
         }
     }
 }

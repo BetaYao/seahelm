@@ -1809,6 +1809,7 @@ impl Dispatch for Core {
             return Reply::Value(Err(first_mate::refused("research.summary requires First Mate's real session")));
         }
         let pid = peer.pid;
+        let params = if method == "hook" { crate::peer::hook_params(params, pid) } else { params };
         self.call_checked(method, params, pid, || crate::peer::identify(peer))
     }
 }

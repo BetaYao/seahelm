@@ -174,7 +174,7 @@ final class BareLaunchCommandTests: XCTestCase {
             "claude --dangerously-skip-permissions")
         XCTAssertEqual(
             AgentType.codex.bareLaunchCommand(agentYolo: true),
-            "codex --dangerously-bypass-approvals-and-sandbox")
+            "codex --no-daemon --dangerously-bypass-approvals-and-sandbox")
         XCTAssertEqual(
             AgentType.cursor.bareLaunchCommand(agentYolo: true),
             "agent --yolo")

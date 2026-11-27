@@ -246,6 +246,63 @@ pub fn identify(peer: &crate::rpc::Peer) -> Verdict {
     classify(&gather(pid))
 }
 
+/// A process of Codex's shared app-server daemon: `codex app-server …`, the
+/// server itself (`--listen unix:// --managed-daemon`) or its updater. A
+/// Codex TUI run with `--no-daemon` has none of these over its hooks.
+pub fn is_codex_daemon(p: &Proc) -> bool {
+    let exe = p.argv.first().map(String::as_str).filter(|a| !a.is_empty()).unwrap_or(&p.exe);
+    stem(exe) == "codex" && p.argv.iter().skip(1).any(|a| a == "app-server")
+}
+
+/// Codex (0.171+) runs every turn's hooks inside one daemon shared by all
+/// its TUIs, with the environment of whichever pane started it — or of
+/// none, once its updater has restarted it. The pane such a hook names is
+/// then not the one the turn belongs to, so the hook names none: it counts
+/// toward its worktree and lands on no pane's timeline. seahelm launches
+/// Codex with `--no-daemon` (`actions::always_flags`) so this stays rare.
+pub fn hook_from_codex_daemon(chain: &[Proc]) -> bool {
+    chain.iter().any(is_codex_daemon)
+}
+
+/// A hook's params, less the pane it names when it ran under Codex's shared
+/// daemon. Only the peer's ancestry is read, never the process table: a
+/// hook comes with every tool call.
+pub fn hook_params(mut params: serde_json::Value, pid: Option<u32>) -> serde_json::Value {
+    let codex = params.get("seahelm_source").and_then(|v| v.as_str()) == Some("codex");
+    if codex && params.get("seahelm_pane_id").is_some() && pid.is_some_and(|pid| hook_from_codex_daemon(&ancestry(pid, 8))) {
+        if let Some(o) = params.as_object_mut() {
+            o.remove("seahelm_pane_id");
+        }
+    }
+    params
+}
+
+/// A process and up to `depth - 1` of its ancestors, argv and executable
+/// read for each, one process at a time.
+fn ancestry(pid: u32, depth: usize) -> Vec<Proc> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let mut sys = System::new();
+    let kind = ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always).with_exe(UpdateKind::Always);
+    let mut chain = Vec::new();
+    let mut at = Some(Pid::from_u32(pid));
+    while let Some(p) = at {
+        if chain.len() >= depth || chain.iter().any(|c: &Proc| c.pid == p.as_u32()) {
+            break;
+        }
+        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[p]), false, kind);
+        let Some(proc_) = sys.process(p) else { break };
+        let ppid = proc_.parent().map(|pp| pp.as_u32()).unwrap_or(0);
+        chain.push(Proc {
+            pid: p.as_u32(),
+            ppid,
+            exe: proc_.exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default(),
+            argv: proc_.cmd().iter().map(|a| a.to_string_lossy().into_owned()).collect(),
+        });
+        at = (ppid != 0).then(|| Pid::from_u32(ppid));
+    }
+    chain
+}
+
 /// The calls that answer for the user: answering or dismissing a card, and
 /// raising one (a raised card's answer goes back to whoever raised it, so a
 /// raised card that copies First Mate's could carry the user's yes to it).
@@ -293,6 +350,33 @@ mod tests {
 
     fn launchd() -> Proc {
         proc_(1, 0, "/sbin/launchd", &["/sbin/launchd"])
+    }
+
+    /// A hook Codex's shared daemon ran: seahelm-hook ← sh ← the daemon.
+    #[test]
+    fn a_hook_under_codex_s_shared_daemon_names_no_pane() {
+        let daemon = "/Users/u/.codex/packages/app-server-daemon/releases/0.172.0-aarch64-apple-darwin/bin/codex";
+        let hook = proc_(30, 20, "/Users/u/.local/bin/seahelm-hook", &["/Users/u/.local/bin/seahelm-hook", "codex"]);
+        let sh = proc_(20, 10, "/bin/sh", &["/bin/sh", "-lc", "seahelm-hook codex"]);
+        let server = proc_(10, 5, daemon, &[daemon, "app-server", "--listen", "unix://", "--analytics-default-enabled", "--managed-daemon"]);
+        let updater = proc_(5, 1, daemon, &[daemon, "app-server", "daemon", "pid-update-loop"]);
+        assert!(hook_from_codex_daemon(&[hook.clone(), sh.clone(), server, updater, launchd()]));
+        // `codex --no-daemon` in a pane: the hook's parent is the TUI itself.
+        let tui = proc_(10, 9, "/opt/homebrew/bin/codex", &["codex", "--no-daemon"]);
+        assert!(!hook_from_codex_daemon(&[hook, sh, tui, proc_(9, 8, "/bin/zsh", &["zsh"]), session(8, "s"), launchd()]));
+        // Asked about a prompt that names app-server, the TUI is still no daemon.
+        assert!(!is_codex_daemon(&proc_(10, 9, "/opt/homebrew/bin/codex", &["codex", "explain app-server"])));
+        assert!(!is_codex_daemon(&proc_(10, 9, "/usr/bin/grep", &["grep", "app-server"])));
+    }
+
+    #[test]
+    fn only_codex_hooks_with_a_pane_are_checked() {
+        let p = serde_json::json!({"seahelm_pane_id": "s", "seahelm_source": "claude-code"});
+        assert_eq!(hook_params(p.clone(), Some(std::process::id())), p);
+        let p = serde_json::json!({"seahelm_pane_id": "s", "seahelm_source": "codex"});
+        assert_eq!(hook_params(p.clone(), None), p, "no peer pid: left as it came");
+        // This test's own process runs under no Codex daemon.
+        assert_eq!(hook_params(p.clone(), Some(std::process::id())), p);
     }
 
     fn env(pairs: &[(&str, &str)]) -> Option<Vec<(String, String)>> {
