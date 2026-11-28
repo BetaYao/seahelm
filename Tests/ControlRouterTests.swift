@@ -69,6 +69,11 @@ private final class FakeDataSource: ControlDataSource {
         -> Result<[String: Any], ControlCreateError> {
         creates.append((repoPath, agentType, prompt)); return createResult
     }
+    var updates: [(install: Bool, timeout: TimeInterval)] = []
+    var updateResult: Result<[String: Any], ControlUpdateError> = .success(["available": false])
+    func runUpdate(install: Bool, timeout: TimeInterval) -> Result<[String: Any], ControlUpdateError> {
+        updates.append((install, timeout)); return updateResult
+    }
 }
 
 final class ControlRouterTests: XCTestCase {
@@ -82,6 +87,43 @@ final class ControlRouterTests: XCTestCase {
         let (r, _) = router()
         guard case .ok(let d) = r.handle(method: "ping", params: [:]) else { return XCTFail() }
         XCTAssertEqual(d["pong"] as? Bool, true)
+        XCTAssertNotNil(d["version"] as? String, "seahelm update waits for the new version on ping")
+    }
+
+    func testAppUpdateChecksUnlessToldToInstall() {
+        let (r, ds) = router()
+        guard case .ok = r.handle(method: "app.update", params: [:]) else { return XCTFail() }
+        guard case .ok = r.handle(method: "app.update", params: ["install": true, "timeout_ms": 5000.0]) else { return XCTFail() }
+        XCTAssertEqual(ds.updates.map(\.install), [false, true])
+        XCTAssertEqual(ds.updates.map(\.timeout), [60, 5])
+    }
+
+    func testAppUpdateFailuresKeepTheirMessage() {
+        let (r, ds) = router()
+        ds.updateResult = .failure(.busy)
+        guard case .error(let code, let message) = r.handle(method: "app.update", params: [:]) else { return XCTFail() }
+        XCTAssertEqual(code, ControlError.updateFailed)
+        XCTAssertTrue(message.contains("already"))
+        ds.updateResult = .failure(.timedOut)
+        guard case .error(let late, _) = r.handle(method: "app.update", params: ["install": true]) else { return XCTFail() }
+        XCTAssertEqual(late, ControlError.timedOut)
+    }
+
+    func testUpdateReplySaysWhatTheOutcomeWas() {
+        guard case .success(let up) = SeahelmControlDataSource.updateReply(.upToDate, current: "2.0.100") else { return XCTFail() }
+        XCTAssertEqual(up["available"] as? Bool, false)
+        XCTAssertEqual(up["latest"] as? String, "2.0.100")
+        guard case .success(let new) = SeahelmControlDataSource.updateReply(.available(version: "2.0.101"), current: "2.0.100")
+        else { return XCTFail() }
+        XCTAssertEqual(new["available"] as? Bool, true)
+        XCTAssertEqual(new["latest"] as? String, "2.0.101")
+        guard case .success(let going) = SeahelmControlDataSource.updateReply(.installing(version: "2.0.101"), current: "2.0.100")
+        else { return XCTFail() }
+        XCTAssertEqual(going["installing"] as? String, "2.0.101")
+        XCTAssertEqual(going["relaunching"] as? Bool, true)
+        guard case .failure(.failed(let why)) = SeahelmControlDataSource.updateReply(.failed("no network"), current: "x")
+        else { return XCTFail() }
+        XCTAssertEqual(why, "no network")
     }
 
     func testWorktreeCreatePassesRepoAgentAndTrimmedPrompt() {

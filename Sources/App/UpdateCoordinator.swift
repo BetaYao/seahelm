@@ -32,6 +32,8 @@ final class UpdateCoordinator: NSObject {
     let banner = UpdateBanner()
     private var updater: SPUUpdater?
     private var driver: UpdateDriver?
+    /// Waiting on a silent check (`seahelm update --check`).
+    private var probe: ((UpdateRunOutcome) -> Void)?
 
     init(config: Config) {
         self.config = config
@@ -99,6 +101,36 @@ final class UpdateCoordinator: NSObject {
         updater.checkForUpdates()
     }
 
+    /// `seahelm update`: without `install`, say whether a newer build is out
+    /// (Sparkle's silent probe: no banner, no alert); with it, download,
+    /// install and relaunch with nobody clicking. A found update the banner
+    /// is already offering is taken over. Main thread; `done` is called once.
+    func runUnattended(install: Bool, done: @escaping (UpdateRunOutcome) -> Void) {
+        guard let updater, let driver else { done(.unavailable); return }
+        if driver.unattended != nil || probe != nil { done(.busy); return }
+        if driver.awaitsChoice, let version = driver.foundVersion {
+            guard install else { done(.available(version: version)); return }
+            driver.unattended = done
+            driver.takeOverPendingChoice()
+            return
+        }
+        guard updater.canCheckForUpdates else { done(.busy); return }
+        if install {
+            driver.isUserInitiated = false
+            driver.unattended = done
+            updater.checkForUpdates()
+        } else {
+            probe = done
+            updater.checkForUpdateInformation()
+        }
+    }
+
+    private func finishProbe(_ outcome: UpdateRunOutcome) {
+        guard let report = probe else { return }
+        probe = nil
+        report(outcome)
+    }
+
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         guard item.action == #selector(checkForUpdates) else { return true }
         return updater?.canCheckForUpdates ?? false
@@ -112,8 +144,23 @@ extension UpdateCoordinator: SPUUpdaterDelegate {
         Self.feedURLString
     }
 
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        finishProbe(.available(version: item.displayVersionString))
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
+        finishProbe(.upToDate)
+    }
+
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         driver?.isUserInitiated = false
+        // Whatever a silent check or an unattended update has not said by the
+        // end of the cycle, it never will.
+        let why = error?.localizedDescription ?? "the update check ended without an answer"
+        finishProbe(.failed(why))
+        if error != nil {
+            driver?.finishUnattended(.failed(why))
+        }
     }
 }
 

@@ -14,6 +14,9 @@ final class SeahelmControlDataSource: ControlDataSource {
     var applyLayoutHandler: ((LayoutNode) -> Bool)?
     /// (targetStationId, mode) → zoomed-after, or nil if the pane isn't found.
     var zoomHandler: ((String?, String) -> Bool?)?
+    /// `app.update`: (install, done) on the main thread; `UpdateCoordinator.runUnattended`.
+    /// Static, so the window's updater can plug in whenever it is set up.
+    static var updateHandler: ((Bool, @escaping (UpdateRunOutcome) -> Void) -> Void)?
     /// Close a pane by station id (main thread). Returns whether it was closed.
     var closeHandler: ((String) -> Bool)?
     /// (stationId, worktreePath) -> moved. Re-files a live pane under another
@@ -254,6 +257,39 @@ final class SeahelmControlDataSource: ControlDataSource {
 
     func memoryStats() -> [String: Any]? {
         MemoryProbe.stats()
+    }
+
+    func runUpdate(install: Bool, timeout: TimeInterval) -> Result<[String: Any], ControlUpdateError> {
+        guard !Thread.isMainThread else { return .failure(.unavailable) }
+        guard let run = Self.updateHandler else { return .failure(.unavailable) }
+        let done = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var outcome: UpdateRunOutcome?
+        DispatchQueue.main.async {
+            run(install) { o in
+                lock.lock()
+                defer { lock.unlock() }
+                guard outcome == nil else { return }
+                outcome = o
+                done.signal()
+            }
+        }
+        guard done.wait(timeout: .now() + timeout) == .success else { return .failure(.timedOut) }
+        lock.lock()
+        defer { lock.unlock() }
+        return Self.updateReply(outcome ?? .failed("no answer"), current: Bundle.main.shortVersionString)
+    }
+
+    /// `app.update`'s reply for an outcome.
+    static func updateReply(_ outcome: UpdateRunOutcome, current: String) -> Result<[String: Any], ControlUpdateError> {
+        switch outcome {
+        case .upToDate: return .success(["current": current, "latest": current, "available": false])
+        case .available(let v): return .success(["current": current, "latest": v, "available": true])
+        case .installing(let v): return .success(["current": current, "installing": v, "relaunching": true])
+        case .unavailable: return .failure(.unavailable)
+        case .busy: return .failure(.busy)
+        case .failed(let why): return .failure(.failed(why))
+        }
     }
 
     func messageSnapshot(paneId: String?) -> [[String: Any]] {

@@ -5,7 +5,7 @@ import Foundation
 /// multiplexer via the `seahelm` CLI. The first rule is the SEAHELM_ENV guard:
 /// an agent must not touch the CLI unless it is actually inside a seahelm pane.
 enum SeahelmSkillInstaller {
-    private static let versionMarker = "<!-- seahelm-skill v12 -->"
+    private static let versionMarker = "<!-- seahelm-skill v13 -->"
 
     static func skillContents() -> String {
         return """
@@ -90,6 +90,9 @@ enum SeahelmSkillInstaller {
                                                  # (text from stdin when none is given; a short text
                                                  # rides as the file's caption; only to the default
                                                  # chat or an allowed user, files up to 50 MB)
+        seahelm update [--check]                 # --check: is a newer Seahelm out? Without it: download,
+                                                 # install and relaunch the app, then wait for the new
+                                                 # version (panes keep running). Only when the user asks.
         ```
 
         Output contract: `run`/`send-*` print nothing; `read` prints raw text;

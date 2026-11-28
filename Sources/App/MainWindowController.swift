@@ -353,6 +353,10 @@ class MainWindowController: NSWindowController {
         WorktreePRStore.shared.start()
         setupLayout()
         updateCoordinator.setup(config: config)
+        SeahelmControlDataSource.updateHandler = { [weak self] install, done in
+            guard let self else { done(.unavailable); return }
+            self.updateCoordinator.runUnattended(install: install, done: done)
+        }
         normalizeBackendAvailabilityIfNeeded()
         tabCoordinator.loadWorkspaces()
 
