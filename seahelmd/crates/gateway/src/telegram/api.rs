@@ -19,6 +19,12 @@ pub const LONG_POLL_SECONDS: u64 = 50;
 /// Slack past the long poll before a call is abandoned; short calls get this
 /// alone.
 pub const STALL_SECONDS: u64 = 15;
+/// How long an upload may take: a 50 MB file over a slow link.
+const UPLOAD_SECONDS: u64 = 300;
+/// The most a file's caption may hold.
+pub const MAX_CAPTION_LENGTH: usize = 1024;
+/// The largest file a bot may upload.
+pub const MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
 /// Bot API downloads top out at 20 MB; refuse anything larger here too.
 pub const MAX_FILE_BYTES: usize = 20 * 1024 * 1024;
 
@@ -325,8 +331,13 @@ impl Bot {
             .send()
             .await
             .map_err(|e| ApiError::Network(self.scrub(&describe(e))))?;
-        // Not judged on the status: a 4xx carries the envelope, and its
-        // description is the useful part.
+        self.result(response).await
+    }
+
+    /// A reply's `result`, or the error its envelope describes. Not judged
+    /// on the status: a 4xx carries the envelope, and its description is the
+    /// useful part.
+    async fn result<T: DeserializeOwned>(&self, response: reqwest::Response) -> Result<T, ApiError> {
         let body = response.bytes().await.map_err(|e| ApiError::Network(self.scrub(&describe(e))))?;
         let envelope: Value = serde_json::from_slice(&body).map_err(|_| ApiError::BadResponse)?;
         if envelope.get("ok").and_then(Value::as_bool) != Some(true) {
@@ -374,6 +385,31 @@ impl Bot {
             params["reply_markup"] = json!({"inline_keyboard": keyboard(buttons)});
         }
         let sent: Message = self.call("sendMessage", params, STALL_SECONDS).await?;
+        Ok(sent.message_id)
+    }
+
+    /// One file, uploaded: a document (sent as is), or with `photo` a
+    /// picture (Telegram recompresses it and shows it inline). A caption
+    /// rides along when given; callers keep it within `MAX_CAPTION_LENGTH`.
+    /// Returns the message's id.
+    pub async fn send_file(&self, chat_id: &str, name: &str, bytes: Vec<u8>, caption: Option<&str>, photo: bool) -> Result<i64, ApiError> {
+        let (method, field) = if photo { ("sendPhoto", "photo") } else { ("sendDocument", "document") };
+        let mut form = reqwest::multipart::Form::new()
+            .text("chat_id", chat_id.to_string())
+            .part(field, reqwest::multipart::Part::bytes(bytes).file_name(name.to_string()));
+        if let Some(c) = caption.filter(|c| !c.is_empty()) {
+            form = form.text("caption", c.to_string());
+        }
+        let url = format!("{}/bot{}/{method}", self.base, self.token);
+        let response = self
+            .http
+            .post(url)
+            .timeout(Duration::from_secs(UPLOAD_SECONDS))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| ApiError::Network(self.scrub(&describe(e))))?;
+        let sent: Message = self.result(response).await?;
         Ok(sent.message_id)
     }
 
@@ -491,6 +527,59 @@ fn describe(e: reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One request to a local stand-in for the Bot API: the raw request, and
+    /// a `sendDocument`-shaped reply.
+    async fn one_request(listener: tokio::net::TcpListener) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut s, _) = listener.accept().await.unwrap();
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = s.read(&mut buf).await.unwrap();
+            raw.extend_from_slice(&buf[..n]);
+            let text = String::from_utf8_lossy(&raw).to_string();
+            if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                let len = head.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()));
+                if len.is_some_and(|l| body.len() >= l) || n == 0 {
+                    break;
+                }
+            }
+        }
+        let reply = r#"{"ok":true,"result":{"message_id":7,"date":0,"chat":{"id":42,"type":"private"}}}"#;
+        let out = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}", reply.len());
+        s.write_all(out.as_bytes()).await.unwrap();
+        String::from_utf8_lossy(&raw).into_owned()
+    }
+
+    #[tokio::test]
+    async fn uploads_a_file_as_a_multipart_form() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(one_request(listener));
+        let bot = Bot::with_base(http_client(), "T0K", base);
+        let id = bot.send_file("42", "notes.txt", b"hello file".to_vec(), Some("see this"), false).await.unwrap();
+        let raw = server.await.unwrap();
+        assert_eq!(id, 7);
+        assert!(raw.starts_with("POST /botT0K/sendDocument "), "{raw}");
+        assert!(raw.contains("multipart/form-data; boundary="));
+        assert!(raw.contains("name=\"chat_id\"\r\n\r\n42"));
+        assert!(raw.contains("name=\"document\"; filename=\"notes.txt\""));
+        assert!(raw.contains("hello file"));
+        assert!(raw.contains("name=\"caption\"\r\n\r\nsee this"));
+    }
+
+    #[tokio::test]
+    async fn a_photo_goes_to_send_photo_without_an_empty_caption() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(one_request(listener));
+        Bot::with_base(http_client(), "T", base).send_file("42", "a.png", vec![1, 2, 3], Some(""), true).await.unwrap();
+        let raw = server.await.unwrap();
+        assert!(raw.starts_with("POST /botT/sendPhoto "));
+        assert!(raw.contains("name=\"photo\"; filename=\"a.png\""));
+        assert!(!raw.contains("name=\"caption\""));
+    }
 
     #[test]
     fn decodes_updates_leniently() {

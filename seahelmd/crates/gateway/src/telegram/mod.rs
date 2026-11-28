@@ -29,6 +29,7 @@ mod outbox;
 mod pairing;
 mod progress;
 mod rules;
+mod send;
 mod session;
 
 use std::collections::HashMap;
@@ -156,6 +157,22 @@ pub fn admin(gw: &Arc<Gateway>, method: &str, params: &Value) -> Option<RpcResul
             let session = pairing::Session::new(crate::auth::now());
             *lock(&adapter.pairing) = Some(session.clone());
             Ok(json!({"code": session.code, "deep_link": pairing::deep_link(&username, &session.code), "expires_at": session.expires_at}))
+        }
+        "telegram.send" => {
+            let Some(adapter) = ADAPTER.get() else { return Some(Err(RpcError::new(-32000, "the Telegram adapter is not running"))) };
+            let Some(live) = adapter.live() else {
+                return Some(Err(RpcError::new(-32000, "The Telegram bot is not connected: set a bot token and turn Telegram on first.")));
+            };
+            let get = |k: &str| params.get(k).and_then(Value::as_str);
+            let chat = match send::recipient(&adapter.config(), get("chat")) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(RpcError::new(-32602, e))),
+            };
+            let file = get("file").filter(|f| !f.is_empty()).map(std::path::PathBuf::from);
+            let photo = params.get("photo").and_then(Value::as_bool).unwrap_or(false);
+            gw.runtime
+                .block_on(send::run(&live.bot, &chat, get("text").unwrap_or_default(), file.as_deref(), photo))
+                .map_err(|e| RpcError::new(-32000, e))
         }
         "telegram.pair.cancel" => {
             if let Some(a) = ADAPTER.get() {

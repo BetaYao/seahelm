@@ -5,7 +5,7 @@ import Foundation
 /// multiplexer via the `seahelm` CLI. The first rule is the SEAHELM_ENV guard:
 /// an agent must not touch the CLI unless it is actually inside a seahelm pane.
 enum SeahelmSkillInstaller {
-    private static let versionMarker = "<!-- seahelm-skill v11 -->"
+    private static let versionMarker = "<!-- seahelm-skill v12 -->"
 
     static func skillContents() -> String {
         return """
@@ -85,6 +85,11 @@ enum SeahelmSkillInstaller {
         seahelm worktree create --repo <path> --task <text> [--agent claudeCode]
                                                  # new worktree + branch with an agent briefed on <text>
         seahelm worktree delete <worktree-path>  # the row's Delete (asks first if work would be lost)
+        seahelm telegram send [--file PATH [--photo]] [--chat ID] [text...]
+                                                 # message the user on Telegram through seahelm's bot
+                                                 # (text from stdin when none is given; a short text
+                                                 # rides as the file's caption; only to the default
+                                                 # chat or an allowed user, files up to 50 MB)
         ```
 
         Output contract: `run`/`send-*` print nothing; `read` prints raw text;

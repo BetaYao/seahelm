@@ -9,6 +9,9 @@
 //! - **the macOS app** (`$SEAHELM_SOCKET_PATH`, else
 //!   `~/.config/seahelm/seahelm.sock`) answers what only the side drawing
 //!   the panes can do: split, focus, zoom, move, fork, layouts, `exec`.
+//! - **seahelm-gateway** (`$SEAHELM_GATEWAY_SOCKET`, else
+//!   `~/.config/seahelm/gateway.sock`, a named pipe on Windows) sends to
+//!   the user's Telegram: `telegram send`.
 //!
 //! A core verb goes to the app when the core cannot be reached, or does not
 //! know the pane yet (one split a moment ago); worktree create/delete and
@@ -36,7 +39,7 @@ fn main() {
         args.drain(..2);
     }
     let Some((group, rest)) = args.split_first() else {
-        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|worktree|habit|schedule> ...", 2)
+        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|worktree|habit|schedule|telegram> ...", 2)
     };
     let cli = Cli { note };
     cli.run(group, rest);
@@ -85,6 +88,7 @@ impl Cli {
                 pretty(&self.call(method, params, 180.0, &[]));
             }
             "pane" => self.pane(a),
+            "telegram" => self.telegram(a),
             other => die(&format!("unknown command: {other}"), 2),
         }
     }
@@ -100,6 +104,31 @@ impl Cli {
             _ => die("usage: seahelm memory note|show|undo|confirm <repo> [text|digest]", 2),
         }
         pretty(&self.call(&format!("memory.{verb}"), params, 40.0, &[]));
+    }
+
+    /// `telegram send [--chat ID] [--file PATH] [--photo] [text…]`: through
+    /// seahelm-gateway's bot to the default chat (or, with `--chat`, an
+    /// allowed user's). The text is the arguments, else stdin when it is not
+    /// a terminal; a short text rides as the file's caption.
+    fn telegram(&self, a: &[String]) {
+        const USAGE: &str = "usage: seahelm telegram send [--chat ID] [--file PATH] [--photo] [text...]";
+        let Some(("send", rest)) = a.split_first().map(|(v, r)| (v.as_str(), r)) else { die(USAGE, 2) };
+        let TelegramSend { chat, file, photo, words } = telegram_args(rest).unwrap_or_else(|e| die(&format!("{e}\n{USAGE}"), 2));
+        let text = if words.is_empty() && !std::io::IsTerminal::is_terminal(&std::io::stdin()) { read_stdin() } else { words.join(" ") };
+        if text.trim().is_empty() && file.is_none() {
+            die(&format!("nothing to send\n{USAGE}"), 2);
+        }
+        let mut params = json!({"text": text, "photo": photo});
+        if let Some(c) = chat {
+            params["chat"] = json!(c);
+        }
+        if let Some(f) = file {
+            params["file"] = json!(absolute(&f));
+        }
+        // An upload of up to 50 MB: give it the gateway's own five minutes.
+        let r = self.call("telegram.send", params, 330.0, &[]);
+        let n = r["message_ids"].as_array().map_or(0, Vec::len);
+        eprintln!("sent {n} message(s) to {}", r["chat"].as_str().unwrap_or("?"));
     }
 
     fn layout(&self, a: &[String]) {
@@ -416,6 +445,9 @@ impl Cli {
         if let Some(err) = not_found {
             die(err["message"].as_str().unwrap_or("pane not found"), 2);
         }
+        if sides == [Side::Gateway] {
+            die(&format!("{method} needs seahelm-gateway, which is not answering ({})", unreachable.join("; ")), 2);
+        }
         if sides == [Side::App] {
             die(&format!("{method} needs the Seahelm app, which is not answering ({})", unreachable.join("; ")), 2);
         }
@@ -444,6 +476,7 @@ const PANE_NOT_FOUND: i64 = -32004;
 enum Side {
     Core,
     App,
+    Gateway,
 }
 
 impl Side {
@@ -451,6 +484,7 @@ impl Side {
         match self {
             Side::Core => "seahelm-core",
             Side::App => "the app",
+            Side::Gateway => "seahelm-gateway",
         }
     }
 
@@ -478,6 +512,7 @@ fn route(method: &str) -> &'static [Side] {
         "task-source.add" | "task-source.list" | "task-source.remove" | "task-source.test" | "schedule.add" | "schedule.list" | "schedule.remove" | "schedule.run_now" | "habits.list" | "habits.inventory" | "habits.propose" => &[Side::Core],
         "memory.note" | "memory.show" | "memory.undo" | "memory.confirm" => &[Side::Core],
         "pane.rename" => &[Side::Core],
+        "telegram.send" => &[Side::Gateway],
         _ => &[Side::App],
     }
 }
@@ -519,14 +554,19 @@ fn socket_path(side: Side) -> std::path::PathBuf {
     }
     match side {
         Side::App => env_path("SEAHELM_SOCKET_PATH").unwrap_or_else(|| home().join(".config/seahelm/seahelm.sock")),
-        Side::Core => env_path("SEAHELM_CORE_SOCKET").unwrap_or_else(|| {
-            if cfg!(windows) {
-                let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| "default".into());
-                format!(r"\\.\pipe\seahelm-core-{user}").into()
-            } else {
-                home().join(".config/seahelm/core.sock")
-            }
-        }),
+        Side::Core => env_path("SEAHELM_CORE_SOCKET").unwrap_or_else(|| service_socket("core")),
+        Side::Gateway => env_path("SEAHELM_GATEWAY_SOCKET").unwrap_or_else(|| service_socket("gateway")),
+    }
+}
+
+/// A service's default socket: `~/.config/seahelm/<name>.sock`, or on
+/// Windows the pipe `\\.\pipe\seahelm-<name>-<user>` (pipes are machine-wide).
+fn service_socket(name: &str) -> std::path::PathBuf {
+    if cfg!(windows) {
+        let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| "default".into());
+        format!(r"\\.\pipe\seahelm-{name}-{user}").into()
+    } else {
+        home().join(format!(".config/seahelm/{name}.sock"))
     }
 }
 
@@ -544,7 +584,7 @@ fn connect(side: Side, timeout: Option<f64>) -> std::io::Result<Box<dyn Conn>> {
     Ok(Box::new(s))
 }
 
-/// The core's named pipe opens like a file. The app is macOS only.
+/// The services' named pipes open like files. The app is macOS only.
 #[cfg(not(unix))]
 fn connect(side: Side, _timeout: Option<f64>) -> std::io::Result<Box<dyn Conn>> {
     if side == Side::App {
@@ -633,6 +673,39 @@ fn habit_table(v: &Value) -> String {
 
 fn first(a: &[String]) -> Option<&str> {
     a.first().map(String::as_str)
+}
+
+/// `telegram send`'s arguments: `--chat ID`, `--file PATH`, `--photo`, and
+/// the words of the text (all of them after a `--`).
+#[derive(Debug, Default, PartialEq)]
+struct TelegramSend {
+    chat: Option<String>,
+    file: Option<String>,
+    photo: bool,
+    words: Vec<String>,
+}
+
+fn telegram_args(a: &[String]) -> Result<TelegramSend, String> {
+    let (mut chat, mut file, mut photo, mut words) = (None, None, false, Vec::new());
+    let mut it = a.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--" => {
+                words.extend(it.by_ref().cloned());
+            }
+            "--chat" | "--file" => {
+                let v = it.next().ok_or_else(|| format!("{arg} needs a value"))?.clone();
+                if arg == "--chat" { chat = Some(v) } else { file = Some(v) }
+            }
+            "--photo" => photo = true,
+            flag if flag.starts_with("--") && words.is_empty() => return Err(format!("unknown option: {flag}")),
+            w => words.push(w.to_string()),
+        }
+    }
+    if photo && file.is_none() {
+        return Err("--photo needs --file".into());
+    }
+    Ok(TelegramSend { chat, file, photo, words })
 }
 
 fn has(a: &[String], name: &str) -> bool {
@@ -776,5 +849,30 @@ mod tests {
         assert!(absolute("rel/x").ends_with("/rel/x"));
         assert!(absolute("rel/x").starts_with('/'));
         assert_eq!(absolute("/abs"), "/abs");
+    }
+
+    fn args(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn telegram_send_reads_its_options_and_text() {
+        let got = telegram_args(&args(&["--chat", "42", "--file", "a.png", "--photo", "look", "here"])).unwrap();
+        assert_eq!(got, TelegramSend { chat: Some("42".into()), file: Some("a.png".into()), photo: true, words: args(&["look", "here"]) });
+        // After the text starts, or after `--`, a dash is just text.
+        assert_eq!(telegram_args(&args(&["ship", "--now"])).unwrap().words, args(&["ship", "--now"]));
+        assert_eq!(telegram_args(&args(&["--", "--chat"])).unwrap().words, args(&["--chat"]));
+    }
+
+    #[test]
+    fn telegram_send_refuses_bad_options() {
+        assert!(telegram_args(&args(&["--chat"])).is_err());
+        assert!(telegram_args(&args(&["--loud", "hi"])).is_err());
+        assert!(telegram_args(&args(&["--photo", "hi"])).is_err());
+    }
+
+    #[test]
+    fn telegram_goes_to_the_gateway_alone() {
+        assert_eq!(route("telegram.send"), &[Side::Gateway]);
     }
 }
