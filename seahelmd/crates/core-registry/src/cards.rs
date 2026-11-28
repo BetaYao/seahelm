@@ -505,6 +505,39 @@ impl Cards {
                 self.clear_suggestions(&card.pane, now);
                 Ok(Answer::Keys { pane: card.pane, inputs: vec![Input::Bytes(label.to_string()), Input::Submit], confirm_review: false })
             }
+            // A multi-select drawn on screen (Cursor Agent's question): Space
+            // ticks the row and the card stays, kept current by the screen;
+            // Done is Return, pressed on a ticked row, since Return also ticks
+            // the row it is pressed on.
+            CardKind::Choice if card.flags.multi_select => {
+                let from = selected().unwrap_or(card.flags.cursor);
+                if tapped == card.options.len() {
+                    self.resolve(id, CardState::Answered, Some(label.to_string()), via, now);
+                    let checked = &card.flags.checked;
+                    let row = if checked.is_empty() || checked.contains(&from) {
+                        from
+                    } else {
+                        checked.iter().copied().min_by_key(|r| r.abs_diff(from)).unwrap_or(from)
+                    };
+                    return Ok(Answer::Keys { pane: card.pane, inputs: arrows(row, from), confirm_review: false });
+                }
+                let mut inputs = arrows(tapped, from);
+                inputs.pop();
+                inputs.push(Input::Key(" ".into()));
+                if let Some(c) = self.cards.iter_mut().find(|c| c.id == id) {
+                    match c.flags.checked.iter().position(|&i| i == tapped) {
+                        Some(at) => {
+                            c.flags.checked.remove(at);
+                        }
+                        None => {
+                            c.flags.checked.push(tapped);
+                            c.flags.checked.sort_unstable();
+                        }
+                    }
+                    c.flags.cursor = tapped;
+                }
+                Ok(Answer::Keys { pane: card.pane, inputs, confirm_review: false })
+            }
             CardKind::Choice => {
                 self.resolve(id, CardState::Answered, Some(label.to_string()), via, now);
                 let mut inputs = arrows(tapped, selected().unwrap_or(card.flags.cursor));
@@ -694,12 +727,19 @@ fn selected_row(screen: &str) -> Option<usize> {
     }
     let tail = &lines[lines.len().saturating_sub(25)..];
     let mut rows: Vec<bool> = Vec::new();
+    // Cursor Agent's question: unnumbered checkbox rows in a box.
+    let mut boxes: Vec<bool> = Vec::new();
     for l in tail {
         let t = l.trim_start();
+        let t = t.strip_prefix('│').map_or(t, str::trim_start);
         let (marked, rest) = match t.chars().next() {
             Some(c @ ('❯' | '›' | '>')) => (true, t[c.len_utf8()..].trim_start()),
             _ => (false, t),
         };
+        if ["[ ] ", "[x] ", "[X] ", "[✓] "].iter().any(|b| rest.starts_with(b)) {
+            boxes.push(marked);
+            continue;
+        }
         let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
         if digits.is_empty() || !rest[digits.len()..].starts_with(". ") {
             continue;
@@ -710,6 +750,9 @@ fn selected_row(screen: &str) -> Option<usize> {
         if digits.parse::<usize>().ok() == Some(rows.len() + 1) {
             rows.push(marked);
         }
+    }
+    if boxes.len() >= 2 {
+        return boxes.iter().position(|&m| m);
     }
     rows.iter().position(|&m| m)
 }
@@ -1198,6 +1241,26 @@ mod tests {
         assert_eq!(inputs, vec![Input::Bytes(KEY_UP.into()), Input::Submit]);
         let a = q.answer("c-1", DONE_LABEL, None, 4.0).unwrap();
         assert_eq!(a, Answer::Keys { pane: "p1".into(), inputs: vec![Input::Bytes(KEY_RIGHT.into())], confirm_review: true });
+        assert!(q.list().is_empty());
+    }
+
+    #[test]
+    fn a_multi_select_on_screen_ticks_with_space_and_finishes_on_a_ticked_row() {
+        let mut q = Cards::new();
+        let flags = QuestionFlags { multi_select: true, ..QuestionFlags::default() };
+        q.observe(&question("p1", EventSource::Scan, &["a", "b", "c"], flags, vec![]), 1.0);
+        assert_eq!(q.list()[0].kind, CardKind::Choice);
+        assert_eq!(q.list()[0].labels(), vec!["☐ a", "☐ b", "☐ c", DONE_LABEL]);
+        // Tick c: two down from a, then Space; the card stays.
+        let Answer::Keys { inputs, .. } = q.answer("c-1", "☐ c", None, 2.0).unwrap() else { panic!() };
+        assert_eq!(inputs, vec![Input::Bytes(KEY_DOWN.into()), Input::Bytes(KEY_DOWN.into()), Input::Key(" ".into())]);
+        assert_eq!(q.list()[0].labels()[2], "☑ c");
+        // The screen (Cursor's question box) says where the cursor went: on a,
+        // which is not ticked, so Done goes back down to c before Return.
+        let screen = " │   › [ ] a │\n │     [ ] b │\n │     [x] c │\n │ Space select · Enter next/submit │";
+        let a = q.answer("c-1", DONE_LABEL, Some(screen), 3.0).unwrap();
+        let Answer::Keys { inputs, .. } = a else { panic!() };
+        assert_eq!(inputs, vec![Input::Bytes(KEY_DOWN.into()), Input::Bytes(KEY_DOWN.into()), Input::Submit]);
         assert!(q.list().is_empty());
     }
 

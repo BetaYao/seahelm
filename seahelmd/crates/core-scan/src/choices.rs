@@ -126,10 +126,194 @@ pub fn parse(screen: &str, bottom_lines: usize) -> Vec<ChoiceOption> {
         last_valid.clear();
     }
     if last_valid.is_empty() {
-        return unnumbered(screen, bottom_lines);
+        let menu = unnumbered(screen, bottom_lines);
+        if !menu.is_empty() {
+            return menu;
+        }
+        return checklist(screen).map(|c| c.options).unwrap_or_default();
     }
     last_valid
 }
+
+/// A line drawn inside a box (`│ … │`) with its frame taken off, and the
+/// box's own top and bottom edges as blank lines. Cursor Agent draws its
+/// questions in a box; anything else is returned as it is.
+pub fn unbox_line(line: &str) -> &str {
+    let t = trim_ws(line);
+    if t.starts_with(['┌', '╭', '└', '╰']) && t.ends_with(['┐', '╮', '┘', '╯']) {
+        return "";
+    }
+    match line.trim_start().strip_prefix('│').map(str::trim_end).and_then(|inner| inner.strip_suffix('│')) {
+        Some(inner) => inner,
+        None => line,
+    }
+}
+
+/// A question Cursor Agent asks (its AskQuestion tool), drawn in a box:
+///
+/// ```text
+/// ┌──────────────────────────────────────────────┐
+/// │ Pick the CLIs to add                         │
+/// │                                              │
+/// │ Question 1 of 1                              │
+/// │                                              │
+/// │ 1. Which first? (multi-select)               │
+/// │                                              │
+/// │   › [ ] session: list and read sessions,     │
+/// │         send messages                        │
+/// │     [x] knowledge: search the knowledge base │
+/// │     [ ] Other: (type to answer)              │
+/// │                                              │
+/// │ ↑/↓ option · ←/→ question · Space select ·   │
+/// │ Enter next/submit · Esc to skip              │
+/// └──────────────────────────────────────────────┘
+/// ```
+///
+/// Every row is a checkbox, single choice or not. Return takes the row under
+/// the cursor (in a multi-select it only ever adds it) and goes on to the
+/// next question or submits; Space ticks and unticks.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Checklist {
+    /// The box's heading.
+    pub title: String,
+    /// The question, without its number and "(multi-select)".
+    pub prompt: String,
+    pub multi: bool,
+    /// The rows a card offers, cursor marked; the free-text "Other:" row is
+    /// left out, since a button cannot type its answer.
+    pub options: Vec<ChoiceOption>,
+    /// Rows ticked (0-based).
+    pub checked: Vec<usize>,
+    /// The row the cursor is on (0-based), "Other:" counted.
+    pub cursor: usize,
+}
+
+fn checkbox_pattern() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"^(\s*)(›\s*)?\[([ xX✓])\]\s+(.*?)\s*$").expect("checkbox regex"))
+}
+
+/// Either half of the footer under Cursor Agent's question, which wraps
+/// between them in a narrow pane.
+fn is_checklist_footer(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("space select") || lower.contains("enter next/submit")
+}
+
+/// The Cursor Agent question at the bottom of the screen, if one is up.
+pub fn checklist(screen: &str) -> Option<Checklist> {
+    let lines: Vec<&str> = screen.split('\n').map(unbox_line).collect();
+    let last = lines.iter().rposition(|l| is_checklist_footer(l))?;
+    // The box must be what the screen ends with: after its footer, nothing
+    // but the footer's wrapped end and the box's bottom edge.
+    if lines[last + 1..].iter().filter(|l| !trim_ws(l).is_empty()).count() > 2 {
+        return None;
+    }
+    let mut footer = last;
+    while footer > 0 && is_checklist_footer(lines[footer - 1]) {
+        footer -= 1;
+    }
+    // The rows above the footer, with the wrapped parts of their labels.
+    let mut start = None;
+    let mut column = usize::MAX;
+    for at in (footer.saturating_sub(80)..footer).rev() {
+        let l = lines[at];
+        if trim_ws(l).is_empty() {
+            continue;
+        }
+        if let Some(c) = checkbox_pattern().captures(l) {
+            column = column.min(l[..c.get(4).expect("group 4").start()].chars().count());
+            start = Some(at);
+            continue;
+        }
+        // A wrapped label's rest: as deep as the labels, or, under the last
+        // row before any row is seen, indented at all.
+        let indent = l.chars().take_while(|c| c.is_whitespace()).count();
+        let continues = if start.is_none() { indent >= 4 } else { indent >= column };
+        if !continues {
+            break;
+        }
+    }
+    let start = start?;
+    let mut rows: Vec<(String, bool, bool)> = Vec::new();
+    for l in &lines[start..footer] {
+        if let Some(c) = checkbox_pattern().captures(l) {
+            rows.push((c[4].to_string(), c.get(2).is_some(), &c[3] != " "));
+        } else if let (Some(row), t) = (rows.last_mut(), trim_ws(l)) {
+            if !t.is_empty() {
+                row.0 = join_wrapped(&row.0, t);
+            }
+        }
+    }
+    if rows.len() < 2 {
+        return None;
+    }
+    let cursor = rows.iter().position(|r| r.1).unwrap_or(0);
+    if rows.last().is_some_and(|r| r.0.starts_with("Other:")) {
+        rows.pop();
+    }
+    let checked = rows.iter().enumerate().filter(|(_, r)| r.2).map(|(i, _)| i).collect();
+    let options = rows.into_iter().enumerate().map(|(i, (label, selected, _))| ChoiceOption { index: i + 1, label, selected }).collect();
+
+    // Above the rows: the numbered question (wrapped over a few lines), then
+    // "Question n of m", then the heading under the box's top edge.
+    static NUMBERED: OnceLock<Regex> = OnceLock::new();
+    let numbered = NUMBERED.get_or_init(|| Regex::new(r"^\d+\.\s+(.*)$").expect("numbered regex"));
+    let mut prompt_lines: Vec<&str> = Vec::new();
+    let mut prompt_start = start;
+    for at in (start.saturating_sub(8)..start).rev() {
+        let t = trim_ws(lines[at]);
+        if t.is_empty() {
+            if prompt_lines.is_empty() {
+                continue;
+            }
+            break;
+        }
+        prompt_lines.insert(0, t);
+        prompt_start = at;
+        if numbered.is_match(t) {
+            break;
+        }
+    }
+    let mut prompt = prompt_lines.iter().fold(String::new(), |acc, l| join_wrapped(&acc, l));
+    if let Some(c) = numbered.captures(&prompt) {
+        prompt = c[1].to_string();
+    }
+    let multi = prompt.ends_with("(multi-select)");
+    if multi {
+        prompt = prompt.trim_end_matches("(multi-select)").trim_end().to_string();
+    }
+    static PROGRESS: OnceLock<Regex> = OnceLock::new();
+    let progress = PROGRESS.get_or_init(|| Regex::new(r"^Question \d+ of \d+$").expect("progress regex"));
+    let raw: Vec<&str> = screen.split('\n').collect();
+    let mut title = String::new();
+    for at in (prompt_start.saturating_sub(8)..prompt_start).rev() {
+        if trim_ws(raw[at]).starts_with(['┌', '╭']) {
+            break;
+        }
+        let t = trim_ws(lines[at]);
+        if !t.is_empty() && !progress.is_match(t) {
+            title = t.to_string();
+        }
+    }
+    Some(Checklist { title, prompt, multi, options, checked, cursor })
+}
+
+/// Two parts of a label a TUI wrapped, joined: with a space between words,
+/// with none inside a run of CJK text.
+fn join_wrapped(a: &str, b: &str) -> String {
+    if a.is_empty() {
+        return b.to_string();
+    }
+    let ascii_end = a.chars().last().is_some_and(|c| c.is_ascii());
+    let ascii_start = b.chars().next().is_some_and(|c| c.is_ascii());
+    if ascii_end || ascii_start {
+        format!("{a} {b}")
+    } else {
+        format!("{a}{b}")
+    }
+}
+
 
 /// A selection menu without numbers, as Claude Code draws its folder-trust
 /// dialog: rows at one indent, the cursor `❯` on exactly one, and "Enter to

@@ -240,7 +240,20 @@ impl PaneScanner {
             tasks: Vec::new(),
             background_busy: detection.background_busy,
         };
+        let checklist = if has_approval { choices::checklist(content) } else { None };
         let question = (has_approval && !choices::is_agent_question_dialog(content, choices::DEFAULT_BOTTOM_LINES)).then(|| {
+            // Cursor Agent's question box: its heading, its question, and
+            // for a multi-select the rows already ticked, so a card ticks
+            // with Space and finishes with Return (`CardKind::Choice`).
+            if let Some(c) = checklist {
+                let generic = format!("{} is asking", agent_type.display_name());
+                return EventKind::Question {
+                    prompt: if c.prompt.is_empty() { generic } else { c.prompt },
+                    options: c.options.into_iter().map(|o| o.label).collect(),
+                    followups: Vec::new(),
+                    flags: QuestionFlags { multi_select: c.multi, checked: c.checked, cursor: c.cursor, header: c.title, ..QuestionFlags::default() },
+                };
+            }
             // Where the cursor was when the dialog was read: an unnumbered
             // menu shows no number to find it by when the card is answered.
             let cursor = options.iter().position(|o| o.selected).unwrap_or(0);
