@@ -429,3 +429,85 @@ fn an_unruled_dialog_stops_at_the_conversation() {
     let d = choices::dialog(&screen).expect("dialog");
     assert_eq!((d.title.as_str(), d.question.as_str(), d.body.as_str()), ("", "Allow this?", "$ ls"));
 }
+
+/// Cursor Agent's AskQuestion, as it draws it: a box, every row a checkbox,
+/// labels wrapped under themselves, the free-text row last.
+fn cursor_question(prompt: &str, rows: &[&str]) -> String {
+    let mut l = vec![
+        "    apps/daemon/src/http/ui/chat.html".to_string(),
+        " ┌──────────────────────────────────────────────────────┐".to_string(),
+        " │ 要先补哪几个 CLI？                                   │".to_string(),
+        " │                                                      │".to_string(),
+        " │ Question 1 of 2                                      │".to_string(),
+        " │                                                      │".to_string(),
+    ];
+    for p in prompt.split('\n') {
+        l.push(format!(" │ {p:<52} │"));
+    }
+    l.push(" │                                                      │".to_string());
+    for r in rows {
+        l.push(format!(" │ {r:<52} │"));
+    }
+    l.push(" │                                                      │".to_string());
+    l.push(" │ ↑/↓ option · ←/→ question · Space select · Enter     │".to_string());
+    l.push(" │ next/submit · Esc to skip                            │".to_string());
+    l.push(" └──────────────────────────────────────────────────────┘".to_string());
+    l.join("\n")
+}
+
+#[test]
+fn reads_a_cursor_multi_select_question() {
+    let screen = cursor_question(
+        "1. 我盘点出的缺口见上面。你想先做哪几组？（可多选，我按\n你的选择开分支实现） (multi-select)",
+        &[
+            "  › [ ] session：列出/查看会话、读消息、发消息、归档、",
+            "        加减参与者（agent 现在只能用 MCP 做这些）",
+            "    [x] knowledge: search and read the knowledge",
+            "        base, publish the inbox",
+            "    [ ] channel send",
+            "    [ ] Other: (type to answer)",
+        ],
+    );
+    let c = choices::checklist(&screen).expect("checklist");
+    assert_eq!(c.title, "要先补哪几个 CLI？");
+    assert_eq!(c.prompt, "我盘点出的缺口见上面。你想先做哪几组？（可多选，我按你的选择开分支实现）");
+    assert!(c.multi);
+    let labels: Vec<&str> = c.options.iter().map(|o| o.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "session：列出/查看会话、读消息、发消息、归档、加减参与者（agent 现在只能用 MCP 做这些）",
+            "knowledge: search and read the knowledge base, publish the inbox",
+            "channel send",
+        ]
+    );
+    assert_eq!((c.checked.clone(), c.cursor), (vec![1], 0));
+    assert!(c.options[0].selected);
+    // The choice scan offers the same rows, so the pane waits on the user.
+    assert_eq!(parse(&screen).len(), 3);
+}
+
+#[test]
+fn reads_a_cursor_single_choice_question() {
+    let screen = cursor_question("1. Which database?", &["    [ ] Postgres", "  › [ ] SQLite", "    [ ] Other: (type to answer)"]);
+    let c = choices::checklist(&screen).expect("checklist");
+    assert!(!c.multi);
+    assert_eq!(c.prompt, "Which database?");
+    assert_eq!(c.options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(), ["Postgres", "SQLite"]);
+    assert_eq!((c.checked.len(), c.cursor), (0, 1));
+}
+
+#[test]
+fn a_cursor_question_answered_is_no_longer_read() {
+    let mut screen = cursor_question("1. Which database?", &["  › [x] Postgres", "    [ ] SQLite"]);
+    screen.push_str("\n• Using Postgres.\n  Writing the schema now, then the migrations.\n  ⬢ Running");
+    assert_eq!(choices::checklist(&screen), None);
+    assert!(parse(&screen).is_empty());
+}
+
+#[test]
+fn a_box_frame_comes_off() {
+    assert_eq!(choices::unbox_line(" │   › [ ] a  │"), "   › [ ] a  ");
+    assert_eq!(choices::unbox_line(" └────┘"), "");
+    assert_eq!(choices::unbox_line("plain │ text"), "plain │ text");
+}
