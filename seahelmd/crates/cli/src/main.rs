@@ -39,7 +39,7 @@ fn main() {
         args.drain(..2);
     }
     let Some((group, rest)) = args.split_first() else {
-        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|worktree|habit|schedule|telegram> ...", 2)
+        die("usage: seahelm <ping|memory|session|pane|wait|events|layout|worktree|habit|schedule|telegram|update> ...", 2)
     };
     let cli = Cli { note };
     cli.run(group, rest);
@@ -89,6 +89,7 @@ impl Cli {
             }
             "pane" => self.pane(a),
             "telegram" => self.telegram(a),
+            "update" => self.update(a),
             other => die(&format!("unknown command: {other}"), 2),
         }
     }
@@ -129,6 +130,43 @@ impl Cli {
         let r = self.call("telegram.send", params, 330.0, &[]);
         let n = r["message_ids"].as_array().map_or(0, Vec::len);
         eprintln!("sent {n} message(s) to {}", r["chat"].as_str().unwrap_or("?"));
+    }
+
+    /// `update [--check]`: the macOS app's updater (Sparkle). `--check` only
+    /// says whether a newer build is out; without it the app downloads and
+    /// installs it and relaunches, and this waits until the new version
+    /// answers. Pane sessions live in seahelmd and outlast the relaunch.
+    fn update(&self, a: &[String]) {
+        const USAGE: &str = "usage: seahelm update [--check]";
+        let check = match a {
+            [] => false,
+            [flag] if flag == "--check" => true,
+            _ => die(USAGE, 2),
+        };
+        let r = self.call("app.update", json!({"install": !check}), 960.0, &[]);
+        let current = r["current"].as_str().unwrap_or("?").to_string();
+        let Some(version) = r["installing"].as_str().map(str::to_string) else {
+            match r["latest"].as_str() {
+                Some(latest) if r["available"] == true => println!("Seahelm {latest} is available (running {current}); run `seahelm update` to install it"),
+                _ => println!("Seahelm {current} is up to date"),
+            }
+            return;
+        };
+        println!("installing Seahelm {version} (was {current}); the app is relaunching…");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        // The old app is still up for a moment, then gone, then the new one.
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        while std::time::Instant::now() < deadline {
+            if let Ok(line) = request(Side::App, "ping", &json!({}), 5.0) {
+                let running = serde_json::from_str::<Value>(&line).ok().and_then(|v| v.pointer("/result/version").and_then(Value::as_str).map(str::to_string));
+                if running.as_deref() == Some(version.as_str()) {
+                    println!("Seahelm {version} is running");
+                    return;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        die(&format!("Seahelm {version} did not answer within 5 minutes; check the app"), 1);
     }
 
     fn layout(&self, a: &[String]) {
@@ -513,6 +551,8 @@ fn route(method: &str) -> &'static [Side] {
         "memory.note" | "memory.show" | "memory.undo" | "memory.confirm" => &[Side::Core],
         "pane.rename" => &[Side::Core],
         "telegram.send" => &[Side::Gateway],
+        // Sparkle runs in the macOS app only.
+        "app.update" => &[Side::App],
         _ => &[Side::App],
     }
 }
@@ -874,5 +914,10 @@ mod tests {
     #[test]
     fn telegram_goes_to_the_gateway_alone() {
         assert_eq!(route("telegram.send"), &[Side::Gateway]);
+    }
+
+    #[test]
+    fn update_goes_to_the_app_alone() {
+        assert_eq!(route("app.update"), &[Side::App]);
     }
 }

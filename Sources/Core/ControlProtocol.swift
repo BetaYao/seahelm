@@ -152,6 +152,34 @@ protocol ControlDataSource: AnyObject {
     /// A page of one pane's MessageStream older than `beforeSeq`, oldest first:
     /// `{messages, has_more}`.
     func messageHistory(paneId: String, beforeSeq: UInt64, limit: Int) -> [String: Any]
+    /// Ask Sparkle for a newer build; with `install`, download it, install it
+    /// and relaunch, unattended. Blocks until the outcome is known — never
+    /// call it on the main thread.
+    func runUpdate(install: Bool, timeout: TimeInterval) -> Result<[String: Any], ControlUpdateError>
+}
+
+/// Why `app.update` could not answer.
+enum ControlUpdateError: Error, Equatable {
+    case unavailable
+    case busy
+    case timedOut
+    case failed(String)
+
+    var code: Int {
+        switch self {
+        case .timedOut: return ControlError.timedOut
+        default: return ControlError.updateFailed
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .unavailable: return "the updater is not running in this build (no Sparkle key, or a debug build)"
+        case .busy: return "another update is already in progress"
+        case .timedOut: return "the update did not finish in time; it may still be going"
+        case .failed(let why): return why
+        }
+    }
 }
 
 extension ControlDataSource {
@@ -190,6 +218,9 @@ extension ControlDataSource {
     func messageSnapshot(paneId: String?) -> [[String: Any]] { [] }
     func messageHistory(paneId: String, beforeSeq: UInt64, limit: Int) -> [String: Any] {
         ["messages": [], "has_more": false]
+    }
+    func runUpdate(install: Bool, timeout: TimeInterval) -> Result<[String: Any], ControlUpdateError> {
+        .failure(.unavailable)
     }
 }
 
@@ -230,6 +261,8 @@ enum ControlError {
     static let notFound = -32004
     /// A deadline passed. Nothing was undone: the work may still be going.
     static let timedOut = -32024
+    /// `app.update` could not check or install.
+    static let updateFailed = -32030
     /// First Mate asked for something its policy does not allow.
     static let autopilotRefused = -32040
 }
@@ -295,7 +328,16 @@ final class ControlRouter {
     private func dispatch(method: String, params: [String: Any]) -> ControlResult {
         switch method {
         case "ping":
-            return .ok(["pong": true])
+            // The version lets `seahelm update` see the relaunched app is the new one.
+            return .ok(["pong": true, "version": Bundle.main.shortVersionString])
+
+        case "app.update":
+            let install = params["install"] as? Bool ?? false
+            let wait = (params["timeout_ms"] as? Double).map { $0 / 1000 } ?? (install ? 900 : 60)
+            switch dataSource?.runUpdate(install: install, timeout: wait) ?? .failure(.unavailable) {
+            case .success(let result): return .ok(result)
+            case .failure(let e): return .error(code: e.code, message: e.message)
+            }
 
         case "session.snapshot", "pane.list":
             // `memory: true` costs a process-table walk, so it stays opt-in.

@@ -15,6 +15,19 @@ enum UpdateState {
     case failed(Error)
 }
 
+/// What an update asked for over the control socket (`seahelm update`) came to.
+enum UpdateRunOutcome: Equatable {
+    case upToDate
+    case available(version: String)
+    /// Downloaded and verified; the app is about to install it and relaunch.
+    case installing(version: String)
+    /// No updater in this build (Sparkle did not start).
+    case unavailable
+    /// Something else holds the updater (a check or download already running).
+    case busy
+    case failed(String)
+}
+
 /// Bridges Sparkle's `SPUUserDriver` callbacks onto seahelm's inline
 /// `UpdateBanner` instead of Sparkle's stock modal windows.
 ///
@@ -32,6 +45,17 @@ final class UpdateDriver: NSObject, SPUUserDriver {
 
     /// Set while a check the user explicitly asked for is in flight.
     var isUserInitiated = false
+
+    /// Set while `seahelm update` drives the update: every decision Sparkle
+    /// asks for is answered yes on the spot, no alert is shown, and the
+    /// outcome goes here, once.
+    var unattended: ((UpdateRunOutcome) -> Void)?
+
+    /// The version the current update session found, while it lasts.
+    private(set) var foundVersion: String?
+
+    /// Whether a found update waits on the banner's Update / Restart Now.
+    var awaitsChoice: Bool { updateChoiceReply != nil || installReply != nil }
 
     // Pending Sparkle replies, cleared as soon as they're invoked.
     private var updateChoiceReply: ((SPUUserUpdateChoice) -> Void)?
@@ -55,6 +79,31 @@ final class UpdateDriver: NSObject, SPUUserDriver {
         } else {
             DispatchQueue.main.async { self.onStateChange(state) }
         }
+    }
+
+    /// Report to `unattended`, once.
+    func finishUnattended(_ outcome: UpdateRunOutcome) {
+        guard let report = unattended else { return }
+        unattended = nil
+        report(outcome)
+    }
+
+    /// Hand a found update the banner is still offering over to `unattended`:
+    /// download it, or, already downloaded, install it and relaunch.
+    func takeOverPendingChoice() {
+        if installReply != nil {
+            readyUnattended()
+        } else {
+            confirmInstall()
+        }
+    }
+
+    /// Ready to install unattended: answer `seahelm update` first, then let
+    /// Sparkle quit and relaunch the app a moment later, so the reply leaves
+    /// the socket before the process goes.
+    private func readyUnattended() {
+        finishUnattended(.installing(version: foundVersion ?? "?"))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.installAndRelaunch() }
     }
 
     // MARK: - Banner-driven actions
@@ -120,7 +169,11 @@ final class UpdateDriver: NSObject, SPUUserDriver {
         reply: @escaping @Sendable (SPUUserUpdateChoice) -> Void
     ) {
         updateChoiceReply = reply
+        foundVersion = appcastItem.displayVersionString
         emit(.available(version: appcastItem.displayVersionString))
+        if unattended != nil {
+            confirmInstall()
+        }
     }
 
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
@@ -133,6 +186,12 @@ final class UpdateDriver: NSObject, SPUUserDriver {
     }
 
     func showUpdateNotFoundWithError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+        if unattended != nil {
+            acknowledgement()
+            emit(.idle)
+            finishUnattended(.upToDate)
+            return
+        }
         guard isUserInitiated else {
             // Background check found nothing. Stay quiet.
             acknowledgement()
@@ -156,6 +215,12 @@ final class UpdateDriver: NSObject, SPUUserDriver {
         self.acknowledgement = acknowledgement
         NSLog("Sparkle update error: \(error)")
         emit(.failed(error))
+        if unattended != nil {
+            acknowledgement()
+            self.acknowledgement = nil
+            finishUnattended(.failed(error.localizedDescription))
+            return
+        }
         guard isUserInitiated else {
             acknowledgement()
             self.acknowledgement = nil
@@ -200,6 +265,9 @@ final class UpdateDriver: NSObject, SPUUserDriver {
     func showReady(toInstallAndRelaunch reply: @escaping @Sendable (SPUUserUpdateChoice) -> Void) {
         installReply = reply
         emit(.readyToInstall)
+        if unattended != nil {
+            readyUnattended()
+        }
     }
 
     func showInstallingUpdate(
@@ -220,6 +288,8 @@ final class UpdateDriver: NSObject, SPUUserDriver {
     func showUpdateInFocus() {}
 
     func dismissUpdateInstallation() {
+        finishUnattended(.failed("the update was called off before it was ready to install"))
+        foundVersion = nil
         updateChoiceReply = nil
         installReply = nil
         acknowledgement = nil
